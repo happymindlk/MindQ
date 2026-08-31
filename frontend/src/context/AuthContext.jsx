@@ -1,6 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { AuthContext } from './authContext';
+
+const AuthContext = createContext(null);
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
+  return ctx;
+}
 
 function readCorporateId(session) {
   // corporate_id is injected into app_metadata by the custom access token hook.

@@ -4,7 +4,7 @@ import { Mail, Lock, ArrowRight, Package } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
-import { useAuth } from '../../context/authContext';
+import { useAuth } from '../../context/AuthContext.jsx';
 import { isSupabaseConfigured } from '../../lib/supabaseClient';
 
 export default function AdminLogin() {

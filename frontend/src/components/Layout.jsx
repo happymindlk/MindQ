@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Package, Users, Menu, Bell, UserCircle, LogOut } from 'lucide-react';
-import { useAuth } from '../context/authContext';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
