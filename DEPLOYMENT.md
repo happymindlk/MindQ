@@ -27,6 +27,17 @@ frontend (React/Vite) ──supabase-js + HR JWT──► Supabase (Auth, Postgr
    supabase start
    supabase db reset      # applies supabase/migrations + enables the auth hook
    ```
+   **Windows / Docker Desktop:** a plain `supabase db reset` often fails with
+   `failed to connect to postgres ... Connection timed out`. The CLI tries TLS
+   against local Postgres; the Docker host proxy can take several seconds to
+   return the first byte, and the connect attempt then times out. Disable SSL
+   for the local reset (local Postgres does not use TLS):
+
+   ```powershell
+   $env:PGSSLMODE = "disable"
+   supabase db reset
+   ```
+
    `supabase start` prints the API URL, anon key, service_role key, and JWT
    secret. The custom access token hook is enabled in `supabase/config.toml`.
 
