@@ -24,11 +24,19 @@ export const adminApi = {
     return data;
   },
 
-  async getCandidates() {
-    const { data, error } = await supabase
+  async getCandidates(packageId) {
+    let query = supabase
       .from('candidate_overview')
       .select('*')
       .order('created_at', { ascending: false });
+    if (packageId) query = query.eq('package_id', packageId);
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  async getCorporate() {
+    const { data, error } = await supabase.from('corporates').select('*').limit(1).maybeSingle();
     if (error) throw new Error(error.message);
     return data;
   },
@@ -91,4 +99,17 @@ export function candidateStatus(c) {
   if (c.total_assessments > 0 && c.completed_assessments >= c.total_assessments) return 'completed';
   if (c.completed_assessments > 0 || c.logged_in_at) return 'in_progress';
   return 'not_started';
+}
+
+export function maskEmail(email) {
+  if (!email || !email.includes('@')) return '—';
+  const [local, domain] = email.split('@');
+  const visible = local.slice(0, 2);
+  return `${visible}${'•'.repeat(Math.max(1, local.length - 2))}@${domain}`;
+}
+
+export function maskAccessCode(code) {
+  if (!code) return '—';
+  if (code.length <= 4) return '••••';
+  return `${code.slice(0, 3)}••••${code.slice(-1)}`;
 }

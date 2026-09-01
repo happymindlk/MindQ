@@ -37,15 +37,19 @@ class CandidateService:
         )
         candidate = cand_result.scalars().first()
 
+        display_name = (login_data.full_name or "").strip() or login_data.email.split("@")[0]
+
         if not candidate:
             candidate = Candidate(
                 corporate_id=package.corporate_id,
                 package_id=package.id,
-                full_name=login_data.email.split("@")[0],
+                full_name=display_name,
                 email=login_data.email,
                 access_code=login_data.access_code,
             )
             session.add(candidate)
+        elif display_name:
+            candidate.full_name = display_name
 
         candidate.logged_in_at = _utcnow()
         await session.commit()

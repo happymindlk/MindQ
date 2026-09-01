@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet } from 'react-router-dom';
 import { Package } from 'lucide-react';
-import Chatbot from './Chatbot';
+import SupportModal from './SupportModal';
 
 export default function PortalLayout() {
   return (
@@ -33,8 +33,7 @@ export default function PortalLayout() {
         </div>
       </main>
 
-      {/* Floating Chat Widget */}
-      <Chatbot />
+      <SupportModal />
     </div>
   );
 }

@@ -8,13 +8,14 @@ import { adminApi } from '../../lib/adminApi';
 
 export default function PackageBuilder() {
   const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const [jobDescription, setJobDescription] = useState('');
   const [tests, setTests] = useState([]);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [generatedCode, setGeneratedCode] = useState(null);
 
   const addTest = () => {
+    if (tests.length >= 6) return;
     setTests([...tests, { id: Date.now(), title: '', description: '', questions: [] }]);
   };
 
@@ -51,8 +52,8 @@ export default function PackageBuilder() {
       // no longer send an organization name from the client.
       const data = {
         title,
-        description,
-        tests: tests.map((t) => ({
+        description: jobDescription,
+        tests: tests.slice(0, 6).map((t) => ({
           title: t.title,
           description: t.description || '',
           questions: t.questions.map((q, qIdx) => ({
@@ -82,7 +83,9 @@ export default function PackageBuilder() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-50">Package Builder</h1>
-          <p className="text-slate-400 mt-1">Design a new assessment package</p>
+          <p className="text-slate-400 mt-1">
+            Structure sections (Likert, MCQ, open-ended), attach a job description, max 6 assessments.
+          </p>
         </div>
         <Button onClick={handleSave} isLoading={isSubmitting} disabled={tests.length === 0 || !title}>
           Save & Generate Code
@@ -100,12 +103,12 @@ export default function PackageBuilder() {
                 onChange={(e) => setTitle(e.target.value)}
               />
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Description</label>
-                <textarea 
+                <label className="block text-sm font-medium text-slate-300 mb-1.5">Job Description (for AI grading)</label>
+                <textarea
                   className="w-full rounded-lg bg-slate-900 border border-slate-700 text-slate-50 text-sm focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 p-3 h-24 resize-none"
-                  placeholder="Describe this package..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Paste the role JD. Scoring against this JD is not wired to Gemini yet; the text is stored on the package."
+                  value={jobDescription}
+                  onChange={(e) => setJobDescription(e.target.value)}
                 />
               </div>
             </div>
@@ -217,9 +220,14 @@ export default function PackageBuilder() {
             ))}
           </div>
 
-          <Button variant="ghost" className="w-full border border-dashed border-slate-700 py-6" onClick={addTest}>
+          <Button
+            variant="ghost"
+            className="w-full border border-dashed border-slate-700 py-6"
+            onClick={addTest}
+            disabled={tests.length >= 6}
+          >
             <Plus className="w-5 h-5 mr-2" />
-            Add New Test Section
+            {tests.length >= 6 ? 'Maximum 6 assessments per package' : 'Add New Test Section'}
           </Button>
         </div>
 
@@ -234,7 +242,7 @@ export default function PackageBuilder() {
                   <span className="text-slate-200">{title || 'Untitled Package'}</span>
                 </div>
                 <div className="pt-4 border-t border-slate-800">
-                  <span className="text-slate-400 block mb-2">Content</span>
+                  <span className="text-slate-400 block mb-2">Content ({tests.length}/6)</span>
                   <ul className="space-y-2">
                     {tests.map((t, i) => (
                       <li key={t.id} className="flex items-center justify-between text-slate-300">

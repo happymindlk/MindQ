@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Download, Eye, Bell } from 'lucide-react';
+import { useParams } from 'react-router-dom';
+import { Search, Download, Bell } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Badge from '../../components/ui/Badge';
-import { adminApi, candidateStatus, exportCandidatesCsv } from '../../lib/adminApi';
+import { adminApi, candidateStatus, exportCandidatesCsv, maskEmail, maskAccessCode } from '../../lib/adminApi';
 
 export default function CandidateTracker() {
+  const { packageId } = useParams();
   const [search, setSearch] = useState('');
   const [candidates, setCandidates] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -14,7 +16,7 @@ export default function CandidateTracker() {
   useEffect(() => {
     async function loadCandidates() {
       try {
-        const data = await adminApi.getCandidates();
+        const data = await adminApi.getCandidates(packageId);
         setCandidates(data || []);
       } catch (err) {
         console.error('Failed to fetch candidates:', err);
@@ -23,7 +25,7 @@ export default function CandidateTracker() {
       }
     }
     loadCandidates();
-  }, []);
+  }, [packageId]);
 
   const [nudgingId, setNudgingId] = useState(null);
 
@@ -49,11 +51,15 @@ export default function CandidateTracker() {
     }
   };
 
+  const invited = candidates.length;
+  const inProgress = candidates.filter((c) => candidateStatus(c) === 'in_progress').length;
+  const completed = candidates.filter((c) => candidateStatus(c) === 'completed').length;
+
   const getStatusBadge = (status) => {
     switch(status) {
       case 'completed': return <Badge variant="success" showDot>Completed</Badge>;
       case 'in_progress': return <Badge variant="warning" showDot>In Progress</Badge>;
-      default: return <Badge variant="neutral" showDot>Not Started</Badge>;
+      default: return <Badge variant="neutral" showDot>Invited</Badge>;
     }
   };
 
@@ -61,14 +67,13 @@ export default function CandidateTracker() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-50">Candidate Tracker</h1>
-          <p className="text-slate-400 mt-1">Monitor candidate progress and results</p>
+          <h1 className="text-2xl font-bold text-slate-50">HR Tracking Dashboard</h1>
+          <p className="text-slate-400 mt-1">
+            Live completion status. Emails and access codes are masked on this view.
+            {packageId ? ' Filtered to one package.' : ''}
+          </p>
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
-          <Button variant="secondary">
-            <Filter className="w-4 h-4 mr-2" />
-            Filter
-          </Button>
           <Button
             variant="secondary"
             onClick={() => exportCandidatesCsv(candidates)}
@@ -79,6 +84,14 @@ export default function CandidateTracker() {
           </Button>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card><p className="text-sm text-slate-400">Invited</p><p className="text-2xl font-bold text-slate-50 mt-1">{invited}</p></Card>
+        <Card><p className="text-sm text-slate-400">In progress</p><p className="text-2xl font-bold text-amber-300 mt-1">{inProgress}</p></Card>
+        <Card><p className="text-sm text-slate-400">Completed</p><p className="text-2xl font-bold text-emerald-400 mt-1">{completed}</p></Card>
+      </div>
+
+      {isLoading && <p className="text-slate-500">Loading tracker…</p>}
 
       <Card className="p-0">
         <div className="p-4 border-b border-slate-800 bg-slate-900/50">
@@ -114,7 +127,8 @@ export default function CandidateTracker() {
                   <tr key={candidate.id} className="hover:bg-slate-800/30 transition-colors">
                     <td className="px-6 py-4">
                       <div className="font-medium text-slate-100">{candidate.full_name}</div>
-                      <div className="text-xs text-slate-500 mt-0.5">{candidate.email}</div>
+                      <div className="text-xs text-slate-500 mt-0.5">{maskEmail(candidate.email)}</div>
+                      <div className="text-xs text-slate-600 mt-0.5 font-mono">{maskAccessCode(candidate.access_code)}</div>
                     </td>
                     <td className="px-6 py-4">{candidate.package_title}</td>
                     <td className="px-6 py-4">
@@ -143,9 +157,6 @@ export default function CandidateTracker() {
                             <Bell className="w-4 h-4" />
                           </button>
                         )}
-                        <button className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-md transition-colors" title="View Details">
-                          <Eye className="w-4 h-4" />
-                        </button>
                       </div>
                     </td>
                   </tr>

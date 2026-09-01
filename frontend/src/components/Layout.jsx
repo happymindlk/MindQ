@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Package, Users, Menu, Bell, UserCircle, LogOut } from 'lucide-react';
+import { LayoutDashboard, Building2, Library, Package, Users, Menu, UserCircle, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Layout() {
@@ -16,8 +16,10 @@ export default function Layout() {
 
   const navigation = [
     { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-    { name: 'Packages', href: '/admin/packages/create', icon: Package },
-    { name: 'Candidates', href: '/admin/candidates', icon: Users },
+    { name: 'Corporates', href: '/admin/corporates', icon: Building2 },
+    { name: 'Assessment Library', href: '/admin/library', icon: Library },
+    { name: 'Package Builder', href: '/admin/packages/create', icon: Package },
+    { name: 'HR Tracker', href: '/admin/track', icon: Users },
   ];
 
   const getPageTitle = () => {
@@ -86,11 +88,6 @@ export default function Layout() {
             <h1 className="text-xl font-semibold text-slate-50">{getPageTitle()}</h1>
           </div>
           <div className="flex items-center gap-4">
-            <button className="text-slate-400 hover:text-slate-50 relative p-1">
-              <Bell className="w-5 h-5" />
-              <span className="absolute top-0 right-0 w-2 h-2 bg-rose-500 rounded-full"></span>
-            </button>
-            <div className="h-8 w-px bg-slate-800 mx-2"></div>
             <div className="flex items-center gap-2 text-slate-400">
               <UserCircle className="w-8 h-8" />
               <span className="text-sm font-medium hidden sm:block">{user?.email || 'Admin'}</span>

@@ -10,6 +10,7 @@ class CandidateBase(BaseModel):
 
 
 class CandidateLogin(BaseModel):
+    full_name: str
     email: EmailStr
     access_code: str
 
