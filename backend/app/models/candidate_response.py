@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, UniqueConstraint, Uuid
+from decimal import Decimal
+
+from sqlalchemy import String, DateTime, ForeignKey, Numeric, UniqueConstraint, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
@@ -25,6 +27,7 @@ class CandidateResponse(Base):
     )
     question_id: Mapped[str] = mapped_column(String(255), nullable=False)
     response: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    elapsed_seconds: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     __table_args__ = (

@@ -1,5 +1,7 @@
 from pydantic import BaseModel
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+
+from app.security import enforce_rate_limit, public_limiter
 
 router = APIRouter()
 
@@ -16,7 +18,7 @@ class ChatReply(BaseModel):
 FAQ_ENTRIES = [
     {
         "keywords": ["hello", "hi", "hey", "good morning", "good afternoon"],
-        "reply": "Hello! 👋 I'm your Happy Mind assistant. How can I help you today? You can ask me about getting started, access codes, test duration, or anything else!"
+        "reply": "Hello! I'm your Assess Pulse assistant. How can I help you today? You can ask me about getting started, access codes, test duration, or anything else!"
     },
     {
         "keywords": ["start", "begin", "how do i", "get started", "first step"],
@@ -39,30 +41,30 @@ FAQ_ENTRIES = [
         "reply": "I'm sorry you're having trouble! Try refreshing the page first. If the issue persists, please contact your organization administrator with a description of the problem."
     },
     {
-        "keywords": ["result", "score", "report", "performance", "how did i do"],
-        "reply": "Your results will be compiled into a comprehensive report and shared with your organization after you complete all assessments. Individual scores are not displayed during the test."
-    },
-    {
         "keywords": ["submit", "finish", "complete", "done", "end"],
-        "reply": "When you've answered all questions in a test, click the 'Submit Test' button. You'll be asked to confirm before final submission. Once submitted, the test is marked as Completed and cannot be retaken."
+        "reply": "When you're ready, click the Submit button on the test page. Once submitted, you cannot change your answers. Make sure you've reviewed everything before submitting!"
     },
     {
-        "keywords": ["skip", "go back", "previous", "change answer", "redo"],
-        "reply": "You can navigate freely between questions using the Previous and Next buttons. Feel free to skip questions and come back to them later before submitting."
+        "keywords": ["score", "result", "results", "grade", "feedback"],
+        "reply": "Your results are processed after you complete all assigned tests. Your organization administrator will share your results with you according to their process."
     },
     {
-        "keywords": ["privacy", "data", "confidential", "secure", "safe"],
+        "keywords": ["password", "forgot", "reset", "account"],
+        "reply": "Candidates don't need a password — just your access code and email. If you're an HR user, use the password reset option on the login page or contact your admin."
+    },
+    {
+        "keywords": ["privacy", "data", "secure", "confidential", "gdpr"],
         "reply": "Your data is handled with strict confidentiality. All responses are stored securely and only accessible by authorized administrators within your organization. We take your privacy seriously."
     },
 ]
 
 
 @router.post("/message", response_model=ChatReply)
-async def chat_message(chat: ChatMessage):
+async def chat_message(chat: ChatMessage, request: Request):
     """Simple FAQ chatbot with keyword matching."""
+    enforce_rate_limit(public_limiter, request, "chat_message")
     msg = chat.message.lower().strip()
 
-    # Try to match against FAQ entries
     best_match = None
     best_score = 0
 

@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from typing import Optional
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class CorporateBase(BaseModel):
@@ -14,6 +15,10 @@ class CorporateCreate(CorporateBase):
 
 class CorporateResponse(CorporateBase):
     id: uuid.UUID
+    logo_url: Optional[str] = None
+    primary_color: Optional[str] = None
+    contact_email: Optional[EmailStr] = None
+    contact_phone: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

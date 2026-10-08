@@ -36,3 +36,19 @@ def test_no_gradable_questions_returns_none():
 def test_missing_answer_counts_wrong():
     responses = [_resp("q1", "30")]  # q2 unanswered
     assert score_assessment(QUESTIONS, responses) == 50.0
+
+
+def test_multi_correct_set_equality():
+    questions = [
+        {"id": "q1", "type": "mcq", "correct_answer": ["A", "C"]},
+        {"id": "q2", "type": "mcq", "correct_answer": "B"},
+    ]
+    assert score_assessment(questions, [_resp("q1", ["C", "A"]), _resp("q2", "B")]) == 100.0
+    assert score_assessment(questions, [_resp("q1", ["A"]), _resp("q2", "B")]) == 50.0
+    assert score_assessment(questions, [_resp("q1", ["A", "B", "C"]), _resp("q2", "B")]) == 50.0
+
+
+def test_single_correct_still_string_match():
+    questions = [{"id": "q1", "type": "mcq", "correct_answer": "yes"}]
+    assert score_assessment(questions, [_resp("q1", "yes")]) == 100.0
+    assert score_assessment(questions, [_resp("q1", "no")]) == 0.0
