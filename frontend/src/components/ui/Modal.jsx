@@ -1,51 +1,52 @@
 import React, { useEffect } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
-import Button from './Button';
 
-export default function Modal({ isOpen, onClose, title, children, actions }) {
+/**
+ * Centered modal dialog. Prefer Drawer for record drill-downs.
+ */
+export default function Modal({ isOpen, onClose, title, children, actions, contentClassName = '' }) {
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
+    if (!isOpen) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = prev;
     };
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
-        onClick={onClose}
-      />
-      
-      {/* Modal Content */}
-      <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl transform transition-all animate-in fade-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
-          <h3 className="text-xl font-semibold text-slate-50">{title}</h3>
-          <button 
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-50 transition-colors p-1 rounded-md hover:bg-slate-800"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        
-        <div className="p-6 text-slate-300">
-          {children}
-        </div>
-        
-        {actions && (
-          <div className="flex justify-end gap-3 p-6 border-t border-slate-800 bg-slate-900/50 rounded-b-2xl">
-            {actions}
+    <Dialog.Root open={isOpen} onOpenChange={(open) => !open && onClose?.()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-canvas/80 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <Dialog.Content
+          className={`
+            fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2
+            bg-surface border border-border rounded-lg
+            focus:outline-none
+            ${contentClassName}
+          `}
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+            <Dialog.Title className="text-base font-semibold text-foreground">{title}</Dialog.Title>
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                className="p-1 rounded-md text-muted hover:text-foreground hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-primary"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </Dialog.Close>
           </div>
-        )}
-      </div>
-    </div>
+          <div className="px-4 py-4 text-sm text-muted">{children}</div>
+          {actions && (
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-border bg-surface-raised/50">
+              {actions}
+            </div>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

@@ -1,34 +1,14 @@
-version: "3.9"
+# Legacy compose — do not use for the hybrid Supabase stack.
+#
+# Day-to-day local development:
+#   1. `supabase start` + `supabase db reset`  (Postgres on :54322)
+#   2. Backend uvicorn on :8000 against DATABASE_URL → that Postgres
+#   3. Frontend Vite on :5173
+# See DEPLOYMENT.md.
+#
+# This file remains only as a reminder that the old SQLite single-compose
+# demo is retired. Prefer a container host that points DATABASE_URL at
+# Supabase (local or cloud) and installs WeasyPrint system libs (see
+# backend/Dockerfile).
 
-services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/app
-      - sqlite-data:/app/data
-    environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./data/happymind.db
-      - SECRET_KEY=change-me-in-production
-      - DEBUG=true
-      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend/src:/app/src
-    environment:
-      - VITE_API_URL=http://localhost:8000
-    depends_on:
-      - backend
-
-volumes:
-  sqlite-data:
+services: {}

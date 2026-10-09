@@ -5,7 +5,7 @@ import { api } from '../api/client';
 export default function Chatbot() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([
-    { id: 1, text: "Hello! I'm your Happy Mind assistant. How can I help you today?", sender: 'bot' }
+    { id: 1, text: "Hello! I'm your MindQ assistant. How can I help you today?", sender: 'bot' }
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);

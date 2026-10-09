@@ -1,40 +1,48 @@
 import React from 'react';
-import { Outlet } from 'react-router-dom';
-import { Package } from 'lucide-react';
-import Chatbot from './Chatbot';
+import { Outlet, Link } from 'react-router-dom';
+import { Brain } from 'lucide-react';
+import SupportModal from './SupportModal';
+import ToastProvider from './ui/Toast';
+import ThemeToggle from './ThemeToggle';
 
+/**
+ * Candidate assessment shell. Shares Design System tokens with admin Operate surfaces.
+ */
 export default function PortalLayout() {
+  const hasSession =
+    typeof window !== 'undefined' && Boolean(localStorage.getItem('candidateToken'));
+  const brandTo = hasSession ? '/portal/dashboard' : '/portal';
+
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden">
-      {/* Decorative background gradients */}
-      <div className="absolute top-0 inset-x-0 h-64 bg-gradient-to-b from-indigo-900/20 to-transparent pointer-events-none" />
-      <div className="absolute -top-40 -right-40 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute top-1/4 -left-40 w-96 h-96 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      {/* Header */}
-      <header className="relative z-10 border-b border-slate-800/50 bg-slate-900/30 backdrop-blur-md">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-indigo-400">
-            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
-              <Package className="w-5 h-5" />
+    <ToastProvider>
+      <div className="min-h-screen bg-canvas flex flex-col text-foreground">
+        <header className="border-b border-border bg-surface sticky top-0 z-10">
+          <div className="max-w-4xl mx-auto px-3 sm:px-4 h-12 flex items-center justify-between gap-3">
+            <Link
+              to={brandTo}
+              aria-label="MindQ home"
+              className="flex items-center gap-2 min-w-0 focus-visible:ring-2 focus-visible:ring-primary rounded-md"
+            >
+              <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center shrink-0">
+                <Brain className="w-3.5 h-3.5 text-white" aria-hidden />
+              </div>
+              <span className="font-semibold text-sm text-foreground truncate">MindQ</span>
+            </Link>
+            <div className="flex items-center gap-2 shrink-0">
+              <p className="text-xs font-medium text-muted hidden sm:block">Assessment Portal</p>
+              <ThemeToggle />
             </div>
-            <span className="font-bold text-lg text-slate-50">Happy Mind</span>
           </div>
-          <div className="text-sm text-slate-400">
-            Assessment Portal
+        </header>
+
+        <main className="flex-1 flex flex-col items-center p-3 sm:p-4">
+          <div className="w-full max-w-3xl flex-1 flex flex-col">
+            <Outlet />
           </div>
-        </div>
-      </header>
+        </main>
 
-      {/* Main Content Area */}
-      <main className="relative z-10 flex-1 flex flex-col items-center p-4 sm:p-6">
-        <div className="w-full max-w-4xl flex-1 flex flex-col">
-          <Outlet />
-        </div>
-      </main>
-
-      {/* Floating Chat Widget */}
-      <Chatbot />
-    </div>
+        <SupportModal />
+      </div>
+    </ToastProvider>
   );
 }
