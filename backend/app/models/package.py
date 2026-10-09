@@ -37,6 +37,9 @@ class Package(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # When False, package access codes only admit candidates already invited.
     allow_open_enrollment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Candidate availability window; None on either side means unbounded.
+    open_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    close_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow

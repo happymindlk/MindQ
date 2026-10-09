@@ -179,7 +179,7 @@ async def client_report_data(
     client: ClientUserContext = Depends(get_current_client_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Technical-only PDF report payload, tenant-scoped.
+    """MindQ Report payload, tenant-scoped.
 
     Cross-tenant ids return 404 (not 403) so callers cannot probe whether a
     candidate exists in another tenant.
@@ -190,7 +190,7 @@ async def client_report_data(
         db: Async database session.
 
     Returns:
-        Technical report data with psychometric fields omitted.
+        Report data with module-level psychometric scores only (no item data).
     """
     candidate = (
         await db.execute(

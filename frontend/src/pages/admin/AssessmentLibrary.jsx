@@ -1,101 +1,152 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Copy, Users, Link2 } from 'lucide-react';
-import Card from '../../components/ui/Card';
+import { Brain, Code2, Search } from 'lucide-react';
 import Button from '../../components/ui/Button';
-import Badge from '../../components/ui/Badge';
 import Input from '../../components/ui/Input';
-import { adminApi } from '../../lib/adminApi';
+import PageHeader from '../../components/ui/PageHeader';
+import Modal from '../../components/ui/Modal';
+import { AssessmentBuilderWorkspace } from '../../features/assessment-builder/components/assessment-builder-workspace';
+import { useModuleLibrary } from '../../features/assessment-builder/hooks/use-module-library';
+
+const TABS = [
+  { id: 'all', label: 'All', cta: '+ New Assessment' },
+  { id: 'psychometric', label: 'Psychometric', cta: '+ New Psychometric' },
+  { id: 'technical', label: 'Technical', cta: '+ New Technical' },
+];
+
+const CATEGORY_OPTIONS = [
+  {
+    id: 'psychometric',
+    label: 'Psychometric Assessment',
+    description: 'Behavioral, cognitive, and personality modules.',
+    icon: Brain,
+  },
+  {
+    id: 'technical',
+    label: 'Technical Assessment',
+    description: 'Role-specific skills, MCQ, and open-ended tasks.',
+    icon: Code2,
+  },
+];
 
 export default function AssessmentLibrary() {
   const navigate = useNavigate();
+  const library = useModuleLibrary();
   const [search, setSearch] = useState('');
-  const [packages, setPackages] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('all');
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState(null);
 
-  useEffect(() => {
-    adminApi.getPackages()
-      .then((data) => setPackages(data || []))
-      .catch((err) => console.error(err))
-      .finally(() => setIsLoading(false));
-  }, []);
+  const tabCounts = useMemo(() => {
+    const counts = { all: library.modules.length, psychometric: 0, technical: 0 };
+    library.modules.forEach((m) => {
+      if (m.moduleKind in counts) counts[m.moduleKind] += 1;
+    });
+    return counts;
+  }, [library.modules]);
 
-  const handleCopyCode = (code) => {
-    navigator.clipboard.writeText(code);
+  const activeTabConfig = TABS.find((t) => t.id === activeTab) ?? TABS[0];
+
+  const openCreate = (kind) => {
+    setTypePickerOpen(false);
+    setCreateDraft({ kind, category: kind === 'psychometric' ? 'behavioral' : null });
   };
 
-  const portalLink = (code) => `${window.location.origin}/portal?code=${encodeURIComponent(code)}`;
+  const onPrimaryCta = () => {
+    if (activeTab === 'all') {
+      setTypePickerOpen(true);
+      return;
+    }
+    openCreate(activeTab);
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-50">Assessment Library</h1>
-          <p className="text-slate-400 mt-1">
-            Packages bundling psychometric, technical, and operational tests (max 6 per package).
-          </p>
-        </div>
-        <div className="flex items-center gap-3 w-full sm:w-auto">
-          <Input
-            icon={Search}
-            placeholder="Search packages..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full sm:w-64"
-          />
-          <Button onClick={() => navigate('/admin/packages/create')} className="shrink-0">
-            <Plus className="w-4 h-4 mr-2" />
-            Package Builder
-          </Button>
-        </div>
+    <div className="space-y-4">
+      <PageHeader
+        title="Standard Library"
+        actions={
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Input
+              icon={Search}
+              placeholder="Search assessments"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full sm:w-56"
+              aria-label="Search assessments"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => navigate('/admin/packages/create')}
+              className="shrink-0"
+            >
+              Build Suite
+            </Button>
+            <Button size="sm" onClick={onPrimaryCta} className="shrink-0">
+              {activeTabConfig.cta}
+            </Button>
+          </div>
+        }
+      />
+
+      <div
+        role="tablist"
+        aria-label="Filter templates by category"
+        className="flex items-center gap-1 border-b border-neutral-800"
+      >
+        {TABS.map((tab) => {
+          const selected = tab.id === activeTab;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => setActiveTab(tab.id)}
+              className={`-mb-px inline-flex items-center gap-2 px-3 py-2 text-sm border-b-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-t-md ${
+                selected
+                  ? 'border-primary text-foreground font-semibold'
+                  : 'border-transparent text-neutral-400 hover:text-foreground'
+              }`}
+            >
+              {tab.label}
+              <span className="font-mono tabular-nums text-[11px] text-neutral-500">
+                {tabCounts[tab.id] ?? 0}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {packages
-          .filter((pkg) =>
-            pkg.title.toLowerCase().includes(search.toLowerCase())
-            || pkg.access_code.toLowerCase().includes(search.toLowerCase())
-          )
-          .map((pkg) => (
-            <Card key={pkg.id} variant="elevated" className="flex flex-col">
-              <div className="flex justify-between items-start mb-4">
-                <Badge variant={pkg.is_active ? 'success' : 'neutral'}>
-                  {pkg.is_active ? 'Active' : 'Archived'}
-                </Badge>
-                <button
-                  className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-md"
-                  title="Open HR tracker"
-                  onClick={() => navigate(`/track/${pkg.id}`)}
-                >
-                  <Link2 className="w-4 h-4" />
-                </button>
-              </div>
-              <h3 className="text-lg font-semibold text-slate-50 mb-1">{pkg.title}</h3>
-              <p className="text-sm text-slate-400 line-clamp-2 mb-4">{pkg.description || 'No job description attached.'}</p>
-              <div className="flex items-center justify-between mt-auto pt-4 border-t border-slate-800">
-                <div className="flex items-center gap-2 bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-700">
-                  <span className="text-sm font-mono text-indigo-300">{pkg.access_code}</span>
-                  <button onClick={() => handleCopyCode(pkg.access_code)} className="text-slate-400 hover:text-slate-50">
-                    <Copy className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <div className="flex items-center text-sm text-slate-400">
-                  <Users className="w-4 h-4 mr-1" />
-                  {pkg.candidate_count ?? 0}
-                </div>
-              </div>
-              <p className="text-xs text-slate-600 mt-3 truncate" title={portalLink(pkg.access_code)}>
-                Candidate link uses ?code=
-              </p>
-            </Card>
+      <AssessmentBuilderWorkspace
+        library={library}
+        filter={activeTab}
+        search={search}
+        createDraft={createDraft}
+        onCreateDraftChange={setCreateDraft}
+      />
+
+      <Modal
+        isOpen={typePickerOpen}
+        onClose={() => setTypePickerOpen(false)}
+        title="New Assessment"
+        contentClassName="bg-neutral-900 border border-neutral-800 text-neutral-100"
+      >
+        <div className="grid gap-2 sm:grid-cols-2">
+          {CATEGORY_OPTIONS.map(({ id, label, description, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => openCreate(id)}
+              className="flex flex-col items-start gap-2 rounded-lg border border-neutral-800 bg-canvas p-4 text-left transition-colors hover:border-primary hover:bg-surface-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <Icon className="w-5 h-5 text-primary" aria-hidden />
+              <span className="text-sm font-semibold text-foreground">{label}</span>
+              <span className="text-xs text-neutral-400 leading-relaxed">{description}</span>
+            </button>
           ))}
-      </div>
-      {packages.length === 0 && !isLoading && (
-        <div className="text-center py-12 text-slate-500 italic">
-          No packages yet. Open Package Builder to compose one.
         </div>
-      )}
-      {isLoading && <div className="text-center py-12 text-slate-500">Loading library...</div>}
+      </Modal>
     </div>
   );
 }

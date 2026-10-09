@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.package_builder import QuestionType
 
@@ -15,6 +15,20 @@ def _blank_to_none(value: object) -> object:
     if value == "":
         return None
     return value
+
+
+def _check_window_order(open_time: datetime | None, close_time: datetime | None) -> None:
+    """Reject a close time that does not fall after the open time.
+
+    Args:
+        open_time: Package open instant, if set.
+        close_time: Package deadline, if set.
+
+    Raises:
+        ValueError: ``close_time`` is not strictly after ``open_time``.
+    """
+    if open_time is not None and close_time is not None and close_time <= open_time:
+        raise ValueError("Close time must be after open time")
 
 
 def _alias_questions_payload(data: Any) -> Any:
@@ -117,6 +131,8 @@ class DraftPackageRequest(BaseModel):
     module_ids: list[UUID] = Field(default_factory=list)
     custom_questions: list[CustomQuestionIn] = Field(default_factory=list)
     module_question_overrides: dict[str, list[dict[str, Any]]] | None = None
+    open_time: AwareDatetime | None = None
+    close_time: AwareDatetime | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -131,10 +147,15 @@ class DraftPackageRequest(BaseModel):
             raise ValueError("Title is required")
         return stripped
 
-    @field_validator("target_role", "passing_threshold", mode="before")
+    @field_validator("target_role", "passing_threshold", "open_time", "close_time", mode="before")
     @classmethod
     def _optional_blanks(cls, value: object) -> object:
         return _blank_to_none(value)
+
+    @model_validator(mode="after")
+    def _window_order(self) -> "DraftPackageRequest":
+        _check_window_order(self.open_time, self.close_time)
+        return self
 
 
 class DraftPackageResponse(BaseModel):
@@ -153,6 +174,8 @@ class DraftPackageResponse(BaseModel):
     review_path: str | None = None
     track_secret: str | None = None
     published_at: datetime | None = None
+    open_time: datetime | None = None
+    close_time: datetime | None = None
     module_ids: list[UUID] = Field(default_factory=list)
     custom_questions: list[CustomQuestionOut] = Field(default_factory=list)
     module_count: int = 0
@@ -429,6 +452,8 @@ class CorporatePackageItem(BaseModel):
     completed_count: int = 0
     published_at: datetime | None = None
     created_at: datetime | None = None
+    open_time: datetime | None = None
+    close_time: datetime | None = None
     candidate_link: str | None = None
     hr_login_link: str | None = None
 
@@ -464,6 +489,11 @@ class AdminPackageModule(BaseModel):
     description: str | None = None
     module_kind: Literal["psychometric", "technical"]
     time_limit_minutes: int | None = None
+    duration_seconds: int | None = None
+    timer_mode: Literal["strict", "flexible"] = "flexible"
+    version: int = 1
+    # Set when a draft cart row was resolved to a newer published version of its lineage.
+    upgraded_from_version: int | None = None
     question_count: int = 0
     is_active: bool = True
     # Draft-time editable copy (psychometric overrides); catalog fallback when null.
@@ -483,6 +513,8 @@ class AdminPackageDetail(BaseModel):
     description: str | None = None
     is_active: bool = False
     access_code: str | None = None
+    open_time: datetime | None = None
+    close_time: datetime | None = None
     modules: list[AdminPackageModule] = Field(default_factory=list)
     custom_questions: list[CustomQuestionOut] = Field(default_factory=list)
 
@@ -493,6 +525,8 @@ class AdminPackageUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     title: str = Field(min_length=1, max_length=255)
+    # Role Assessment Brief. None keeps the stored value so older clients cannot wipe it.
+    description: str | None = Field(default=None, max_length=50_000)
     target_role: str | None = Field(default=None, max_length=255)
     passing_threshold: float | None = Field(default=None, ge=0, le=100)
     corporate_id: UUID | None = None
@@ -500,6 +534,8 @@ class AdminPackageUpdateRequest(BaseModel):
     custom_questions: list[CustomQuestionIn] | None = None
     # Optional per-module question overrides keyed by global_module_id (draft only).
     module_question_overrides: dict[str, list[dict[str, Any]]] | None = None
+    open_time: AwareDatetime | None = None
+    close_time: AwareDatetime | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -514,10 +550,36 @@ class AdminPackageUpdateRequest(BaseModel):
             raise ValueError("Title is required")
         return stripped
 
-    @field_validator("target_role", "passing_threshold", mode="before")
+    @field_validator("target_role", "passing_threshold", "open_time", "close_time", mode="before")
     @classmethod
     def _optional_blanks(cls, value: object) -> object:
         return _blank_to_none(value)
+
+    @model_validator(mode="after")
+    def _window_order(self) -> "AdminPackageUpdateRequest":
+        _check_window_order(self.open_time, self.close_time)
+        return self
+
+
+class PackageScheduleUpdate(BaseModel):
+    """Ops deadline change for a draft or live package (Extend Deadline)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    close_time: AwareDatetime | None = None
+
+    @field_validator("close_time", mode="before")
+    @classmethod
+    def _blank(cls, value: object) -> object:
+        return _blank_to_none(value)
+
+
+class PackageScheduleResponse(BaseModel):
+    """Package window after a schedule change."""
+
+    id: UUID
+    open_time: datetime | None = None
+    close_time: datetime | None = None
 
 
 class PackageUpdate(AdminPackageUpdateRequest):
@@ -580,8 +642,43 @@ class TechnicalReportCustomQuestion(BaseModel):
     scorecard: list[str] | None = None
 
 
+ReportCategoryKey = Literal["cognitive", "behavioral", "personality", "technical"]
+
+
+class ReportCompletedAssessment(BaseModel):
+    """A module the candidate completed, listed near the top of the report."""
+
+    id: UUID
+    title: str
+    category: ReportCategoryKey
+    category_label: str
+    completed_at: datetime | None = None
+
+
+class ReportAssessmentScore(BaseModel):
+    """Module-level score inside a competency group (no item-level data)."""
+
+    id: UUID
+    title: str
+    score: float | None = None
+
+
+class ReportCompetencyGroup(BaseModel):
+    """Cognitive / Behavioral / Personality / Technical sub-topic breakdown."""
+
+    key: ReportCategoryKey
+    label: str
+    average_score: float | None = None
+    assessments: list[ReportAssessmentScore] = Field(default_factory=list)
+    narrative: str
+
+
 class TechnicalReportData(BaseModel):
-    """Technical-only candidate report payload for client-side PDF export."""
+    """MindQ Report payload for on-screen preview and client-side PDF export.
+
+    Psychometric modules contribute module-level scores only; item responses,
+    facet traits, and answer keys are never included.
+    """
 
     candidate_id: UUID
     company_name: str
@@ -606,3 +703,5 @@ class TechnicalReportData(BaseModel):
     jd_eval_status: Literal["ok", "failed", "skipped", "pending"] = "pending"
     modules: list[TechnicalReportModule] = Field(default_factory=list)
     custom_questions: list[TechnicalReportCustomQuestion] = Field(default_factory=list)
+    completed_assessments: list[ReportCompletedAssessment] = Field(default_factory=list)
+    competency_groups: list[ReportCompetencyGroup] = Field(default_factory=list)

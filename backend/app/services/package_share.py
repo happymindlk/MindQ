@@ -136,6 +136,8 @@ async def list_corporate_packages(
                 completed_count=int(completed or 0),
                 published_at=package.published_at,
                 created_at=package.created_at,
+                open_time=package.open_time,
+                close_time=package.close_time,
                 candidate_link=candidate_portal_link(package.access_code) if published else None,
                 hr_login_link=hr_link if published else None,
             )

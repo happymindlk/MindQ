@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class QuestionType(str, Enum):
-    """Supported item formats in the manual / AI package builder."""
+    """Supported item formats in the manual / automated package builder."""
 
     mcq = "mcq"
     likert = "likert"

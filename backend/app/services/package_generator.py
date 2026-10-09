@@ -254,7 +254,7 @@ async def save_blueprint_package(
         package_id=package.id,
         title=f"{blueprint.role} Assessment".strip()[:255] or blueprint.title[:255],
         description=(
-            f"AI-generated for {blueprint.target_seniority.value} · "
+            f"Tailored for {blueprint.target_seniority.value} · "
             f"~{blueprint.estimated_duration_minutes} min"
             + (f" · Competencies: {competencies}" if competencies else "")
         ),

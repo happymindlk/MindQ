@@ -15,6 +15,11 @@ from app.schemas.candidate import CandidateLogin
 from decimal import Decimal
 
 from app.schemas.response import ResponseSave
+from app.services.package_window import (
+    ensure_module_launchable,
+    ensure_package_open,
+    window_state,
+)
 from app.services.runner_payload import effective_duration_seconds, strict_deadline
 from app.services.profiles import ItemResult, ProfileInputs, resolve_profile
 from app.services.scoring import ScoreResult, _extract_answer, score_assessment_detailed
@@ -157,6 +162,10 @@ class CandidateService:
                 raise ValueError("Invalid access code")
             if invited.email.lower() != email_norm.lower():
                 raise ValueError("Email does not match this invitation")
+            invited_package = (
+                await session.execute(select(Package).where(Package.id == invited.package_id))
+            ).scalars().first()
+            await CandidateService._ensure_login_window(session, invited_package, invited)
             invited.full_name = display_name
             invited.first_name = first_name
             invited.logged_in_at = _utcnow()
@@ -171,6 +180,7 @@ class CandidateService:
             )
         )
         candidate = cand_result.scalars().first()
+        await CandidateService._ensure_login_window(session, package, candidate)
 
         is_new = False
 
@@ -199,6 +209,51 @@ class CandidateService:
         await session.commit()
         await session.refresh(candidate)
         return candidate, is_new
+
+    @staticmethod
+    async def _has_unfinished_module(session: AsyncSession, candidate_id: UUID) -> bool:
+        """True when the candidate opened a module but has not submitted it."""
+        row = (
+            await session.execute(
+                select(CandidateProgress.id).where(
+                    CandidateProgress.candidate_id == candidate_id,
+                    CandidateProgress.started_at.is_not(None),
+                    CandidateProgress.status != COMPLETED_STATUS,
+                )
+            )
+        ).scalars().first()
+        return row is not None
+
+    @staticmethod
+    async def _ensure_login_window(
+        session: AsyncSession, package: Package | None, candidate: Candidate | None
+    ) -> None:
+        """Block login outside the package window, except to finish started work.
+
+        Args:
+            session: Async database session.
+            package: Package being entered (None skips the check).
+            candidate: Existing candidate row, if any.
+
+        Raises:
+            PackageNotOpenError: Before ``open_time``.
+            PackageClosedError: After ``close_time`` with nothing left in progress.
+        """
+        if package is None:
+            return
+        open_time = getattr(package, "open_time", None)
+        close_time = getattr(package, "close_time", None)
+        now = _utcnow()
+        state = window_state(open_time, close_time, now)
+        if state == "open":
+            return
+        if (
+            state == "closed"
+            and candidate is not None
+            and await CandidateService._has_unfinished_module(session, candidate.id)
+        ):
+            return
+        ensure_package_open(open_time, close_time, now)
 
     @staticmethod
     async def invite(
@@ -296,21 +351,37 @@ class CandidateService:
                 select(CandidateProgress).where(CandidateProgress.candidate_id == candidate.id)
             )
         ).scalars().all()
-        status_map = {p.assessment_id: p.status for p in progresses}
+        progress_map = {p.assessment_id: p for p in progresses}
+        open_time = package.open_time if package else None
+        close_time = package.close_time if package else None
+        state = window_state(open_time, close_time, _utcnow())
 
-        tests = [
-            {
-                "id": str(a.id),
-                "title": a.title,
-                "description": a.description,
-                "status": status_map.get(a.id, "NOT_STARTED").lower(),
-            }
-            for a in assessments
-        ]
+        tests = []
+        for a in assessments:
+            progress = progress_map.get(a.id)
+            status = (progress.status if progress else "NOT_STARTED").lower()
+            started = progress is not None and progress.started_at is not None
+            # Mirrors require_writable_assessment so the UI never offers a launch the API rejects.
+            launchable = status != "completed" and (
+                state == "open" or (state == "closed" and started)
+            )
+            tests.append(
+                {
+                    "id": str(a.id),
+                    "title": a.title,
+                    "description": a.description,
+                    "status": status,
+                    "launchable": launchable,
+                }
+            )
 
         return {
             "package_title": package.title if package else "",
             "candidate_name": candidate.full_name,
+            "candidate_first_name": candidate.first_name,
+            "open_time": open_time.isoformat() if open_time else None,
+            "close_time": close_time.isoformat() if close_time else None,
+            "window_state": state,
             "tests": tests,
         }
 
@@ -399,12 +470,41 @@ class CandidateService:
     async def require_writable_assessment(
         session: AsyncSession, candidate: Candidate, assessment_id: UUID
     ) -> tuple[Assessment, CandidateProgress | None]:
-        """Assessment must belong to the candidate's package and not be submitted."""
+        """Assessment must belong to the package, be unsubmitted, and be inside the window.
+
+        Args:
+            session: Async database session.
+            candidate: Authenticated candidate.
+            assessment_id: Module being opened, autosaved, or submitted.
+
+        Returns:
+            ``(assessment, progress)``; progress is None if never opened.
+
+        Raises:
+            AssessmentNotFoundError: Module is not in the candidate's package.
+            AssessmentAlreadySubmittedError: Module is already completed.
+            PackageNotOpenError: Package has not opened yet.
+            PackageClosedError: Deadline passed and the module was never started.
+        """
         assessment = await CandidateService.require_assessment_in_package(
             session, candidate, assessment_id
         )
         progress = await CandidateService._get_progress(session, candidate.id, assessment_id)
         ensure_not_submitted(progress)
+        window = (
+            await session.execute(
+                select(Package.open_time, Package.close_time).where(
+                    Package.id == candidate.package_id
+                )
+            )
+        ).first()
+        if window is not None:
+            ensure_module_launchable(
+                window.open_time,
+                window.close_time,
+                progress.started_at if progress is not None else None,
+                _utcnow(),
+            )
         return assessment, progress
 
     @staticmethod

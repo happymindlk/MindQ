@@ -22,6 +22,8 @@ from app.schemas.client_package import (
     CompanyUpdateRequest,
     HrInviteRequest,
     HrInviteResponse,
+    PackageScheduleResponse,
+    PackageScheduleUpdate,
 )
 from app.services.client_package import (
     ClientPackageError,
@@ -243,6 +245,34 @@ async def update_admin_package(
             status_code=400,
             detail="Published packages are locked and cannot be modified.",
         ) from exc
+    except ClientPackageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ProgrammingError as exc:
+        raise HTTPException(status_code=503, detail=schema_drift_detail(exc)) from exc
+
+
+@router.patch("/packages/{package_id}/schedule", response_model=PackageScheduleResponse)
+async def update_package_schedule(
+    package_id: UUID,
+    body: PackageScheduleUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: HRUserContext = Depends(get_current_ops_user),
+):
+    """Extend (or clear) a package deadline; works on published packages.
+
+    Args:
+        package_id: Client package UUID.
+        body: New timezone-aware ``close_time`` or null for no deadline.
+        db: Async database session.
+        _: Authenticated ops user.
+
+    Returns:
+        The package's open/close window after the update.
+    """
+    try:
+        return await ClientPackageService.update_schedule(db, package_id, body)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ClientPackageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ProgrammingError as exc:

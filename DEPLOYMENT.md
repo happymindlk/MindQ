@@ -1,4 +1,4 @@
-# Happy Mind — Deployment & Local Development (Hybrid Supabase Stack)
+# Assess Pulse — Deployment & Local Development (Hybrid Supabase Stack)
 
 Architecture (Option C, hybrid):
 
@@ -83,10 +83,48 @@ frontend (React/Vite) ──supabase-js + HR JWT──► Supabase (Auth, Postgr
   ```bash
   PGHOST=127.0.0.1 PGUSER=postgres PGPASSWORD=postgres bash scripts/verify_rls.sh
   ```
+- Schema drift check (run after pulling new migrations). Exits 1 and prints the
+  missing columns if the database behind `DATABASE_URL` lags the SQLAlchemy models;
+  fix with `supabase migration up --local`:
+  ```bash
+  python scripts/check_schema_drift.py
+  ```
+- API E2E loop (stack must be running):
+  ```bash
+  # from repo root, backend venv active
+  python scripts/e2e_candidate_loop.py
+  ```
 - Full RLS suite against the real stack: `supabase test db` (add pgTAP tests
   under `supabase/tests/`).
 
-CI runs all three (`.github/workflows/ci.yml`).
+CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
+
+## Gemini JD fit and technical item grading
+
+- Set `GEMINI_API_KEY` in `backend/.env`. Use `GEMINI_MODEL=gemini-3.6-flash`
+  (new keys cannot call `gemini-2.5-*`).
+- Client: `google-genai` (`genai.Client(api_key=GEMINI_API_KEY)`).
+- Free-tier 429s: `GEMINI_MAX_RETRIES` (default 3) with exponential backoff
+  (`GEMINI_RETRY_BASE_SECONDS`). Custom technical items are graded **sequentially**
+  with `GEMINI_INTER_REQUEST_SECONDS` between calls.
+- Item scores land on `candidate_responses.response` (`ai_score`, `ai_evaluation`,
+  `scorecard`) and are returned by `GET /api/v1/candidates/{id}/report-data`.
+- Package-level JD fit still runs after the last test submit, and again on HR
+  report download (cached by JD hash). Soft timeout: `GEMINI_TIMEOUT_SECONDS`
+  per attempt.
+
+## Reports (PDF vs HTML)
+
+- Linux/Docker images install WeasyPrint system libs (`backend/Dockerfile`).
+- On Windows without Pango/Cairo, downloads fall back to HTML. The tracker
+  surfaces this via `X-Report-Type: HTML`.
+
+## Public tracker & support
+
+- Each package has a `track_secret`. Share `/public/track/{secret}` (no auth).
+- `POST /api/v1/support/submit` stores tickets; HR of that corporate can SELECT.
+- T-24h nudges: schedule `POST /api/v1/admin/jobs/nudge-due` with an HR JWT
+  (Task Scheduler / cron). Uses `NUDGE_AFTER_HOURS` (default 24).
 
 ## Cloud deployment
 
@@ -112,3 +150,33 @@ CI runs all three (`.github/workflows/ci.yml`).
   them to the browser (the frontend uses only the anon/publishable key).
 - Tenancy is enforced by RLS on the supabase-js path and by explicit
   `corporate_id` checks on the FastAPI/service_role path.
+- **Fail-closed boot:** with `DEBUG=false`, FastAPI refuses to start if
+  `SECRET_KEY` / `SUPABASE_JWT_SECRET` are still the `.env.example` defaults
+  or shorter than 32 characters, or if `CORS_ORIGINS` is empty / localhost-only.
+  (Local/CI keep `DEBUG=true` — the Settings default — so example secrets work.)
+- **Hosted Supabase:** after `supabase db push`, confirm Dashboard → Advisors
+  shows RLS enabled on `corporates`, `packages`, `assessments`, `candidates`,
+  `candidate_progress`, and `candidate_responses`. Enable Auth leaked-password
+  protection (HaveIBeenPwned) in the Auth settings.
+- **Invite-only enrollment:** package access codes do **not** auto-register
+  strangers. Pre-invite candidates (or set `packages.allow_open_enrollment = true`
+  intentionally). Invite codes still match email.
+- **Rate limits (in-process):** candidate login ≈ 10 / 15 min / IP; public track,
+  blind review, support, and chat ≈ 60 / min / IP. Multi-instance deploys need a
+  shared store (Redis) or limits multiply by replica count.
+- **Psychometric isolation:** HR RLS may SELECT technical `candidate_responses`
+  only; psychometric answers stay ops-only. Candidate APIs strip answer-key
+  aliases including `correct_answer_or_rubric`.
+- Security headers: FastAPI sets `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`, `Permissions-Policy`, and HSTS on HTTPS. The Vite app
+  ships a CSP meta tag (tighten `connect-src` for production API hosts).
+
+## Pre-launch checklist (shipping)
+
+- [ ] `DEBUG=false`, strong `SECRET_KEY`, hosted `SUPABASE_JWT_SECRET`, production `CORS_ORIGINS`
+- [ ] Migrations applied (`supabase db push`), including psychometric response RLS
+- [ ] `pip-audit` / `npm audit` clean of reachable critical/high findings
+- [ ] Health check `GET /health` returns 200 behind the load balancer
+- [ ] Rollback: previous container image + prior migration down path documented
+- [ ] Structured JSON logs flowing (request_id on responses via `X-Request-Id`)
+- [ ] Confirm package open-enrollment flags match product intent per tenant

@@ -34,6 +34,26 @@ class AssessmentTimeExpiredError(Exception):
         super().__init__(self.detail)
 
 
+class PackageNotOpenError(Exception):
+    """Candidate activity attempted before the package's open_time."""
+
+    code = "PACKAGE_NOT_OPEN"
+
+    def __init__(self, opens_at: str) -> None:
+        self.detail = f"This assessment opens on {opens_at}."
+        super().__init__(self.detail)
+
+
+class PackageClosedError(Exception):
+    """Candidate tried to start new work after the package's close_time."""
+
+    code = "PACKAGE_CLOSED"
+
+    def __init__(self, closed_at: str) -> None:
+        self.detail = f"This assessment closed on {closed_at}."
+        super().__init__(self.detail)
+
+
 class AssessmentAlreadySubmittedError(Exception):
     """Writes and retakes are locked after a candidate submits."""
 

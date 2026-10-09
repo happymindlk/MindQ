@@ -15,7 +15,7 @@ from .library import router as library_router
 
 api_router = APIRouter()
 # Most HR admin CRUD (packages list / candidates) is served by Supabase via
-# supabase-js + RLS. AI package generation + save run through FastAPI so Gemini
+# supabase-js + RLS. Automated package generation + save run through FastAPI so Gemini
 # keys stay server-side and tenancy is enforced via the HR JWT corporate_id.
 api_router.include_router(candidate_router, prefix="/candidate", tags=["candidate"])
 api_router.include_router(

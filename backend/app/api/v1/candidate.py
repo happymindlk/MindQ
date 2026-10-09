@@ -24,6 +24,8 @@ from app.exceptions import (
     AssessmentAlreadySubmittedError,
     AssessmentNotFoundError,
     AssessmentTimeExpiredError,
+    PackageClosedError,
+    PackageNotOpenError,
 )
 from app.security import enforce_rate_limit, login_limiter
 
@@ -40,6 +42,10 @@ def _raise_integrity(exc: Exception) -> NoReturn:
     if isinstance(exc, AssessmentTimeExpiredError):
         raise HTTPException(
             status_code=409, detail={"code": "TIME_EXPIRED", "message": exc.detail}
+        ) from exc
+    if isinstance(exc, (PackageNotOpenError, PackageClosedError)):
+        raise HTTPException(
+            status_code=403, detail={"code": exc.code, "message": exc.detail}
         ) from exc
     raise exc
 
@@ -69,6 +75,8 @@ async def login(
         verify_candidate_email_otp(authorization, str(login_data.email))
     try:
         candidate, is_new = await CandidateService.login(db, login_data)
+    except (PackageNotOpenError, PackageClosedError) as exc:
+        _raise_integrity(exc)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if is_new:
@@ -113,7 +121,12 @@ async def get_test(
         )
         progress = await CandidateService.ensure_started(db, candidate, assessment, progress)
         answers = await CandidateService.get_saved_answers(db, candidate.id, assessment_id)
-    except (AssessmentNotFoundError, AssessmentAlreadySubmittedError) as exc:
+    except (
+        AssessmentNotFoundError,
+        AssessmentAlreadySubmittedError,
+        PackageNotOpenError,
+        PackageClosedError,
+    ) as exc:
         _raise_integrity(exc)
     return build_runner_payload(
         assessment_id=assessment.id,
@@ -142,6 +155,8 @@ async def autosave(
         AssessmentNotFoundError,
         AssessmentAlreadySubmittedError,
         AssessmentTimeExpiredError,
+        PackageNotOpenError,
+        PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
     return {"id": str(resp.id), "saved_at": resp.saved_at}
@@ -163,7 +178,12 @@ async def submit_test(
             pending_responses=(body.responses if body else None),
             client_duration_seconds=(body.total_module_duration_seconds if body else None),
         )
-    except (AssessmentNotFoundError, AssessmentAlreadySubmittedError) as exc:
+    except (
+        AssessmentNotFoundError,
+        AssessmentAlreadySubmittedError,
+        PackageNotOpenError,
+        PackageClosedError,
+    ) as exc:
         _raise_integrity(exc)
     # Do not block the candidate on Gemini; item eval + JD fit run in the background.
     background_tasks.add_task(score_ai_for_candidate, candidate.id, assessment_id)

@@ -1,4 +1,4 @@
-"""Technical-only candidate report data for client-side PDF export."""
+"""MindQ Report data for on-screen preview and client-side PDF export."""
 from __future__ import annotations
 
 import logging
@@ -16,6 +16,7 @@ from app.models.candidate_evaluation import CandidateEvaluation
 from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.models.corporate import Corporate
+from app.models.global_module import GlobalModule
 from app.models.package import Package
 from app.schemas.client_package import (
     TechnicalReportCompetency,
@@ -24,8 +25,16 @@ from app.schemas.client_package import (
     TechnicalReportModule,
 )
 from app.schemas.jd_evaluation import RECOMMENDATION_LABELS
+from app.services.candidate_service import COMPLETED_STATUS
 from app.services.client_package import PSYCHOMETRIC, TECHNICAL, _strip_answer_keys
 from app.services.jd_scoring import JdScoringService, evaluation_is_ok
+from app.services.report_synthesis import (
+    ModuleOutcome,
+    build_competency_groups,
+    build_completed_assessments,
+    module_percentage,
+    resolve_category,
+)
 from app.services.scoring import _extract_answer, _normalize_answer_set
 from app.services.technical_eval import TechnicalEvalService
 
@@ -258,10 +267,11 @@ async def get_candidate_report_data(
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return technical-only report fields for printable PDF export.
+    """Return MindQ Report fields for on-screen preview and PDF export.
 
-    Psychometric modules, trait scores, and answer keys are omitted.
-    Gemini JD-fit notes are included as ``ai_evaluation`` / ``ai_summary``.
+    Psychometric modules contribute module-level scores to the competency
+    breakdown only; item responses, trait facets, and answer keys are omitted.
+    JD-fit notes are included as ``ai_evaluation`` / ``ai_summary``.
 
     Args:
         candidate_id: ``candidates.id`` (not ``candidate_progress.id``).
@@ -286,17 +296,18 @@ async def get_candidate_report_data(
 async def build_technical_report_data(
     db: AsyncSession, candidate: Candidate
 ) -> TechnicalReportData:
-    """Assemble the technical-only report for an already-authorized candidate.
+    """Assemble the MindQ Report for an already-authorized candidate.
 
     Callers MUST verify tenant access before calling. Missing open-ended
-    technical grades and the Gemini JD-fit evaluation are backfilled lazily.
+    technical grades and the JD-fit evaluation are backfilled lazily.
 
     Args:
         db: Async database session.
         candidate: Candidate row the caller is allowed to read.
 
     Returns:
-        Company/candidate metadata plus technical module and custom-question rows.
+        Company/candidate metadata, completed assessments, competency groups,
+        and technical module / custom-question rows.
     """
     candidate_id = candidate.id
     package = (
@@ -395,6 +406,21 @@ async def build_technical_report_data(
     executive = _executive_fields(eval_payload)
     ai_summary = executive["ai_summary"]
 
+    catalog_ids = {a.global_module_id for a in assessments if a.global_module_id}
+    catalog_categories: dict[UUID, str | None] = {}
+    if catalog_ids:
+        catalog_categories = {
+            row.id: row.assessment_category
+            for row in (
+                await db.execute(
+                    select(GlobalModule.id, GlobalModule.assessment_category).where(
+                        GlobalModule.id.in_(catalog_ids)
+                    )
+                )
+            ).all()
+        }
+
+    outcomes: list[ModuleOutcome] = []
     modules: list[TechnicalReportModule] = []
     custom_questions: list[TechnicalReportCustomQuestion] = []
     scores: list[float] = []
@@ -403,16 +429,33 @@ async def build_technical_report_data(
 
     for assessment in assessments:
         kind = (assessment.module_kind or TECHNICAL).strip().lower()
+        prog = progress_by_id.get(assessment.id)
+        if prog and str(prog.status or "").upper() == COMPLETED_STATUS:
+            outcomes.append(
+                ModuleOutcome(
+                    id=assessment.id,
+                    title=assessment.title,
+                    category=resolve_category(
+                        kind,
+                        catalog_categories.get(assessment.global_module_id)
+                        if assessment.global_module_id
+                        else None,
+                        assessment.questions,
+                    ),
+                    score=module_percentage(prog.score, prog.facet_scores),
+                    completed_at=prog.completed_at,
+                )
+            )
+            if completed_at is None or (
+                prog.completed_at and prog.completed_at > completed_at
+            ):
+                completed_at = prog.completed_at
         if kind == PSYCHOMETRIC:
             continue
 
-        prog = progress_by_id.get(assessment.id)
         score = float(prog.score) if prog and prog.score is not None else None
         if score is not None:
             scores.append(score)
-        if prog and prog.completed_at:
-            if completed_at is None or prog.completed_at > completed_at:
-                completed_at = prog.completed_at
 
         modules.append(
             TechnicalReportModule(
@@ -492,4 +535,6 @@ async def build_technical_report_data(
         jd_eval_status=jd_eval_status,
         modules=modules,
         custom_questions=custom_questions,
+        completed_assessments=build_completed_assessments(outcomes),
+        competency_groups=build_competency_groups(candidate.full_name, outcomes),
     )

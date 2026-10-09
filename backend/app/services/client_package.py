@@ -45,6 +45,8 @@ from app.schemas.client_package import (
     DraftPackageResponse,
     GlobalModuleResponse,
     PackagePreviewRequest,
+    PackageScheduleResponse,
+    PackageScheduleUpdate,
     PublishPackageResponse,
     ReviewQuestion,
 )
@@ -284,11 +286,100 @@ def _draft_response(
         review_path=f"/client/review/{review_token}" if published and review_token else None,
         track_secret=package.track_secret if published else None,
         published_at=package.published_at,
+        open_time=package.open_time,
+        close_time=package.close_time,
         module_ids=module_ids,
         custom_questions=[_to_custom_out(r) for r in custom_rows],
         module_count=len(module_ids),
         custom_question_count=len(custom_rows),
     )
+
+
+def _lineage_key(module: GlobalModule) -> UUID:
+    return module.lineage_id or module.id
+
+
+def newest_by_lineage(candidates: list[GlobalModule]) -> dict[UUID, GlobalModule]:
+    """Pick the highest-version row per lineage.
+
+    Args:
+        candidates: Published, active module rows (any lineage mix).
+
+    Returns:
+        Lineage id -> newest module row.
+    """
+    newest: dict[UUID, GlobalModule] = {}
+    for row in candidates:
+        key = _lineage_key(row)
+        current = newest.get(key)
+        if current is None or (row.version or 1) > (current.version or 1):
+            newest[key] = row
+    return newest
+
+
+def resolve_cart_row(
+    pinned: GlobalModule,
+    latest: GlobalModule,
+    link_questions: list[dict[str, Any]] | None,
+) -> tuple[GlobalModule, list[dict[str, Any]]]:
+    """Choose the module version and question snapshot a draft cart row should use.
+
+    "Clone as New Version" creates a new lineage row instead of mutating the
+    published one, so a draft suite pinned to v1 would otherwise keep v1's
+    duration forever. Drafts follow the newest published version; the eager
+    question snapshot follows too unless ops customised it for this suite.
+
+    Args:
+        pinned: Module row the cart currently references.
+        latest: Newest published row on the same lineage (may be ``pinned``).
+        link_questions: Stored per-package snapshot, or None if never snapshotted.
+
+    Returns:
+        ``(module_to_use, questions)`` where questions is a deep copy.
+    """
+    pinned_qs = pinned.questions if isinstance(pinned.questions, list) else []
+    if latest.id == pinned.id:
+        source = link_questions if link_questions is not None else pinned_qs
+        return pinned, copy.deepcopy(source)
+    if link_questions is None or link_questions == pinned_qs:
+        latest_qs = latest.questions if isinstance(latest.questions, list) else []
+        return latest, copy.deepcopy(latest_qs)
+    return latest, copy.deepcopy(link_questions)
+
+
+async def _latest_published_for(
+    session: AsyncSession, modules: list[GlobalModule]
+) -> dict[UUID, GlobalModule]:
+    """Map each pinned module id to the newest published version of its lineage.
+
+    Args:
+        session: Async database session.
+        modules: Module rows referenced by a package cart.
+
+    Returns:
+        Pinned module id -> module to use (itself when already newest).
+    """
+    if not modules:
+        return {}
+    lineages = {_lineage_key(m) for m in modules}
+    rows = (
+        await session.execute(
+            select(GlobalModule).where(
+                func.coalesce(GlobalModule.lineage_id, GlobalModule.id).in_(lineages),
+                GlobalModule.status == "published",
+                GlobalModule.is_active.is_(True),
+            )
+        )
+    ).scalars().all()
+    newest = newest_by_lineage(list(rows))
+    resolved: dict[UUID, GlobalModule] = {}
+    for module in modules:
+        candidate = newest.get(_lineage_key(module))
+        if candidate is not None and (candidate.version or 1) > (module.version or 1):
+            resolved[module.id] = candidate
+        else:
+            resolved[module.id] = module
+    return resolved
 
 
 def pipeline_status(
@@ -753,11 +844,24 @@ class ClientPackageService:
             )
         ).scalars().all()
 
+        published = package.status == "published"
+        # Published suites are historical; only drafts follow newer module versions.
+        latest_by_pinned = (
+            {}
+            if published
+            else await _latest_published_for(session, [catalog for _link, catalog in join_rows])
+        )
+
         modules: list[AdminPackageModule] = []
-        for link, catalog in join_rows:
-            catalog_qs = catalog.questions if isinstance(catalog.questions, list) else []
+        seen_ids: set[UUID] = set()
+        for link, pinned in join_rows:
             override = link.questions if isinstance(link.questions, list) else None
-            questions = copy.deepcopy(override if override is not None else catalog_qs)
+            catalog, questions = resolve_cart_row(
+                pinned, latest_by_pinned.get(pinned.id, pinned), override
+            )
+            if catalog.id in seen_ids:
+                continue
+            seen_ids.add(catalog.id)
             modules.append(
                 AdminPackageModule(
                     module_id=catalog.id,
@@ -767,13 +871,16 @@ class ClientPackageService:
                     description=catalog.description,
                     module_kind=catalog.module_kind,  # type: ignore[arg-type]
                     time_limit_minutes=catalog.time_limit_minutes,
+                    duration_seconds=catalog.duration_seconds,
+                    timer_mode=catalog.timer_mode or "flexible",  # type: ignore[arg-type]
+                    version=catalog.version or 1,
+                    upgraded_from_version=(pinned.version or 1) if catalog.id != pinned.id else None,
                     question_count=len(questions),
                     is_active=catalog.is_active,
                     questions=questions,
                 )
             )
 
-        published = package.status == "published"
         threshold = (
             float(package.passing_threshold)
             if package.passing_threshold is not None
@@ -790,6 +897,8 @@ class ClientPackageService:
             description=package.description,
             is_active=bool(package.is_active),
             access_code=package.access_code if published else None,
+            open_time=package.open_time,
+            close_time=package.close_time,
             modules=modules,
             custom_questions=[_to_custom_out(row) for row in custom_rows],
         )
@@ -845,18 +954,64 @@ class ClientPackageService:
         else:
             custom_payload = list(body.custom_questions)
 
+        sent = body.model_fields_set
         draft = DraftPackageRequest(
             corporate_id=corporate_id,
             title=body.title,
-            description=package.description or "",
+            description=body.description
+            if body.description is not None
+            else (package.description or ""),
             target_role=body.target_role,
             passing_threshold=body.passing_threshold,
             module_ids=body.module_ids,
             custom_questions=custom_payload,
             module_question_overrides=body.module_question_overrides,
+            open_time=body.open_time if "open_time" in sent else package.open_time,
+            close_time=body.close_time if "close_time" in sent else package.close_time,
         )
         await ClientPackageService.save_draft(session, draft, package_id=package_id)
         return await ClientPackageService.get_admin_package(session, package_id)
+
+    @staticmethod
+    async def update_schedule(
+        session: AsyncSession, package_id: UUID, body: PackageScheduleUpdate
+    ) -> PackageScheduleResponse:
+        """Change a package's deadline. Allowed on live suites, unlike content edits.
+
+        Args:
+            session: Async database session.
+            package_id: Target package id.
+            body: New ``close_time`` (None removes the deadline).
+
+        Returns:
+            The package window after the change.
+
+        Raises:
+            LookupError: Package does not exist.
+            ClientPackageError: Deadline is not after the open time.
+        """
+        package = (
+            await session.execute(select(Package).where(Package.id == package_id))
+        ).scalar_one_or_none()
+        if not package:
+            raise LookupError("Package not found")
+        if (
+            body.close_time is not None
+            and package.open_time is not None
+            and body.close_time <= package.open_time
+        ):
+            raise ClientPackageError("Deadline must be after the package open time")
+
+        package.close_time = body.close_time
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        await session.refresh(package)
+        return PackageScheduleResponse(
+            id=package.id, open_time=package.open_time, close_time=package.close_time
+        )
 
     @staticmethod
     async def save_draft(
@@ -935,6 +1090,8 @@ class ClientPackageService:
                 status="draft",
                 is_active=False,
                 review_token=_review_token(),
+                open_time=body.open_time,
+                close_time=body.close_time,
             )
             session.add(package)
             await session.flush()
@@ -944,6 +1101,16 @@ class ClientPackageService:
             package.description = body.description.strip() or None
             package.target_role = (body.target_role or "").strip() or None
             package.passing_threshold = body.passing_threshold
+            if "open_time" in body.model_fields_set:
+                package.open_time = body.open_time
+            if "close_time" in body.model_fields_set:
+                package.close_time = body.close_time
+            if (
+                package.open_time is not None
+                and package.close_time is not None
+                and package.close_time <= package.open_time
+            ):
+                raise ClientPackageError("Close time must be after open time")
             if not package.review_token:
                 package.review_token = _review_token()
 
@@ -1053,38 +1220,34 @@ class ClientPackageService:
         if not module_ids and not custom_rows:
             raise ClientPackageError("Add at least one module or custom question")
 
-        modules: list[GlobalModule] = []
-        if module_ids:
-            fetched = (
-                await session.execute(
-                    select(GlobalModule).where(GlobalModule.id.in_(module_ids))
-                )
-            ).scalars().all()
-            by_id = {m.id: m for m in fetched}
-            modules = [by_id[mid] for mid in module_ids if mid in by_id]
+        join_rows = (
+            await session.execute(
+                select(PackageModule, GlobalModule)
+                .join(GlobalModule, GlobalModule.id == PackageModule.global_module_id)
+                .where(PackageModule.package_id == package.id)
+                .order_by(PackageModule.position)
+            )
+        ).all()
+        latest_by_pinned = await _latest_published_for(
+            session, [pinned for _link, pinned in join_rows]
+        )
+        resolved: list[tuple[GlobalModule, list[dict[str, Any]]]] = []
+        for link, pinned in join_rows:
+            override = link.questions if isinstance(link.questions, list) else None
+            module, questions = resolve_cart_row(
+                pinned, latest_by_pinned.get(pinned.id, pinned), override
+            )
+            if any(existing.id == module.id for existing, _qs in resolved):
+                continue
+            resolved.append((module, questions))
+        module_ids = [module.id for module, _qs in resolved]
 
         await session.execute(
             delete(Assessment).where(Assessment.package_id == package.id)
         )
 
-        link_overrides: dict[UUID, list | None] = {}
-        link_rows = (
-            await session.execute(
-                select(PackageModule).where(PackageModule.package_id == package.id)
-            )
-        ).scalars().all()
-        for link in link_rows:
-            link_overrides[link.global_module_id] = (
-                link.questions if isinstance(link.questions, list) else None
-            )
-
         position = 0
-        for module in modules:
-            override = link_overrides.get(module.id)
-            if isinstance(override, list):
-                questions = copy.deepcopy(override)
-            else:
-                questions = copy.deepcopy(module.questions) if module.questions else []
+        for module, questions in resolved:
             session.add(
                 Assessment(
                     corporate_id=package.corporate_id,
