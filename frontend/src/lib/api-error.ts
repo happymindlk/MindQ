@@ -1,4 +1,4 @@
-/** Standardized error for builder API calls, preserving FastAPI's structured detail. */
+/** Standardized error for FastAPI calls, preserving the structured `detail` body. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | null;
@@ -14,6 +14,10 @@ export class ApiError extends Error {
 
   get isModuleLocked(): boolean {
     return this.code === 'MODULE_LOCKED';
+  }
+
+  get isNetworkError(): boolean {
+    return this.code === 'NETWORK';
   }
 }
 

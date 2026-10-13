@@ -396,7 +396,7 @@ async def test_submit_passes_pending_responses_atomically(candidate_client, monk
     assert captured["pending"][0].elapsed_seconds == 12.5
     body = response.json()
     assert body["status"] == "COMPLETED"
-    assert body["score"] == 100.0
+    assert "score" not in body
     assert body["jd_scoring_queued"] is False
     assert captured["aid"] == assessment_id
     assert captured["pending"] is not None

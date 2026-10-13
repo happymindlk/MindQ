@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import ToastProvider from './ui/Toast';
+import RouteErrorBoundary from './route-error-boundary';
 import ThemeToggle from './ThemeToggle';
 import CorporateLogo from '../pages/admin/corporates/corporate-logo';
 import { useClientSession } from '../pages/client/use-client-session';
@@ -49,7 +50,9 @@ export default function ClientLayout() {
           </div>
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
-          <Outlet />
+          <RouteErrorBoundary>
+            <Outlet />
+          </RouteErrorBoundary>
         </main>
       </div>
     </ToastProvider>

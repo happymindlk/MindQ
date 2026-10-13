@@ -1,6 +1,8 @@
 // Thin FastAPI service client for the candidate flow, reports, and chat.
 // HR admin data access lives in src/lib/adminApi.js (supabase-js + RLS).
-const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api/v1`;
+import { API_ORIGIN } from '../lib/api-origin';
+
+const API_BASE = `${API_ORIGIN}/api/v1`;
 
 const getAuthHeaders = () => {
   const token = localStorage.getItem('candidateToken');

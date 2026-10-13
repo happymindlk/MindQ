@@ -14,6 +14,7 @@ import { useAuth } from '../context/useAuth';
 import ToastProvider from './ui/Toast';
 import ThemeToggle from './ThemeToggle';
 import UserMenu from './user-menu';
+import RouteErrorBoundary from './route-error-boundary';
 import { useIdleTimer } from '../hooks/use-idle-timer';
 
 const navigation = [
@@ -184,7 +185,9 @@ export default function Layout() {
           </header>
 
           <main className="flex-1 overflow-y-auto p-3 sm:p-4">
-            <Outlet />
+            <RouteErrorBoundary>
+              <Outlet />
+            </RouteErrorBoundary>
           </main>
         </div>
       </div>

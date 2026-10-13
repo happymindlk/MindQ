@@ -2,13 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { Briefcase, Camera, Hash, LifeBuoy, Mail, MonitorSmartphone, User } from 'lucide-react';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
+import { API_ORIGIN } from '../lib/api-origin';
 import {
   SUPPORT_EMAIL,
   buildSupportMailto,
   readSupportContext,
 } from '../features/candidate-support/support-mailto';
 
-const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api/v1`;
+const API_BASE = `${API_ORIGIN}/api/v1`;
 
 const CHECKLIST = [
   { icon: User, label: 'Full Name', hint: 'As entered when you signed in.' },

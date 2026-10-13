@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     R2_ENDPOINT_URL: str = ""
     R2_BUCKET_NAME: str = "assess-pulse"
     R2_PUBLIC_URL: str = ""
+    # Candidate reports contain PII + psychometric results, so they must never share
+    # the publicly readable logo bucket. Blank disables report archiving entirely.
+    R2_REPORTS_BUCKET_NAME: str = ""
+    REPORT_URL_TTL_SECONDS: int = 900
 
     # Resend transactional email.
     RESEND_API_KEY: str | None = None
@@ -74,6 +78,12 @@ class Settings(BaseSettings):
     NUDGE_AFTER_HOURS: int = 24
 
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
+    # Number of trusted reverse proxies in front of the API (Cloudflare, Render, …).
+    # 0 = ignore X-Forwarded-For entirely; any client can forge that header.
+    TRUSTED_PROXY_HOPS: int = 0
+    # Header set by the edge proxy with the verified client IP (e.g. CF-Connecting-IP).
+    # Only honoured when TRUSTED_PROXY_HOPS > 0.
+    CLIENT_IP_HEADER: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -107,6 +117,11 @@ class Settings(BaseSettings):
             and self.R2_ENDPOINT_URL
             and self.R2_BUCKET_NAME
         )
+
+    @property
+    def r2_reports_configured(self) -> bool:
+        """True when a dedicated private bucket for candidate reports is configured."""
+        return bool(self.r2_configured and self.R2_REPORTS_BUCKET_NAME.strip())
 
     @property
     def r2_public_base(self) -> str:

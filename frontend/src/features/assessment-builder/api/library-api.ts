@@ -11,9 +11,8 @@ import type {
   TimerMode,
 } from '../types/module';
 import type { QuestionPayload, TemplateQuestion } from '../types/question';
-import { ApiError, toApiError } from './api-error';
-
-const API_BASE: string = import.meta.env.VITE_API_URL || '';
+import { API_ORIGIN as API_BASE } from '../../../lib/api-origin';
+import { requestJson } from '../../../lib/api-request';
 
 interface TemplateSummaryDto {
   id: string;
@@ -147,18 +146,15 @@ async function request<T>(
   path: string,
   { method = 'GET', body, fallback }: { method?: string; body?: unknown; fallback: string },
 ): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}/api/v1${path}`, {
+  return requestJson<T>(
+    `${API_BASE}/api/v1${path}`,
+    {
       method,
       headers: await authHeaders(body !== undefined),
       body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-  } catch {
-    throw new ApiError('Network error. Check your connection and retry.', 0, 'NETWORK');
-  }
-  if (!res.ok) throw await toApiError(res, fallback);
-  return (await res.json()) as T;
+    },
+    fallback,
+  );
 }
 
 function settingsBody(settings: Partial<ModuleSettings>): Record<string, unknown> {

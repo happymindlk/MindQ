@@ -259,28 +259,41 @@ export default function SuiteBuilder() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      try {
-        const [modRows, corpRows] = await Promise.all([
-          adminApi.listGlobalModules(),
-          adminApi.listCorporates(),
-        ]);
-        if (cancelled) return;
+      // allSettled: a failed company list must not also discard the module catalog.
+      const [modResult, corpResult] = await Promise.allSettled([
+        adminApi.listGlobalModules(),
+        adminApi.listCorporates(),
+      ]);
+      if (cancelled) return;
+      if (modResult.status === 'fulfilled') {
         // Merge rather than replace: the package load may already have added
         // cart modules with package-specific fields, and either request can land first.
         setModules((prev) => {
           const map = new Map(prev.map((m) => [m.id, m]));
-          (modRows || []).forEach((row) => map.set(row.id, { ...map.get(row.id), ...row }));
+          modResult.value.forEach((row) => map.set(row.id, { ...map.get(row.id), ...row }));
           return Array.from(map.values());
         });
-        setCorporates(corpRows || []);
-      } catch (err) {
-        console.error(err);
+      } else {
+        console.error(modResult.reason);
+        toast({
+          title: friendlyErrorMessage(modResult.reason, 'Could not load the assessment catalog.'),
+          variant: 'error',
+        });
+      }
+      if (corpResult.status === 'fulfilled') {
+        setCorporates(corpResult.value);
+      } else {
+        console.error(corpResult.reason);
+        toast({
+          title: friendlyErrorMessage(corpResult.reason, 'Could not load companies.'),
+          variant: 'error',
+        });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     if (!loadPackageId) return;

@@ -16,6 +16,7 @@ from app.models.assessment import Assessment
 from app.models.corporate import Corporate
 from app.services.jd_scoring import JdScoringService
 from app.services.technical_eval import TechnicalEvalService
+from app.security import enforce_user_rate_limit, report_limiter
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -27,6 +28,8 @@ async def generate_candidate_report(
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Each download can trigger Gemini backfills + WeasyPrint rendering.
+    enforce_user_rate_limit(report_limiter, hr.user_id, "report_pdf")
     candidate = await CandidateService.get_candidate(db, id)
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")

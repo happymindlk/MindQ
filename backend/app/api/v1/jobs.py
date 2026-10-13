@@ -13,6 +13,7 @@ from app.models.candidate import Candidate
 from app.models.candidate_progress import CandidateProgress
 from app.models.package import Package
 from app.services.email_service import EmailService
+from app.security import enforce_user_rate_limit, report_limiter
 
 router = APIRouter()
 
@@ -27,6 +28,8 @@ async def nudge_candidates_due(
     Intended to be called by an external scheduler (T-24h). Scoped to the
     caller's corporate. Returns counts only — never candidate PII.
     """
+    # Bulk mailer: a handful of runs per window is plenty for a scheduler.
+    enforce_user_rate_limit(report_limiter, f"nudge_due:{hr.corporate_id}", "nudge_due")
     cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.NUDGE_AFTER_HOURS)
     packages = (
         await db.execute(

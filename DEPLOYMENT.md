@@ -139,9 +139,23 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
    - `DATABASE_URL` = the project's Postgres connection (use the pooler)
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`
    - `SECRET_KEY` (strong random), `DEBUG=false`, `CORS_ORIGINS` = your frontend origin(s)
-4. Deploy the frontend (static host). Set build env:
+4. Deploy the frontend to Cloudflare Pages with root directory `frontend/`
+   (build `npm run build`, output `dist`). Set env:
    - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
-   - `VITE_API_URL` = the deployed FastAPI base URL
+   - `VITE_API_URL` = `https://api-qa.mindqtalent.com` (the Lightsail FastAPI
+     behind Cloudflare Tunnel). `frontend/.env.production` ships this default;
+     a value set in the Pages dashboard overrides it. HTTP values are ignored in
+     production builds, which then fall back to the same-origin `/api/*` proxy.
+   - Any new API origin must also be added to `connect-src` (and `img-src` if it
+     serves assets) in the `<meta>` CSP in `frontend/index.html`.
+   - `frame-ancestors` / `X-Frame-Options` ship as real headers via
+     `frontend/public/_headers` (browsers ignore `frame-ancestors` in `<meta>`).
+   - The browser calls the API cross-origin, so backend `CORS_ORIGINS` must list
+     every frontend origin, e.g. `https://mindq.pages.dev` plus any custom domain
+     and preview URLs you test from.
+   - Optional fallback: with `VITE_API_URL` empty, `frontend/functions/api/[[catchall]].js`
+     proxies `/api/*` to `BACKEND_ORIGIN` (default `https://api-qa.mindqtalent.com`).
+     Pages Functions cannot fetch raw IP addresses (error 1003); use a hostname.
 5. Onboard HR users: create the auth user, then insert their `hr_users` row.
 
 ## Security notes
@@ -162,18 +176,28 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
   strangers. Pre-invite candidates (or set `packages.allow_open_enrollment = true`
   intentionally). Invite codes still match email.
 - **Rate limits (in-process):** candidate login ≈ 10 / 15 min / IP; public track,
-  blind review, support, and chat ≈ 60 / min / IP. Multi-instance deploys need a
-  shared store (Redis) or limits multiply by replica count.
-- **Psychometric isolation:** HR RLS may SELECT technical `candidate_responses`
-  only; psychometric answers stay ops-only. Candidate APIs strip answer-key
-  aliases including `correct_answer_or_rubric`.
+  blind review, support, and chat ≈ 60 / min / IP; report/scorecard endpoints
+  (Gemini + PDF) 20 / 10 min / user; nudges 30 / h / user; invites 200 / h / user.
+  Multi-instance deploys need a shared store (Redis) or limits multiply by replica count.
+  Behind Cloudflare set `TRUSTED_PROXY_HOPS=1` and `CLIENT_IP_HEADER=CF-Connecting-IP`;
+  with the default `0`, `X-Forwarded-For` is ignored so it cannot be forged.
+- **Exam content isolation:** non-ops HR has no direct PostgREST read on
+  `assessments`, `custom_technical_questions`, `candidate_responses`, or
+  `candidate_progress`, and no write on `candidates` / `corporates`
+  (migration `20261009100000_security_hardening`). Candidate APIs strip answer-key
+  aliases including `correct_answer_or_rubric`, and a DB trigger locks answers once
+  a module is `COMPLETED`.
+- **Reports:** archived only to the private `R2_REPORTS_BUCKET_NAME` bucket (never the
+  public logo bucket) and served via presigned URLs capped at 30 minutes.
 - Security headers: FastAPI sets `X-Content-Type-Options`, `X-Frame-Options`,
   `Referrer-Policy`, `Permissions-Policy`, and HSTS on HTTPS. The Vite app
   ships a CSP meta tag (tighten `connect-src` for production API hosts).
 
 ## Pre-launch checklist (shipping)
 
-- [ ] `DEBUG=false`, strong `SECRET_KEY`, hosted `SUPABASE_JWT_SECRET`, production `CORS_ORIGINS`
+- [ ] `DEBUG=false`, strong `SECRET_KEY`, hosted `SUPABASE_JWT_SECRET`, production `CORS_ORIGINS` (exact https origins, no `*`)
+- [ ] Private R2 bucket created and set as `R2_REPORTS_BUCKET_NAME`; existing report objects moved out of the public logo bucket
+- [ ] `TRUSTED_PROXY_HOPS` / `CLIENT_IP_HEADER` match the real proxy chain
 - [ ] Migrations applied (`supabase db push`), including psychometric response RLS
 - [ ] `pip-audit` / `npm audit` clean of reachable critical/high findings
 - [ ] Health check `GET /health` returns 200 behind the load balancer

@@ -28,7 +28,7 @@ import { adminApi } from '../../../lib/adminApi';
  */
 
 function sortByName(rows) {
-  return [...rows].sort((a, b) => a.name.localeCompare(b.name));
+  return [...rows].sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
 }
 
 /**
@@ -77,7 +77,7 @@ export function useCorporates() {
     setError(null);
     try {
       const rows = await adminApi.listCorporates();
-      if (mountedRef.current) setCorporates(sortByName(rows || []));
+      if (mountedRef.current) setCorporates(sortByName(rows));
     } catch (err) {
       if (mountedRef.current) setError(err.message || 'Failed to load corporates');
     } finally {

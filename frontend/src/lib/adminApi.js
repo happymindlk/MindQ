@@ -1,27 +1,53 @@
 import { supabase } from './supabaseClient';
-
-const API_BASE = import.meta.env.VITE_API_URL || '';
+import { API_ORIGIN as API_BASE } from './api-origin';
+import { ApiError } from './api-error';
+import { apiFetch, BAD_RESPONSE_MESSAGE, requestJson } from './api-request';
 
 /**
- * Extract a human-readable message from a FastAPI error response.
- * Handles both `{detail: string}` and 422 `{detail: [{msg}]}` shapes.
+ * Build FastAPI auth headers from the HR user's Supabase session.
  *
- * @param {Response} res
- * @param {string} fallback
- * @returns {Promise<string>}
+ * @param {boolean} json Whether the request carries a JSON body.
+ * @returns {Promise<Record<string, string>>}
  */
-async function readErrorDetail(res, fallback) {
-  try {
-    const payload = await res.json();
-    const detail = payload?.detail;
-    if (typeof detail === 'string' && detail) return detail;
-    if (Array.isArray(detail) && detail[0]?.msg) {
-      return String(detail[0].msg).replace(/^Value error, /, '');
-    }
-  } catch {
-    /* non-JSON body */
+async function authHeaders(json) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers = { Authorization: `Bearer ${session?.access_token ?? ''}` };
+  if (json) headers['Content-Type'] = 'application/json';
+  return headers;
+}
+
+/**
+ * Authenticated JSON call to the FastAPI service. Network failures, error
+ * statuses, and non-JSON bodies all reject with an `ApiError`.
+ *
+ * @param {string} path Path starting with `/api`.
+ * @param {string} fallback Message used when the error body carries nothing readable.
+ * @param {{ method?: string, body?: unknown, formData?: FormData }} [options]
+ * @returns {Promise<any>}
+ */
+async function authedJson(path, fallback, { method = 'GET', body, formData } = {}) {
+  const hasJson = body !== undefined;
+  return requestJson(
+    `${API_BASE}${path}`,
+    {
+      method,
+      headers: await authHeaders(hasJson),
+      body: formData ?? (hasJson ? JSON.stringify(body) : undefined),
+    },
+    fallback,
+  );
+}
+
+/**
+ * @param {unknown} rows
+ * @param {string} resource Used in the error detail only.
+ * @returns {any[]}
+ */
+function expectArray(rows, resource) {
+  if (!Array.isArray(rows)) {
+    throw new ApiError(BAD_RESPONSE_MESSAGE, 200, 'BAD_RESPONSE', `${resource}: expected array`);
   }
-  return fallback;
+  return rows;
 }
 
 // HR admin data access via supabase-js. RLS enforces tenant isolation, so these
@@ -79,36 +105,23 @@ export const adminApi = {
    * Returns the public object URL (does not persist to Postgres).
    */
   async uploadCorporateLogo(corporateId, file) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const body = new FormData();
-    body.append('file', file);
-    const res = await fetch(`${API_BASE}/api/v1/corporates/${corporateId}/logo`, {
+    const formData = new FormData();
+    formData.append('file', file);
+    const payload = await authedJson(`/api/v1/corporates/${corporateId}/logo`, 'Logo upload failed', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
-      body,
+      formData,
     });
-    if (!res.ok) {
-      let detail = 'Logo upload failed';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Logo upload failed');
-    }
-    const payload = await res.json();
     return payload.logo_url || payload.url;
   },
 
   // Report generation stays in the FastAPI service (WeasyPrint + service_role).
   // We authenticate the request with the HR user's Supabase access token.
   async downloadReport(candidateId) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/admin/candidates/${candidateId}/report`, {
-      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
-    });
-    if (!res.ok) throw new Error('Failed to download report');
+    const res = await apiFetch(
+      `${API_BASE}/api/v1/admin/candidates/${candidateId}/report`,
+      { headers: await authHeaders(false) },
+      'Failed to download report',
+    );
     const blob = await res.blob();
     const reportType = res.headers.get('x-report-type') || '';
     const jdStatus = res.headers.get('x-jd-fit-status') || '';
@@ -123,30 +136,14 @@ export const adminApi = {
   },
 
   async inviteCandidate({ candidateEmail, packageId, corporateId }) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/candidates/invite`, {
+    return authedJson('/api/candidates/invite', 'Invite failed', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+      body: {
         candidate_email: candidateEmail,
         package_id: packageId,
         corporate_id: corporateId,
-      }),
+      },
     });
-    if (!res.ok) {
-      let detail = 'Invite failed';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Invite failed');
-    }
-    return res.json();
   },
 
   async getCandidateScorecard(candidateId) {
@@ -202,78 +199,24 @@ export const adminApi = {
    * Returns AssessmentPackageBlueprint JSON for preview before save.
    */
   async generatePackageFromJd({ role, jobDescription, seniority, questionCount = 10 }) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/packages/generate`, {
+    return authedJson('/api/v1/packages/generate', 'Assessment generation failed', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+      body: {
         role,
         job_description: jobDescription,
         seniority,
         question_count: questionCount,
-      }),
+      },
     });
-    if (!res.ok) {
-      let detail = 'Assessment generation failed';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Assessment generation failed');
-    }
-    return res.json();
   },
 
-  /**
-   * Persist an approved generated blueprint under the HR tenant (packages + assessments).
-   */
   async listGlobalModules() {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/packages/modules`, {
-      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
-    });
-    if (!res.ok) {
-      let detail = 'Failed to load modules';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to load modules');
-    }
-    return res.json();
+    const rows = await authedJson('/api/v1/packages/modules', 'Failed to load modules');
+    return expectArray(rows, 'packages/modules');
   },
 
   async _libraryFetch(path, { method = 'GET', body } = {}) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/library${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        ...(body != null ? { 'Content-Type': 'application/json' } : {}),
-      },
-      body: body != null ? JSON.stringify(body) : undefined,
-    });
-    if (!res.ok) {
-      let detail = `Library request failed (${res.status})`;
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      const error = new Error(typeof detail === 'string' ? detail : 'Library request failed');
-      error.status = res.status;
-      throw error;
-    }
-    if (res.status === 204) return null;
-    return res.json();
+    return authedJson(`/api/v1/library${path}`, 'Library request failed', { method, body });
   },
 
   async listTemplates() {
@@ -324,125 +267,55 @@ export const adminApi = {
   },
 
   async addTemplateToPackage(packageId, templateId) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/packages/${packageId}/add-template`, {
+    return authedJson(`/api/v1/packages/${packageId}/add-template`, 'Failed to add template', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ template_id: templateId }),
+      body: { template_id: templateId },
     });
-    if (!res.ok) {
-      let detail = 'Failed to add template to package';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to add template');
-    }
-    return res.json();
   },
 
   async createCompany({ name, slug, contactEmail }) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/admin/companies`, {
+    return authedJson('/api/v1/admin/companies', 'Failed to create company', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+      body: {
         name,
         slug: slug || undefined,
         contact_email: contactEmail || undefined,
-      }),
+      },
     });
-    if (!res.ok) {
-      throw new Error(await readErrorDetail(res, 'Failed to create company'));
-    }
-    return res.json();
   },
 
   /**
    * Ops-only partial update. Pass `contact_email: ''` to clear the HR email.
    */
   async updateCompany(companyId, fields) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/admin/companies/${companyId}`, {
+    return authedJson(`/api/v1/admin/companies/${companyId}`, 'Failed to update company', {
       method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(fields),
+      body: fields,
     });
-    if (!res.ok) {
-      throw new Error(await readErrorDetail(res, 'Failed to update company'));
-    }
-    return res.json();
   },
 
   /**
    * Ops-only logo upload to R2. The backend persists `logo_url` on the row.
    */
   async uploadCompanyLogo(companyId, file) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const body = new FormData();
-    body.append('file', file);
-    const res = await fetch(`${API_BASE}/api/v1/admin/companies/${companyId}/logo`, {
+    const formData = new FormData();
+    formData.append('file', file);
+    const data = await authedJson(`/api/v1/admin/companies/${companyId}/logo`, 'Logo upload failed', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
-      body,
+      formData,
     });
-    if (!res.ok) {
-      throw new Error(await readErrorDetail(res, 'Logo upload failed'));
-    }
-    const data = await res.json();
     return data.logo_url;
   },
 
   async getAdminPackage(packageId) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/admin/packages/${packageId}`, {
-      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
-    });
-    if (!res.ok) {
-      let detail = 'Failed to load package';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to load package');
-    }
-    return res.json();
+    return authedJson(`/api/v1/admin/packages/${packageId}`, 'Failed to load package');
   },
 
   async updateAdminPackage(packageId, body) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/admin/packages/${packageId}`, {
+    return authedJson(`/api/v1/admin/packages/${packageId}`, 'Failed to update package', {
       method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
+      body,
     });
-    if (!res.ok) {
-      let detail = 'Failed to update package';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to update package');
-    }
-    return res.json();
   },
 
   /**
@@ -452,31 +325,18 @@ export const adminApi = {
    * @returns {Promise<{id: string, open_time: string | null, close_time: string | null}>}
    */
   async updatePackageSchedule(packageId, closeTime) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/admin/packages/${packageId}/schedule`, {
+    return authedJson(`/api/v1/admin/packages/${packageId}/schedule`, 'Failed to update deadline', {
       method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ close_time: closeTime }),
+      body: { close_time: closeTime },
     });
-    if (!res.ok) {
-      throw new Error(await readErrorDetail(res, 'Failed to update deadline'));
-    }
-    return res.json();
   },
 
   async listCorporatePackages(corporateId) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(
-      `${API_BASE}/api/v1/packages?corporate_id=${encodeURIComponent(corporateId)}`,
-      { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } },
+    const rows = await authedJson(
+      `/api/v1/packages?corporate_id=${encodeURIComponent(corporateId)}`,
+      'Failed to load packages',
     );
-    if (!res.ok) {
-      throw new Error(await readErrorDetail(res, 'Failed to load packages'));
-    }
-    return res.json();
+    return expectArray(rows, 'packages');
   },
 
   /**
@@ -484,137 +344,50 @@ export const adminApi = {
    * to the corporate HR email server-side. Also enables open enrollment.
    */
   async sharePackage(packageId, { recipientEmail } = {}) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/packages/${packageId}/share`, {
+    return authedJson(`/api/v1/packages/${packageId}/share`, 'Failed to send invite email', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ recipient_email: recipientEmail || null }),
+      body: { recipient_email: recipientEmail || null },
     });
-    if (!res.ok) {
-      throw new Error(await readErrorDetail(res, 'Failed to send invite email'));
-    }
-    return res.json();
   },
 
   async listCorporates() {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/packages/corporates`, {
-      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
-    });
-    if (!res.ok) {
-      let detail = 'Failed to load companies';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to load companies');
-    }
-    return res.json();
+    const rows = await authedJson('/api/v1/packages/corporates', 'Failed to load companies');
+    return expectArray(rows, 'packages/corporates');
   },
 
   async getDraftPackage(packageId) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/packages/drafts/${packageId}`, {
-      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
-    });
-    if (!res.ok) {
-      let detail = 'Failed to load draft';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to load draft');
-    }
-    return res.json();
+    return authedJson(`/api/v1/packages/drafts/${packageId}`, 'Failed to load draft');
   },
 
   async saveDraftPackage(body, packageId) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const url = packageId
-      ? `${API_BASE}/api/v1/packages/drafts/${packageId}`
-      : `${API_BASE}/api/v1/packages/drafts`;
-    const res = await fetch(url, {
+    const path = packageId ? `/api/v1/packages/drafts/${packageId}` : '/api/v1/packages/drafts';
+    return authedJson(path, 'Failed to save draft', {
       method: packageId ? 'PUT' : 'POST',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
+      body,
     });
-    if (!res.ok) {
-      let detail = 'Failed to save draft';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to save draft');
-    }
-    return res.json();
   },
 
   async publishDraftPackage(packageId) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/packages/drafts/${packageId}/publish`, {
+    return authedJson(`/api/v1/packages/drafts/${packageId}/publish`, 'Failed to publish package', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
     });
-    if (!res.ok) {
-      let detail = 'Failed to publish package';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to publish package');
-    }
-    return res.json();
   },
 
   async saveGeneratedPackage({ blueprint, jobDescription }) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/packages/save`, {
+    return authedJson('/api/v1/packages/save', 'Failed to save package', {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${session?.access_token ?? ''}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+      body: {
         blueprint,
         job_description: jobDescription ?? '',
-      }),
+      },
     });
-    if (!res.ok) {
-      let detail = 'Failed to save package';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to save package');
-    }
-    return res.json();
   },
 
   // HR-triggered reminder email (FastAPI service, authenticated with HR token).
   async nudgeCandidate(candidateId) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(`${API_BASE}/api/v1/admin/candidates/${candidateId}/nudge`, {
+    return authedJson(`/api/v1/admin/candidates/${candidateId}/nudge`, 'Failed to send reminder', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
     });
-    if (!res.ok) throw new Error('Failed to send reminder');
-    return res.json();
   },
 
   /**
@@ -623,29 +396,10 @@ export const adminApi = {
    * @param {string} email
    */
   async inviteHr(companyId, email) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(
-      `${API_BASE}/api/v1/admin/companies/${companyId}/invite-hr`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session?.access_token ?? ''}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email }),
-      },
-    );
-    if (!res.ok) {
-      let detail = 'Failed to send HR access';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to send HR access');
-    }
-    return res.json();
+    return authedJson(`/api/v1/admin/companies/${companyId}/invite-hr`, 'Failed to send HR access', {
+      method: 'POST',
+      body: { email },
+    });
   },
 
   /**
@@ -653,22 +407,7 @@ export const adminApi = {
    * @param {string} candidateId
    */
   async getReportData(candidateId) {
-    const { data: { session } } = await supabase.auth.getSession();
-    const res = await fetch(
-      `${API_BASE}/api/v1/candidates/${candidateId}/report-data`,
-      { headers: { Authorization: `Bearer ${session?.access_token ?? ''}` } },
-    );
-    if (!res.ok) {
-      let detail = 'Failed to load report data';
-      try {
-        const payload = await res.json();
-        detail = payload?.detail || detail;
-      } catch {
-        /* ignore */
-      }
-      throw new Error(typeof detail === 'string' ? detail : 'Failed to load report data');
-    }
-    return res.json();
+    return authedJson(`/api/v1/candidates/${candidateId}/report-data`, 'Failed to load report data');
   },
 };
 

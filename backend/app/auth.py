@@ -96,6 +96,7 @@ class HRUserContext:
 
 # Cached JWKS client for asymmetric tokens (local `supabase start` uses ES256).
 _jwks_client: jwt.PyJWKClient | None = None
+_ASYMMETRIC_ALGS = frozenset({"ES256", "RS256"})
 
 
 def _jwks() -> jwt.PyJWKClient:
@@ -113,10 +114,13 @@ def decode_hr_token(token: str) -> dict:
     Current local `supabase start` mints ES256 tokens; those are verified via JWKS.
     """
     header = jwt.get_unverified_header(token)
-    alg = header.get("alg", "HS256")
-    decode_kwargs = {"audience": "authenticated"}
+    alg = header.get("alg")
+    decode_kwargs = {"audience": "authenticated", "options": {"require": ["exp", "sub"]}}
     if alg == "HS256":
         return jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], **decode_kwargs)
+    if alg not in _ASYMMETRIC_ALGS:
+        # Never let the token pick its own verification scheme (alg=none / HS-with-public-key confusion).
+        raise jwt.InvalidAlgorithmError(f"Unsupported token algorithm: {alg!r}")
     key = _jwks().get_signing_key_from_jwt(token).key
     return jwt.decode(token, key, algorithms=[alg], **decode_kwargs)
 

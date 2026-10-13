@@ -27,6 +27,7 @@ from app.exceptions import (
     AssessmentAlreadySubmittedError,
     AssessmentNotFoundError,
     AssessmentTimeExpiredError,
+    UnknownQuestionError,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,36 @@ def ensure_not_submitted(progress: CandidateProgress | None) -> None:
     """Raise if this assessment is already locked after submit."""
     if progress is not None and progress.status == COMPLETED_STATUS:
         raise AssessmentAlreadySubmittedError()
+
+
+def question_ids(assessment: Assessment) -> set[str]:
+    """Ids of every question in the stored bank for ``assessment``.
+
+    Args:
+        assessment: Assessment whose ``questions`` JSONB defines valid ids.
+
+    Returns:
+        Set of question ids as strings.
+    """
+    ids: set[str] = set()
+    for raw in getattr(assessment, "questions", None) or []:
+        if isinstance(raw, dict) and raw.get("id") is not None:
+            ids.add(str(raw["id"]))
+    return ids
+
+
+def ensure_known_question(assessment: Assessment, question_id: str) -> None:
+    """Reject answers for ids outside the bank (row spam / evidence injection).
+
+    Args:
+        assessment: Target assessment.
+        question_id: Candidate-supplied question id.
+
+    Raises:
+        UnknownQuestionError: When the id is not in the stored bank.
+    """
+    if str(question_id) not in question_ids(assessment):
+        raise UnknownQuestionError()
 
 
 def _utcnow() -> datetime:
@@ -444,16 +475,21 @@ class CandidateService:
 
     @staticmethod
     async def _get_progress(
-        session: AsyncSession, candidate_id: UUID, assessment_id: UUID
+        session: AsyncSession,
+        candidate_id: UUID,
+        assessment_id: UUID,
+        *,
+        for_update: bool = False,
     ) -> CandidateProgress | None:
-        return (
-            await session.execute(
-                select(CandidateProgress).where(
-                    CandidateProgress.candidate_id == candidate_id,
-                    CandidateProgress.assessment_id == assessment_id,
-                )
-            )
-        ).scalars().first()
+        stmt = select(CandidateProgress).where(
+            CandidateProgress.candidate_id == candidate_id,
+            CandidateProgress.assessment_id == assessment_id,
+        )
+        if for_update:
+            # Serialises concurrent submit/autosave for one attempt so the
+            # COMPLETED check and the write happen under the same row lock.
+            stmt = stmt.with_for_update()
+        return (await session.execute(stmt)).scalars().first()
 
     @staticmethod
     async def require_assessment_in_package(
@@ -468,7 +504,11 @@ class CandidateService:
 
     @staticmethod
     async def require_writable_assessment(
-        session: AsyncSession, candidate: Candidate, assessment_id: UUID
+        session: AsyncSession,
+        candidate: Candidate,
+        assessment_id: UUID,
+        *,
+        for_update: bool = False,
     ) -> tuple[Assessment, CandidateProgress | None]:
         """Assessment must belong to the package, be unsubmitted, and be inside the window.
 
@@ -476,6 +516,7 @@ class CandidateService:
             session: Async database session.
             candidate: Authenticated candidate.
             assessment_id: Module being opened, autosaved, or submitted.
+            for_update: Lock the progress row until the caller commits.
 
         Returns:
             ``(assessment, progress)``; progress is None if never opened.
@@ -489,7 +530,9 @@ class CandidateService:
         assessment = await CandidateService.require_assessment_in_package(
             session, candidate, assessment_id
         )
-        progress = await CandidateService._get_progress(session, candidate.id, assessment_id)
+        progress = await CandidateService._get_progress(
+            session, candidate.id, assessment_id, for_update=for_update
+        )
         ensure_not_submitted(progress)
         window = (
             await session.execute(
@@ -598,10 +641,11 @@ class CandidateService:
     @staticmethod
     async def autosave_response(session: AsyncSession, candidate: Candidate, save_data: ResponseSave):
         assessment, progress = await CandidateService.require_writable_assessment(
-            session, candidate, save_data.assessment_id
+            session, candidate, save_data.assessment_id, for_update=True
         )
         if is_strict_expired(assessment, progress, _utcnow()):
             raise AssessmentTimeExpiredError()
+        ensure_known_question(assessment, save_data.question_id)
 
         if not progress:
             progress = CandidateProgress(
@@ -668,13 +712,21 @@ class CandidateService:
             Tuple of (progress row, package_complete flag).
         """
         assessment, progress = await CandidateService.require_writable_assessment(
-            session, candidate, assessment_id
+            session, candidate, assessment_id, for_update=True
         )
         now = _utcnow()
         accept_pending = not is_strict_expired(assessment, progress, now)
+        known_ids = question_ids(assessment)
 
         for save_data in (pending_responses or []) if accept_pending else []:
             if save_data.assessment_id != assessment_id:
+                continue
+            if str(save_data.question_id) not in known_ids:
+                logger.warning(
+                    "submit_unknown_question_dropped candidate_id=%s assessment_id=%s",
+                    candidate.id,
+                    assessment_id,
+                )
                 continue
             elapsed = _elapsed_decimal(save_data.elapsed_seconds)
             existing = (
@@ -741,7 +793,12 @@ class CandidateService:
             duration = _assessment_duration(assessment)
             progress.overtime = bool(duration and server_seconds > duration)
 
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            # A concurrent first-time submit inserted the progress row first.
+            await session.rollback()
+            raise AssessmentAlreadySubmittedError() from exc
         await session.refresh(progress)
         package_complete = await CandidateService.is_package_complete(session, candidate)
         return progress, package_complete

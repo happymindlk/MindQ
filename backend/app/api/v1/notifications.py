@@ -6,6 +6,7 @@ from app.auth import get_current_hr_user, HRUserContext
 from app.services.candidate_service import CandidateService
 from app.services.package_service import PackageService
 from app.services.email_service import EmailService
+from app.security import email_limiter, enforce_user_rate_limit
 
 router = APIRouter()
 
@@ -18,6 +19,7 @@ async def nudge_candidate(
     db: AsyncSession = Depends(get_db),
 ):
     """Queue a reminder email to a candidate. HR-only, tenant-scoped."""
+    enforce_user_rate_limit(email_limiter, hr.user_id, "candidate_nudge")
     candidate = await CandidateService.get_candidate(db, id)
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")

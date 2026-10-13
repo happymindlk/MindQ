@@ -6,8 +6,7 @@ import ThemeToggle from '../components/ThemeToggle';
 import { useAuth } from '../context/useAuth';
 import { isOpsRole } from '../lib/auth-role';
 import { supabase } from '../lib/supabaseClient';
-
-const API_BASE = import.meta.env.VITE_API_URL || '';
+import { API_ORIGIN as API_BASE } from '../lib/api-origin';
 
 function requestKey(userId) {
   return `beta-access-requested:${userId}`;

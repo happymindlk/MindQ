@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Request
 
 from app.security import enforce_rate_limit, public_limiter
@@ -7,7 +7,7 @@ router = APIRouter()
 
 
 class ChatMessage(BaseModel):
-    message: str
+    message: str = Field(min_length=1, max_length=1000)
 
 
 class ChatReply(BaseModel):

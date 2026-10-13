@@ -54,6 +54,16 @@ class PackageClosedError(Exception):
         super().__init__(self.detail)
 
 
+class UnknownQuestionError(Exception):
+    """Candidate wrote an answer for a question id that is not in the module's bank."""
+
+    code = "UNKNOWN_QUESTION"
+    detail = "Question is not part of this assessment."
+
+    def __init__(self) -> None:
+        super().__init__(self.detail)
+
+
 class AssessmentAlreadySubmittedError(Exception):
     """Writes and retakes are locked after a candidate submits."""
 

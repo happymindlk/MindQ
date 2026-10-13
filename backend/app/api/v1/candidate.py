@@ -26,6 +26,7 @@ from app.exceptions import (
     AssessmentTimeExpiredError,
     PackageClosedError,
     PackageNotOpenError,
+    UnknownQuestionError,
 )
 from app.security import enforce_rate_limit, login_limiter
 
@@ -46,6 +47,10 @@ def _raise_integrity(exc: Exception) -> NoReturn:
     if isinstance(exc, (PackageNotOpenError, PackageClosedError)):
         raise HTTPException(
             status_code=403, detail={"code": exc.code, "message": exc.detail}
+        ) from exc
+    if isinstance(exc, UnknownQuestionError):
+        raise HTTPException(
+            status_code=422, detail={"code": exc.code, "message": exc.detail}
         ) from exc
     raise exc
 
@@ -157,6 +162,7 @@ async def autosave(
         AssessmentTimeExpiredError,
         PackageNotOpenError,
         PackageClosedError,
+        UnknownQuestionError,
     ) as exc:
         _raise_integrity(exc)
     return {"id": str(resp.id), "saved_at": resp.saved_at}
@@ -201,10 +207,11 @@ async def submit_test(
                 package_title=package.title if package else "assessment package",
                 hr_name=corporate.name,
             )
+    # Scores stay server-side: echoing them lets candidates calibrate answers
+    # across modules or share keyed results.
     return {
         "assessment_id": str(progress.assessment_id),
         "status": progress.status,
-        "score": float(progress.score) if progress.score is not None else None,
         "completed_at": progress.completed_at,
         "jd_scoring_queued": package_complete,
     }

@@ -37,6 +37,7 @@ from app.services.report_synthesis import (
 )
 from app.services.scoring import _extract_answer, _normalize_answer_set
 from app.services.technical_eval import TechnicalEvalService
+from app.security import enforce_user_rate_limit, report_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +282,7 @@ async def get_candidate_report_data(
     Returns:
         Company/candidate metadata plus technical module and custom-question rows.
     """
+    enforce_user_rate_limit(report_limiter, hr.user_id, "report_data")
     candidate = (
         await db.execute(select(Candidate).where(Candidate.id == candidate_id))
     ).scalar_one_or_none()

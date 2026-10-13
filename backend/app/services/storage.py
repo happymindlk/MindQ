@@ -1,8 +1,9 @@
 """Cloudflare R2 object storage helpers (S3 API via boto3).
 
-Reports are archived under ``{corporate_id}/{candidate_id}.{ext}``.
-Corporate logos are stored under ``logos/{corporate_id}/{filename}`` and
-returned as public URLs based on ``settings.R2_PUBLIC_URL``.
+Reports are archived in the PRIVATE ``R2_REPORTS_BUCKET_NAME`` bucket under
+``{corporate_id}/{candidate_id}.{ext}`` and are only ever served through
+short-lived presigned URLs. Corporate logos are stored in the public
+``R2_BUCKET_NAME`` bucket under ``logos/{corporate_id}/{filename}``.
 """
 from __future__ import annotations
 
@@ -18,13 +19,15 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# SVG is excluded: it can carry script and external references, and logos are
+# served publicly and embedded into PDF reports.
 LOGO_ALLOWED_TYPES: dict[str, str] = {
     "image/png": "png",
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
     "image/webp": "webp",
-    "image/svg+xml": "svg",
 }
+MAX_REPORT_URL_TTL_SECONDS = 30 * 60
 LOGO_MAX_BYTES = 2 * 1024 * 1024  # 2 MiB
 _SAFE_STEM = re.compile(r"[^a-zA-Z0-9._-]+")
 
@@ -51,16 +54,36 @@ def validate_logo_upload(
     """
     normalized = (content_type or "").split(";")[0].strip().lower()
     if normalized not in LOGO_ALLOWED_TYPES:
-        raise LogoValidationError("Unsupported image type. Use PNG, JPEG, WebP, or SVG.")
+        raise LogoValidationError("Unsupported image type. Use PNG, JPEG, or WebP.")
     if not raw:
         raise LogoValidationError("Empty file")
     if len(raw) > LOGO_MAX_BYTES:
         raise LogoValidationError("Logo must be 2 MB or smaller")
+    if _sniff_image_type(raw) != LOGO_ALLOWED_TYPES[normalized]:
+        raise LogoValidationError("File content does not match the declared image type")
 
     original = (original_filename or "logo").rsplit(".", 1)[0]
     stem = _SAFE_STEM.sub("-", original).strip("-._") or "logo"
     ext = LOGO_ALLOWED_TYPES[normalized]
     return f"{stem}-{int(time())}.{ext}", normalized
+
+
+def _sniff_image_type(raw: bytes) -> str | None:
+    """Identify PNG / JPEG / WebP from magic bytes (the declared MIME proves nothing).
+
+    Args:
+        raw: Uploaded file bytes.
+
+    Returns:
+        ``"png"``, ``"jpg"``, ``"webp"``, or None when unrecognised.
+    """
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "webp"
+    return None
 
 
 def _report_key(corporate_id: UUID, candidate_id: UUID, is_pdf: bool) -> str:
@@ -97,10 +120,11 @@ def upload_report(
         is_pdf: When True, store as `.pdf`; otherwise `.html`.
 
     Returns:
-        Object key on success, or None when R2 is unconfigured / upload fails.
+        Object key on success, or None when the private reports bucket is
+        unconfigured / upload fails.
     """
-    if not settings.r2_configured:
-        logger.warning("R2 not configured; skipping report archive for %s", candidate_id)
+    if not _reports_bucket_safe():
+        logger.warning("Private reports bucket not configured; skipping report archive for %s", candidate_id)
         return None
 
     key = _report_key(corporate_id, candidate_id, is_pdf)
@@ -109,10 +133,11 @@ def upload_report(
     try:
         client = _s3_client()
         client.put_object(
-            Bucket=settings.R2_BUCKET_NAME,
+            Bucket=settings.R2_REPORTS_BUCKET_NAME.strip(),
             Key=key,
             Body=content,
             ContentType=content_type,
+            ContentDisposition=f'attachment; filename="report-{candidate_id}.{"pdf" if is_pdf else "html"}"',
         )
         return key
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - archiving is best-effort
@@ -158,33 +183,52 @@ def upload_logo(
         return None
 
 
+def _reports_bucket_safe() -> bool:
+    """True only when reports go to a dedicated bucket, never the public logo bucket."""
+    if not settings.r2_reports_configured:
+        return False
+    reports = settings.R2_REPORTS_BUCKET_NAME.strip()
+    if reports == settings.R2_BUCKET_NAME.strip() and settings.r2_public_base:
+        logger.error(
+            "R2_REPORTS_BUCKET_NAME equals the public logo bucket; refusing to store reports publicly"
+        )
+        return False
+    return True
+
+
 def get_report_download_url(
     corporate_id: UUID,
     candidate_id: UUID,
     is_pdf: bool = True,
-    expires_in: int = 900,
+    expires_in: int | None = None,
 ) -> str | None:
     """Return a time-limited presigned GET URL for an archived report.
+
+    Callers MUST have verified the requester may read ``candidate_id`` in
+    ``corporate_id`` before calling.
 
     Args:
         corporate_id: Tenant id used as the object prefix.
         candidate_id: Candidate id used as the object stem.
         is_pdf: Prefer `.pdf` object when True, else `.html`.
-        expires_in: URL lifetime in seconds (default 15 minutes).
+        expires_in: URL lifetime in seconds; defaults to ``REPORT_URL_TTL_SECONDS``
+            and is capped at 30 minutes.
 
     Returns:
-        Presigned HTTPS URL, or None when R2 is unconfigured / signing fails.
+        Presigned HTTPS URL, or None when the private bucket is unconfigured / signing fails.
     """
-    if not settings.r2_configured:
+    if not _reports_bucket_safe():
         return None
 
+    ttl = int(expires_in or settings.REPORT_URL_TTL_SECONDS)
+    ttl = max(60, min(ttl, MAX_REPORT_URL_TTL_SECONDS))
     key = _report_key(corporate_id, candidate_id, is_pdf)
     try:
         client = _s3_client()
         return client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": settings.R2_BUCKET_NAME, "Key": key},
-            ExpiresIn=expires_in,
+            Params={"Bucket": settings.R2_REPORTS_BUCKET_NAME.strip(), "Key": key},
+            ExpiresIn=ttl,
         )
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001
         logger.warning("Report presign failed for %s: %s", key, exc)

@@ -38,16 +38,29 @@ app = FastAPI(
     description="MindQ Psychometric Assessment Platform API — Create, administer, and analyze psychological assessments.",
     version="1.0.0",
     lifespan=lifespan,
+    # The schema maps every route and payload; only expose it on dev stacks.
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url="/redoc" if settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
-app.add_middleware(SecurityHeadersMiddleware)
+# Build allowed origins combining settings + staging domain
+allowed_origins = list(settings.cors_origins_list) if hasattr(settings, "cors_origins_list") else []
+for domain in [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://mindq.pages.dev",
+]:
+    if domain not in allowed_origins:
+        allowed_origins.append(domain)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
-    expose_headers=["X-Request-Id", "X-Report-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Request-Id", "X-Report-Type", "X-Jd-Fit-Status"],
 )
 
 app.include_router(api_router, prefix="/api/v1")
@@ -83,6 +96,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 @app.get("/", tags=["health"])
 async def root():
     """Visiting :8000 in a browser is not the app. Point people at the UI."""
+    if not settings.DEBUG:
+        return {"service": settings.PROJECT_NAME, "health": "/health"}
     return {
         "service": settings.PROJECT_NAME,
         "health": "/health",
@@ -94,8 +109,4 @@ async def root():
 
 @app.get("/health", tags=["health"])
 async def health_check():
-    return {
-        "status": "healthy",
-        "service": settings.PROJECT_NAME,
-        "debug": settings.DEBUG,
-    }
+    return {"status": "healthy", "service": settings.PROJECT_NAME}

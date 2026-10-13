@@ -37,7 +37,13 @@ from app.schemas.client_package import (
     ClientSessionResponse,
     TechnicalReportData,
 )
-from app.security import enforce_rate_limit, login_limiter, public_limiter
+from app.security import (
+    enforce_rate_limit,
+    enforce_user_rate_limit,
+    login_limiter,
+    public_limiter,
+    report_limiter,
+)
 from app.services.client_package import ClientPackageService
 
 logger = logging.getLogger("app.client")
@@ -162,6 +168,7 @@ async def client_scorecard(
     Returns:
         Technical assessments + overall JD-fit fields only.
     """
+    enforce_user_rate_limit(report_limiter, client.user_id, "client_scorecard")
     try:
         return await ClientPackageService.get_client_scorecard(
             db, candidate_id, client.corporate_id
@@ -192,6 +199,7 @@ async def client_report_data(
     Returns:
         Report data with module-level psychometric scores only (no item data).
     """
+    enforce_user_rate_limit(report_limiter, client.user_id, "client_report_data")
     candidate = (
         await db.execute(
             select(Candidate).where(

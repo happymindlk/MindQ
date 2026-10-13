@@ -11,7 +11,7 @@ from fastapi import HTTPException, Request
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.config import Settings
+from app.config import Settings, settings as app_settings
 
 logger = logging.getLogger("app.security")
 
@@ -65,6 +65,11 @@ def assert_production_ready(settings: Settings) -> None:
     origins = settings.cors_origins_list
     if not origins:
         errors.append("CORS_ORIGINS must list at least one allowed origin when DEBUG=false")
+    elif any(o == "*" or "*" in o for o in origins):
+        # Starlette reflects the caller's Origin for "*" when credentials are allowed.
+        errors.append("CORS_ORIGINS must not contain wildcards when DEBUG=false")
+    elif any(o.startswith("http://") and "localhost" not in o and "127.0.0.1" not in o for o in origins):
+        errors.append("CORS_ORIGINS must use https:// for non-local origins when DEBUG=false")
     else:
         localhost_only = all(
             o.startswith("http://localhost") or o.startswith("http://127.0.0.1")
@@ -75,6 +80,13 @@ def assert_production_ready(settings: Settings) -> None:
                 "CORS_ORIGINS must include the production frontend origin "
                 "(not localhost-only) when DEBUG=false"
             )
+
+    reports_bucket = settings.R2_REPORTS_BUCKET_NAME.strip()
+    if reports_bucket and reports_bucket == settings.R2_BUCKET_NAME.strip() and settings.r2_public_base:
+        errors.append(
+            "R2_REPORTS_BUCKET_NAME must be a private bucket distinct from the public "
+            "logo bucket (R2_BUCKET_NAME) when DEBUG=false"
+        )
 
     if errors:
         raise RuntimeError("Unsafe production configuration:\n- " + "\n- ".join(errors))
@@ -123,16 +135,42 @@ class RateLimiter:
 login_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
 # Public capability URLs / spam surfaces: 60 / minute per IP.
 public_limiter = RateLimiter(max_requests=60, window_seconds=60)
+# Endpoints that can trigger paid Gemini calls or PDF rendering (denial-of-wallet).
+report_limiter = RateLimiter(max_requests=20, window_seconds=10 * 60)
+# Outbound email triggers (nudges, invites): stop HR accounts being used as a spam relay.
+email_limiter = RateLimiter(max_requests=30, window_seconds=60 * 60)
+# Invites are legitimately bulk (a hiring round), so the budget is higher than nudges.
+invite_limiter = RateLimiter(max_requests=200, window_seconds=60 * 60)
 
 
-def client_ip(request: Request) -> str:
-    """Best-effort client IP (honors first X-Forwarded-For hop when present)."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip() or "unknown"
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
+def client_ip(request: Request, config: Settings | None = None) -> str:
+    """Resolve the caller's IP without trusting client-forgeable headers.
+
+    ``X-Forwarded-For`` is only read when ``TRUSTED_PROXY_HOPS`` > 0, and then
+    the entry appended by the outermost trusted proxy is used (not the
+    left-most, which the client controls).
+
+    Args:
+        request: Incoming request.
+        config: Settings override (tests); defaults to the app settings.
+
+    Returns:
+        Client IP string, or ``"unknown"``.
+    """
+    cfg = config or app_settings
+    peer = request.client.host if request.client and request.client.host else "unknown"
+    hops = max(0, int(cfg.TRUSTED_PROXY_HOPS))
+    if hops == 0:
+        return peer
+    header_name = (cfg.CLIENT_IP_HEADER or "").strip()
+    if header_name:
+        edge_ip = (request.headers.get(header_name) or "").strip()
+        if edge_ip:
+            return edge_ip
+    forwarded = [p.strip() for p in (request.headers.get("x-forwarded-for") or "").split(",") if p.strip()]
+    if len(forwarded) >= hops:
+        return forwarded[-hops]
+    return peer
 
 
 def enforce_rate_limit(limiter: RateLimiter, request: Request, bucket: str) -> None:
@@ -144,6 +182,20 @@ def enforce_rate_limit(limiter: RateLimiter, request: Request, bucket: str) -> N
         bucket: Logical route group (e.g. ``candidate_login``).
     """
     limiter.check(f"{bucket}:{client_ip(request)}")
+
+
+def enforce_user_rate_limit(limiter: RateLimiter, principal: object, bucket: str) -> None:
+    """Apply a named rate-limit bucket keyed by an authenticated principal.
+
+    Keying on the user id (not IP) means rotating IPs cannot multiply the
+    budget for an authenticated account.
+
+    Args:
+        limiter: Limiter instance.
+        principal: Authenticated identity (UUID or str).
+        bucket: Logical route group (e.g. ``report_download``).
+    """
+    limiter.check(f"{bucket}:user:{principal}")
 
 
 SECURITY_HEADERS = {

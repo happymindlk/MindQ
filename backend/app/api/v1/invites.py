@@ -11,6 +11,7 @@ from app.models.package import Package
 from app.schemas.candidate import CandidateInviteRequest, CandidateInviteResponse
 from app.services.candidate_service import CandidateService
 from app.services.email_service import EmailService
+from app.security import enforce_user_rate_limit, invite_limiter
 
 router = APIRouter()
 
@@ -26,6 +27,7 @@ async def invite_candidate(
     Tenant is the package's corporate_id. HR may only invite within their
     own tenant; ops may invite for any company package.
     """
+    enforce_user_rate_limit(invite_limiter, hr.user_id, "candidate_invite")
     if not is_ops_role(hr.role) and body.corporate_id != hr.corporate_id:
         raise HTTPException(status_code=403, detail="corporate_id does not match session")
 

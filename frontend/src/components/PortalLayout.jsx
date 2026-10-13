@@ -3,6 +3,7 @@ import { Outlet, Link } from 'react-router-dom';
 import { Brain } from 'lucide-react';
 import SupportModal from './SupportModal';
 import ToastProvider from './ui/Toast';
+import RouteErrorBoundary from './route-error-boundary';
 import ThemeToggle from './ThemeToggle';
 
 /**
@@ -37,7 +38,9 @@ export default function PortalLayout() {
 
         <main className="flex-1 flex flex-col items-center p-3 sm:p-4">
           <div className="w-full max-w-3xl flex-1 flex flex-col">
-            <Outlet />
+            <RouteErrorBoundary>
+              <Outlet />
+            </RouteErrorBoundary>
           </div>
         </main>
 

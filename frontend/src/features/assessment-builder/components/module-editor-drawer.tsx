@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AlertTriangle, Archive, GitBranchPlus, Image as ImageIcon, Lock, Pencil, Plus, Rocket, Trash2 } from 'lucide-react';
-import { ApiError } from '../api/api-error';
+import { ApiError } from '../../../lib/api-error';
 import type { StorageClient } from '../api/media-upload';
 import { useBuilderToast } from '../hooks/use-builder-toast';
 import { useModuleDetail } from '../hooks/use-module-detail';

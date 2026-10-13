@@ -4,8 +4,7 @@ import {
   readClientSession,
   writeClientSession,
 } from '../pages/client/client-session';
-
-const API_BASE = import.meta.env.VITE_API_URL || '';
+import { API_ORIGIN as API_BASE } from './api-origin';
 
 export class ClientAuthError extends Error {
   constructor(message = 'Your session has expired. Please sign in again.') {

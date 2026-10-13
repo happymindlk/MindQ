@@ -13,7 +13,7 @@ alter table public.packages
 
 -- Backfill unique secrets for existing packages.
 update public.packages
-set track_secret = encode(gen_random_bytes(24), 'hex')
+set track_secret = encode(extensions.gen_random_bytes(24), 'hex')
 where track_secret is null;
 
 alter table public.packages

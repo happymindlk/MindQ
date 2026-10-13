@@ -7,8 +7,9 @@ import DataTable from '../../components/ui/DataTable';
 import EmptyState from '../../components/ui/EmptyState';
 import PageHeader from '../../components/ui/PageHeader';
 import { SkeletonTable } from '../../components/ui/Skeleton';
+import { API_ORIGIN } from '../../lib/api-origin';
 
-const API_BASE = `${import.meta.env.VITE_API_URL || ''}/api/v1`;
+const API_BASE = `${API_ORIGIN}/api/v1`;
 
 function statusBadge(status) {
   if (status === 'completed') {
