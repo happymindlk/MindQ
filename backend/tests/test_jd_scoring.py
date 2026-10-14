@@ -1,11 +1,13 @@
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
-from app.prompts.jd_scoring import SYSTEM_INSTRUCTION, build_user_prompt
-from app.schemas.jd_evaluation import JdFitEvaluation
+from app.prompts.jd_scoring import PROMPT_VERSION, SYSTEM_INSTRUCTION, build_user_prompt
+from app.schemas.jd_evaluation import ReportSynthesis
 from app.services.jd_scoring import (
     EVAL_STATUS_FAILED,
     EVAL_STATUS_OK,
@@ -17,9 +19,11 @@ from app.services.jd_scoring import (
     parse_evaluation_json,
     resolve_job_description,
     score_against_jd,
+    synthesis_cache_key,
     JdScoringService,
 )
-from app.services.report_service import _env
+from app.services.report_service import ReportService
+from app.services.report_synthesis import ModuleOutcome
 
 
 def _assessment(questions, title="Math"):
@@ -35,40 +39,81 @@ LEAKY_MCQ = {
     "is_correct": True,
 }
 
-VALID_FIT = {
-    "overall_fit": 72,
-    "summary": "Solid quantitative fit with thin written evidence.",
-    "strengths": ["Accurate MCQ performance"],
-    "risks": ["No open-ended depth"],
-    "hiring_recommendation": "consider",
-    "competencies": [{"name": "Quantitative", "score": 80}],
-    "per_assessment": [{"title": "Math", "fit": 80, "notes": "Score-led."}],
+VALID_SYNTHESIS = {
+    "executive_summary": "Solid quantitative reasoning with thin written evidence.",
+    "strengths": ["Accurate numerical reasoning under time pressure."],
+    "risks_and_antipatterns": ["Limited open-ended depth."],
+    "competency_breakdown": [
+        {
+            "assessment_key": "A1",
+            "assessment_name": "Math",
+            "performance_summary": "Scored 80%, indicating strong numerical reasoning.",
+        }
+    ],
 }
 
 LEGACY_FIT = {
     "overall_fit": 72,
     "summary": "Solid quantitative fit with thin written evidence.",
     "strengths": ["Accurate MCQ performance"],
-    "gaps": ["No open-ended depth"],
-    "per_assessment": [{"title": "Math", "fit": 80, "notes": "Score-led."}],
+    "risks": ["No open-ended depth"],
+    "hiring_recommendation": "consider",
+    "competencies": [{"name": "Quantitative", "score": 80}],
 }
+
+
+def _prompt(**overrides):
+    kwargs = {
+        "target_role": "Backend Engineer",
+        "job_description": "Backend engineer",
+        "candidate_name": "Pat",
+        "package_title": "Eng pack",
+        "assessment_scores_json": '[{"assessment_key":"A1","score":80}]',
+        "evidence_json": '{"title":"Math"}',
+    }
+    kwargs.update(overrides)
+    return build_user_prompt(**kwargs)
 
 
 def test_prompt_does_not_embed_json_schema():
     assert '"type": "object"' not in SYSTEM_INSTRUCTION
     assert "properties" not in SYSTEM_INSTRUCTION
-    prompt = build_user_prompt(
-        job_description="Backend engineer",
-        candidate_name="Pat",
-        package_title="Eng pack",
-        evidence_json='{"title":"Math"}',
-    )
+    prompt = _prompt()
     assert "Backend engineer" in prompt
     assert "Pat" in prompt
     assert '"type": "object"' not in prompt
     assert "required" not in prompt
     assert "interview_questions" not in SYSTEM_INSTRUCTION
-    assert "interview follow-up" in SYSTEM_INSTRUCTION
+    assert "Do not generate interview questions" in SYSTEM_INSTRUCTION
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "Do not include any overall hiring recommendation (such as 'Hire', 'Strong Hire', "
+        "or 'Do Not Hire') and do not generate a 'Candidate Fit' score.",
+        "For each assessment in the competency breakdown, generate exactly one analytical "
+        "sentence summarizing the candidate's performance based on their score.",
+        "Generate an executive summary and detailed bullet points for Strengths and "
+        "Risks/Anti-patterns.",
+    ],
+)
+def test_system_instruction_contains_required_directives_verbatim(instruction):
+    assert instruction in SYSTEM_INSTRUCTION
+
+
+def test_prompt_includes_target_role_and_score_table():
+    prompt = _prompt()
+    assert "Target role: Backend Engineer" in prompt
+    assert '"assessment_key":"A1"' in prompt
+
+
+def test_prompt_falls_back_to_package_title_without_role():
+    assert "Target role: Eng pack" in _prompt(target_role="  ")
+
+
+def test_prompt_version_is_report_synthesis():
+    assert PROMPT_VERSION.startswith("mindq-report")
 
 
 def test_build_evidence_strips_answer_keys():
@@ -106,21 +151,8 @@ def test_build_evidence_stringifies_nested_answer_objects():
         candidate_name="Pat",
         package_title="Pkg",
         evidence=evidence,
-        complete=lambda _p: json.dumps(VALID_FIT),
+        complete=lambda _p: json.dumps(VALID_SYNTHESIS),
     )
-    assessment = _assessment([LEAKY_MCQ])
-    progress = SimpleNamespace(
-        assessment_id=assessment.id, status="COMPLETED", score=100
-    )
-    response = SimpleNamespace(
-        assessment_id=assessment.id, question_id="q1", response={"answer": "4"}
-    )
-    evidence = build_evidence([assessment], [progress], [response])
-    dumped = json.dumps(evidence)
-    assert "correct_answer" not in dumped
-    assert "is_correct" not in dumped
-    assert evidence[0]["mcq"][0]["selected"] == "4"
-    assert evidence[0]["mcq_score"] == 100.0
 
 
 def test_score_against_jd_rejects_leaked_key_fields():
@@ -130,7 +162,7 @@ def test_score_against_jd_rejects_leaked_key_fields():
             candidate_name="Pat",
             package_title="Pkg",
             evidence=[{"correct_answer": "4"}],
-            complete=lambda _prompt: json.dumps(VALID_FIT),
+            complete=lambda _prompt: json.dumps(VALID_SYNTHESIS),
         )
 
 
@@ -150,9 +182,9 @@ def test_score_against_jd_allows_correct_answer_in_prose():
                 ],
             }
         ],
-        complete=lambda _prompt: json.dumps(VALID_FIT),
+        complete=lambda _prompt: json.dumps(VALID_SYNTHESIS),
     )
-    assert result.overall_fit == 72
+    assert result.executive_summary.startswith("Solid quantitative")
 
 
 def test_score_against_jd_parses_structured_output():
@@ -160,24 +192,47 @@ def test_score_against_jd_parses_structured_output():
 
     def complete(prompt: str) -> str:
         captured["prompt"] = prompt
-        return json.dumps(VALID_FIT)
+        return json.dumps(VALID_SYNTHESIS)
 
     result = score_against_jd(
         job_description="Backend engineer. Python, Postgres.",
         candidate_name="Pat",
         package_title="Eng pack",
         evidence=[{"title": "Math", "mcq_score": 80, "mcq": [], "open_ended": [], "likert": []}],
+        assessment_scores=[
+            {"assessment_key": "A1", "assessment_name": "Math", "category": "Cognitive", "score": 80.0}
+        ],
+        target_role="Backend Engineer",
         complete=complete,
     )
-    assert result.overall_fit == 72
+    assert result.summaries_by_key() == {
+        "A1": "Scored 80%, indicating strong numerical reasoning."
+    }
     assert "correct_answer" not in captured["prompt"]
     assert "Backend engineer" in captured["prompt"]
+    assert '"category": "Cognitive"' in captured["prompt"]
+
+
+def test_score_against_jd_logs_missing_assessment_summaries(caplog):
+    result = score_against_jd(
+        job_description="Role",
+        candidate_name="Pat",
+        package_title="Pkg",
+        evidence=[],
+        assessment_scores=[
+            {"assessment_key": "A1", "assessment_name": "Math", "category": "Cognitive", "score": 80.0},
+            {"assessment_key": "A2", "assessment_name": "SQL", "category": "Technical", "score": 40.0},
+        ],
+        complete=lambda _p: json.dumps(VALID_SYNTHESIS),
+    )
+    assert "A2" not in result.summaries_by_key()
+    assert "report_synthesis_missing_summaries" in caplog.text
 
 
 def test_parse_evaluation_json_strips_markdown_fences():
-    fenced = "```json\n" + json.dumps(VALID_FIT) + "\n```"
+    fenced = "```json\n" + json.dumps(VALID_SYNTHESIS) + "\n```"
     result = parse_evaluation_json(fenced)
-    assert result.overall_fit == 72
+    assert result.strengths == ["Accurate numerical reasoning under time pressure."]
 
 
 def test_malformed_gemini_json_raises():
@@ -191,10 +246,47 @@ def test_malformed_gemini_json_raises():
         )
 
 
-def test_fit_bounds_enforced():
-    bad = {**VALID_FIT, "overall_fit": 140}
-    with pytest.raises(Exception):
-        JdFitEvaluation.model_validate(bad)
+def test_synthesis_drops_hallucinated_fit_and_recommendation():
+    hallucinated = {
+        **VALID_SYNTHESIS,
+        "overall_fit": 91,
+        "hiring_recommendation": "strong_hire",
+        "interview_questions": ["Tell me about yourself."],
+    }
+    dumped = ReportSynthesis.model_validate(hallucinated).model_dump()
+    assert set(dumped) == {
+        "executive_summary",
+        "strengths",
+        "risks_and_antipatterns",
+        "competency_breakdown",
+    }
+
+
+def test_synthesis_requires_executive_summary():
+    with pytest.raises(ValidationError):
+        ReportSynthesis.model_validate({**VALID_SYNTHESIS, "executive_summary": ""})
+
+
+def test_legacy_jd_fit_payload_is_not_a_valid_synthesis():
+    with pytest.raises(ValidationError):
+        ReportSynthesis.model_validate(LEGACY_FIT)
+
+
+def test_multi_sentence_performance_summary_is_truncated_to_one():
+    payload = {
+        **VALID_SYNTHESIS,
+        "competency_breakdown": [
+            {
+                "assessment_key": "A1",
+                "assessment_name": "Math",
+                "performance_summary": "Scored 3.5 out of 5 on reasoning. Recommend hire.",
+            }
+        ],
+    }
+    result = ReportSynthesis.model_validate(payload)
+    assert result.competency_breakdown[0].performance_summary == (
+        "Scored 3.5 out of 5 on reasoning."
+    )
 
 
 @pytest.mark.asyncio
@@ -209,6 +301,24 @@ async def test_get_or_evaluate_skips_without_jd_or_role():
     )
     assert evaluation is None
     assert status == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_get_or_evaluate_skips_without_completed_assessments():
+    def complete(_prompt: str) -> str:
+        raise AssertionError("no completed assessments must not call Gemini")
+
+    evaluation, status = await JdScoringService.get_or_evaluate(
+        None,
+        candidate=SimpleNamespace(id=uuid4(), full_name="Pat"),
+        package=SimpleNamespace(description="Ops lead", title="Ops", target_role="Ops"),
+        assessments=[],
+        progresses=[],
+        responses=[],
+        outcomes=[],
+        complete=complete,
+    )
+    assert (evaluation, status) == (None, "skipped")
 
 
 def test_resolve_job_description_prefers_description():
@@ -228,87 +338,74 @@ def test_jd_hash_is_stable():
     assert hash_job_description("  Hello \n") == hash_job_description("Hello")
 
 
-def test_legacy_gaps_payload_maps_to_risks():
-    result = JdFitEvaluation.model_validate(LEGACY_FIT)
-    assert result.risks == ["No open-ended depth"]
-    assert result.hiring_recommendation == "consider"
-    assert result.competencies[0].name == "Math"
-    assert result.competencies[0].score == 80
-
-
-def test_legacy_interview_questions_are_dropped():
-    stale = {
-        **VALID_FIT,
-        "interview_questions": ["Walk me through a production incident you owned."],
+def _report(**overrides):
+    report = {
+        "candidate_id": str(uuid4()),
+        "candidate_full_name": "Pat Doe",
+        "candidate_email": "pat@example.com",
+        "target_role": "Backend Engineer",
+        "company_name": "Acme",
+        "company_logo_url": None,
+        "completed_at": None,
+        "synthesis_status": "ok",
+        "total_assessments_completed": 2,
+        "category_averages": {"Cognitive": 80.0, "Technical": 62.5},
+        "executive_summary": "Solid quantitative reasoning with thin written evidence.",
+        "strengths": ["Accurate numerical reasoning."],
+        "risks_and_antipatterns": ["Limited open-ended depth."],
+        "competency_breakdown": [
+            {
+                "category": "Cognitive",
+                "assessment_name": "Math",
+                "score": 80.0,
+                "performance_summary": "Scored 80%, indicating strong numerical reasoning.",
+            }
+        ],
+        "custom_questions": [],
     }
-    result = JdFitEvaluation.model_validate(stale)
-    dumped = result.model_dump()
-    assert "interview_questions" not in dumped
-    assert result.overall_fit == 72
+    report.update(overrides)
+    return report
 
 
-def test_report_html_includes_jd_fit_section():
-    html = _env.get_template("report.html").render(
-        candidate_name="Pat",
-        package_title="Eng pack",
-        results=[{"assessment": "Math", "score": 80.0, "status": "COMPLETED"}],
-        jd_fit=VALID_FIT,
-        jd_status="generated",
-        mcq_score=80.0,
-        recommendation_label="Consider",
-        recommendation_key="consider",
-        corporate_name="Acme",
-        corporate_logo_url="",
-        generated_at="now",
-        current_year=2026,
+def test_report_html_renders_synthesis_without_fit_or_recommendation():
+    html = ReportService.render_report_html(_report())
+    assert "Assessment Report" in html
+    assert "Mind Q Report - " in html
+    assert "Solid quantitative reasoning" in html
+    assert "62.5%" in html
+    assert "strong numerical reasoning" in html
+    assert "Risks &amp; Anti-patterns" in html
+    assert "Overall Fit" not in html
+    assert "Recommendation" not in html
+    assert "MCQ Score" not in html
+    assert "Assess Pulse" not in html
+    assert "AI " not in html
+    assert "auto-generated Mind Queue report" in html
+    assert "not an indication of whether the candidate is a good fit" in html
+
+
+def test_report_html_shows_na_for_categories_without_assessments():
+    html = ReportService.render_report_html(_report(category_averages={"Cognitive": 80.0}))
+    assert "80.0%" in html
+    assert html.count("N/A") == 3
+    for category in ("Cognitive", "Personality", "Behavioral", "Technical"):
+        assert category in html
+
+
+def test_report_html_skipped_synthesis():
+    html = ReportService.render_report_html(
+        _report(
+            synthesis_status="skipped",
+            executive_summary="",
+            strengths=[],
+            risks_and_antipatterns=[],
+            competency_breakdown=[],
+            category_averages={},
+            total_assessments_completed=0,
+        )
     )
-    assert "Executive Fit Summary" in html
-    assert "Solid quantitative fit" in html
-    assert "72%" in html
-    assert "Assess Pulse" in html
-    assert "Interview Guide" not in html
-    assert "Risks" in html
-
-
-def test_report_html_omits_stale_interview_guide():
-    stale = {
-        **VALID_FIT,
-        "interview_questions": ["How do you validate API contracts under time pressure?"],
-    }
-    html = _env.get_template("report.html").render(
-        candidate_name="Pat",
-        package_title="Eng pack",
-        results=[{"assessment": "Math", "score": 80.0, "status": "COMPLETED"}],
-        jd_fit=stale,
-        jd_status="generated",
-        mcq_score=80.0,
-        recommendation_label="Consider",
-        recommendation_key="consider",
-        corporate_name="Acme",
-        corporate_logo_url="",
-        generated_at="now",
-        current_year=2026,
-    )
-    assert "Interview Guide" not in html
-    assert "validate API contracts" not in html
-
-
-def test_report_html_skipped_jd():
-    html = _env.get_template("report.html").render(
-        candidate_name="Pat",
-        package_title="Eng pack",
-        results=[],
-        jd_fit=None,
-        jd_status="skipped",
-        mcq_score=None,
-        recommendation_label="Consider",
-        recommendation_key="consider",
-        corporate_name="",
-        corporate_logo_url="",
-        generated_at="now",
-        current_year=2026,
-    )
-    assert "No job description" in html
+    assert "needs a target role" in html
+    assert "No scored assessments" in html
 
 
 def test_build_evidence_includes_benchmark_rubric():
@@ -375,7 +472,7 @@ def test_complete_profile_replaces_raw_likert():
         candidate_name="Pat",
         package_title="Pkg",
         evidence=evidence,
-        complete=lambda _p: json.dumps(VALID_FIT),
+        complete=lambda _p: json.dumps(VALID_SYNTHESIS),
     )
 
 
@@ -513,7 +610,7 @@ def test_sjt_crt_evidence_passes_leak_guard_end_to_end():
 
     def complete(prompt: str) -> str:
         captured["prompt"] = prompt
-        return json.dumps(VALID_FIT)
+        return json.dumps(VALID_SYNTHESIS)
 
     score_against_jd(
         job_description="Ops lead",
@@ -568,7 +665,20 @@ class FakeSession:
         self.rollbacks += 1
 
 
-def _scoring_kwargs():
+def _outcomes(score: float = 80.0):
+    return [
+        ModuleOutcome(
+            key="A1",
+            id=uuid4(),
+            title="Math",
+            category="cognitive",
+            score=score,
+            completed_at=datetime(2026, 10, 1, tzinfo=timezone.utc),
+        )
+    ]
+
+
+def _scoring_kwargs(outcomes=None):
     candidate = SimpleNamespace(
         id=uuid4(), full_name="Pat", corporate_id=uuid4(), package_id=uuid4()
     )
@@ -579,6 +689,7 @@ def _scoring_kwargs():
         "assessments": [],
         "progresses": [],
         "responses": [],
+        "outcomes": outcomes if outcomes is not None else _outcomes(),
     }
 
 
@@ -617,7 +728,7 @@ async def test_get_or_evaluate_persists_failed_status_on_malformed_json():
 @pytest.mark.asyncio
 async def test_get_or_evaluate_failure_clears_stale_payload_for_changed_jd():
     stale = SimpleNamespace(
-        jd_hash="old-jd", status=EVAL_STATUS_OK, payload=VALID_FIT, overall_fit=72,
+        jd_hash="old-jd", status=EVAL_STATUS_OK, payload=VALID_SYNTHESIS, overall_fit=72,
         last_error=None, model="m", generated_at=None,
     )
     session = FakeSession(existing=stale)
@@ -634,7 +745,7 @@ async def test_get_or_evaluate_failure_clears_stale_payload_for_changed_jd():
 async def test_get_or_evaluate_retries_failed_row_and_records_served_model():
     kwargs = _scoring_kwargs()
     failed = SimpleNamespace(
-        jd_hash=hash_job_description(kwargs["package"].description),
+        jd_hash=synthesis_cache_key(kwargs["package"].description, kwargs["outcomes"]),
         status=EVAL_STATUS_FAILED, payload={}, overall_fit=None,
         last_error="503", model="gemini-3.6-flash", generated_at=None,
     )
@@ -643,17 +754,19 @@ async def test_get_or_evaluate_retries_failed_row_and_records_served_model():
 
     def complete(_prompt: str) -> str:
         calls["n"] += 1
-        return ModelText.tagged(json.dumps(VALID_FIT), "gemini-3.5-flash")
+        return ModelText.tagged(json.dumps(VALID_SYNTHESIS), "gemini-3.5-flash")
 
     evaluation, status = await JdScoringService.get_or_evaluate(
         session, complete=complete, **kwargs
     )
     assert calls["n"] == 1
     assert status == "generated"
-    assert evaluation.overall_fit == 72
+    assert evaluation.executive_summary.startswith("Solid quantitative")
     assert failed.status == EVAL_STATUS_OK
     assert failed.last_error is None
+    assert failed.overall_fit is None
     assert failed.model == "gemini-3.5-flash"
+    assert "overall_fit" not in failed.payload
     assert evaluation_is_ok(failed)
 
 
@@ -661,8 +774,8 @@ async def test_get_or_evaluate_retries_failed_row_and_records_served_model():
 async def test_get_or_evaluate_cache_hit_skips_provider():
     kwargs = _scoring_kwargs()
     ok_row = SimpleNamespace(
-        jd_hash=hash_job_description(kwargs["package"].description),
-        status=EVAL_STATUS_OK, payload=VALID_FIT,
+        jd_hash=synthesis_cache_key(kwargs["package"].description, kwargs["outcomes"]),
+        status=EVAL_STATUS_OK, payload=VALID_SYNTHESIS,
     )
 
     def complete(_prompt: str) -> str:
@@ -672,7 +785,54 @@ async def test_get_or_evaluate_cache_hit_skips_provider():
         FakeSession(existing=ok_row), complete=complete, **kwargs
     )
     assert status == "cached"
-    assert evaluation.overall_fit == 72
+    assert evaluation.strengths == VALID_SYNTHESIS["strengths"]
+
+
+@pytest.mark.asyncio
+async def test_score_change_invalidates_cached_synthesis():
+    kwargs = _scoring_kwargs(outcomes=_outcomes(score=40.0))
+    ok_row = SimpleNamespace(
+        jd_hash=synthesis_cache_key(kwargs["package"].description, _outcomes(score=80.0)),
+        status=EVAL_STATUS_OK, payload=VALID_SYNTHESIS, overall_fit=None,
+        last_error=None, model="m", generated_at=None,
+    )
+    calls = {"n": 0}
+
+    def complete(_prompt: str) -> str:
+        calls["n"] += 1
+        return json.dumps(VALID_SYNTHESIS)
+
+    _evaluation, status = await JdScoringService.get_or_evaluate(
+        FakeSession(existing=ok_row), complete=complete, **kwargs
+    )
+    assert status == "generated"
+    assert calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_legacy_jd_fit_row_is_regenerated_not_served():
+    kwargs = _scoring_kwargs()
+    legacy = SimpleNamespace(
+        jd_hash=synthesis_cache_key(kwargs["package"].description, kwargs["outcomes"]),
+        status=EVAL_STATUS_OK, payload=LEGACY_FIT, overall_fit=72,
+        last_error=None, model="m", generated_at=None,
+    )
+    evaluation, status = await JdScoringService.get_or_evaluate(
+        FakeSession(existing=legacy),
+        complete=lambda _p: json.dumps(VALID_SYNTHESIS),
+        **kwargs,
+    )
+    assert status == "generated"
+    assert legacy.overall_fit is None
+    assert "hiring_recommendation" not in legacy.payload
+    assert evaluation.risks_and_antipatterns == ["Limited open-ended depth."]
+
+
+def test_cache_key_changes_with_prompt_inputs():
+    base = synthesis_cache_key("Role", _outcomes(80.0))
+    assert base == synthesis_cache_key("Role", _outcomes(80.0))
+    assert base != synthesis_cache_key("Other role", _outcomes(80.0))
+    assert base != synthesis_cache_key("Role", _outcomes(81.0))
 
 
 @pytest.mark.asyncio
@@ -686,6 +846,6 @@ async def test_failure_record_error_does_not_raise_into_report_path():
 
 
 def test_evaluation_is_ok_treats_legacy_rows_without_status_as_ok():
-    assert evaluation_is_ok(SimpleNamespace(payload=VALID_FIT))
+    assert evaluation_is_ok(SimpleNamespace(payload=VALID_SYNTHESIS))
     assert not evaluation_is_ok(None)
     assert not evaluation_is_ok(SimpleNamespace(status=EVAL_STATUS_OK, payload={}))

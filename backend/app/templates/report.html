@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Executive Fit Summary — {{ candidate_name }}</title>
+    <title>Mind Q Report - {{ report.candidate_full_name }}</title>
     <style>
         @page {
             size: A4;
             margin: 18mm 16mm 20mm 16mm;
             @bottom-center {
-                content: "Confidential — Assess Pulse";
+                content: "Confidential — MindQ";
                 font-size: 8pt;
                 color: #64748b;
             }
@@ -39,6 +39,10 @@
         }
         .subtitle { color: #64748b; font-size: 10pt; margin: 0 0 16px 0; }
 
+        .exec-card, .summary, .panel, .results-table tr, .footer {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
         .exec-card {
             width: 100%;
             border: 1px solid #e2e8f0;
@@ -52,7 +56,6 @@
             padding: 14px 16px;
             text-align: center;
             border-right: 1px solid #e2e8f0;
-            width: 33.33%;
         }
         .exec-inner td:last-child { border-right: none; }
         .metric-label {
@@ -68,17 +71,6 @@
             font-variant-numeric: tabular-nums;
             color: #0f172a;
         }
-        .pill {
-            display: inline-block;
-            padding: 4px 10px;
-            border-radius: 999px;
-            font-size: 9pt;
-            font-weight: 600;
-            border: 1px solid transparent;
-        }
-        .pill-strong_hire { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
-        .pill-consider { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
-        .pill-do_not_proceed { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
 
         h2 {
             font-size: 12pt;
@@ -93,30 +85,6 @@
             border-radius: 6px;
             padding: 12px 14px;
             margin-bottom: 8px;
-        }
-
-        .comp-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
-        .comp-table td { padding: 6px 0; vertical-align: middle; }
-        .comp-name { width: 28%; font-size: 9.5pt; color: #334155; padding-right: 10px; }
-        .comp-track {
-            height: 10px;
-            background: #e2e8f0;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        .comp-fill {
-            height: 100%;
-            background: #6b4ce8;
-            border-radius: 4px;
-        }
-        .comp-score {
-            width: 48px;
-            text-align: right;
-            font-variant-numeric: tabular-nums;
-            font-weight: 600;
-            font-size: 9.5pt;
-            color: #0f172a;
-            padding-left: 8px;
         }
 
         .two-col { width: 100%; border-collapse: collapse; margin-top: 4px; }
@@ -159,16 +127,27 @@
         .results-table td {
             padding: 7px 8px;
             border-bottom: 1px solid #f1f5f9;
+            vertical-align: top;
         }
+        .score-cell { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 
         .muted { color: #64748b; font-size: 9pt; }
+        .disclaimer {
+            margin-top: 24px;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            background: #f8fafc;
+            font-size: 8.5pt;
+            color: #334155;
+        }
         .footer {
-            margin-top: 28px;
+            margin-top: 20px;
             padding-top: 10px;
             border-top: 1px solid #e2e8f0;
             text-align: center;
         }
-        .ap-badge {
+        .mq-badge {
             display: inline-block;
             padding: 3px 10px;
             border-radius: 999px;
@@ -185,12 +164,12 @@
         <tr>
             <td>
                 {% if corporate_logo_url %}
-                <img class="logo-img" src="{{ corporate_logo_url }}" alt="{{ corporate_name or 'Corporate logo' }}" />
+                <img class="logo-img" src="{{ corporate_logo_url }}" alt="{{ report.company_name or 'Company logo' }}" />
                 {% else %}
-                <div class="brand-fallback">Assess Pulse</div>
+                <div class="brand-fallback">MindQ</div>
                 {% endif %}
-                {% if corporate_name %}
-                <div class="corp-name">{{ corporate_name }}</div>
+                {% if report.company_name %}
+                <div class="corp-name">{{ report.company_name }}</div>
                 {% endif %}
             </td>
             <td class="meta">
@@ -199,66 +178,75 @@
         </tr>
     </table>
 
-    <h1>Executive Fit Summary</h1>
-    <p class="subtitle">{{ candidate_name }} · {{ package_title }}</p>
+    <h1>Assessment Report</h1>
+    <p class="subtitle">
+        {{ report.candidate_full_name }} · {{ report.candidate_email }}{% if report.target_role %} · {{ report.target_role }}{% endif %}
+    </p>
 
     <div class="exec-card">
         <table class="exec-inner">
             <tr>
                 <td>
-                    <div class="metric-label">Overall Fit</div>
-                    <div class="metric-value">
-                        {% if jd_fit %}{{ jd_fit.overall_fit }}%{% else %}—{% endif %}
-                    </div>
+                    <div class="metric-label">Assessments Completed</div>
+                    <div class="metric-value">{{ report.total_assessments_completed }}</div>
                 </td>
+                {% for item in category_averages %}
                 <td>
-                    <div class="metric-label">MCQ Score</div>
-                    <div class="metric-value">
-                        {% if mcq_score is not none %}{{ mcq_score }}%{% else %}—{% endif %}
-                    </div>
+                    <div class="metric-label">{{ item.category }}</div>
+                    <div class="metric-value">{% if item.average is not none %}{{ '%.1f' | format(item.average) }}%{% else %}N/A{% endif %}</div>
                 </td>
-                <td>
-                    <div class="metric-label">Recommendation</div>
-                    {% if jd_fit %}
-                    <span class="pill pill-{{ recommendation_key }}">{{ recommendation_label }}</span>
-                    {% else %}
-                    <span class="muted">Unavailable</span>
-                    {% endif %}
-                </td>
+                {% endfor %}
             </tr>
         </table>
     </div>
 
-    {% if jd_fit %}
-    <h2>Executive Narrative</h2>
-    <div class="summary">{{ jd_fit.summary }}</div>
-
-    {% if jd_fit.competencies %}
-    <h2>Competency Breakdown</h2>
-    <table class="comp-table">
-        {% for c in jd_fit.competencies %}
-        <tr>
-            <td class="comp-name">{{ c.name }}</td>
-            <td>
-                <div class="comp-track">
-                    <div class="comp-fill" style="width: {{ c.score }}%;"></div>
-                </div>
-            </td>
-            <td class="comp-score">{{ c.score }}%</td>
-        </tr>
-        {% endfor %}
-    </table>
+    <h2>Executive Summary</h2>
+    {% if report.executive_summary %}
+    <div class="summary">{{ report.executive_summary }}</div>
+    {% elif report.synthesis_status == 'skipped' %}
+    <p class="muted">An executive summary needs a target role and at least one completed assessment.</p>
+    {% elif report.synthesis_status == 'failed' %}
+    <p class="muted">The executive summary was unavailable when this report was generated.</p>
+    {% else %}
+    <p class="muted">The executive summary is not available for this candidate yet.</p>
     {% endif %}
 
+    <h2>Competency Breakdown</h2>
+    {% if report.competency_breakdown %}
+    <table class="results-table">
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Assessment</th>
+                <th>Score</th>
+                <th>Performance Summary</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in report.competency_breakdown %}
+            <tr>
+                <td>{{ item.category }}</td>
+                <td>{{ item.assessment_name }}</td>
+                <td class="score-cell">{{ '%.1f' | format(item.score) }}%</td>
+                <td>{{ item.performance_summary }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No scored assessments have been completed yet.</p>
+    {% endif %}
+
+    {% if report.strengths or report.risks_and_antipatterns %}
     <h2>Analysis</h2>
     <table class="two-col">
         <tr>
             <td class="col-left">
                 <div class="panel">
                     <h3>Strengths</h3>
-                    {% if jd_fit.strengths %}
+                    {% if report.strengths %}
                     <ul>
-                        {% for item in jd_fit.strengths %}
+                        {% for item in report.strengths %}
                         <li>{{ item }}</li>
                         {% endfor %}
                     </ul>
@@ -269,10 +257,10 @@
             </td>
             <td class="col-right">
                 <div class="panel panel-risks">
-                    <h3>Risks &amp; Anti-Patterns</h3>
-                    {% if jd_fit.risks %}
+                    <h3>Risks &amp; Anti-patterns</h3>
+                    {% if report.risks_and_antipatterns %}
                     <ul>
-                        {% for item in jd_fit.risks %}
+                        {% for item in report.risks_and_antipatterns %}
                         <li>{{ item }}</li>
                         {% endfor %}
                     </ul>
@@ -283,38 +271,15 @@
             </td>
         </tr>
     </table>
-    {% elif jd_status == 'skipped' %}
-    <p class="muted">No job description was attached to this package, so JD fit was not scored.</p>
-    {% elif jd_status == 'failed' %}
-    <p class="muted">JD fit scoring was unavailable when this report was generated.</p>
-    {% else %}
-    <p class="muted">Executive fit analysis is not available for this candidate yet.</p>
     {% endif %}
 
-    <h2>Assessment Results</h2>
-    <table class="results-table">
-        <thead>
-            <tr>
-                <th>Assessment</th>
-                <th>Status</th>
-                <th>Score</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for r in results %}
-            <tr>
-                <td>{{ r.assessment }}</td>
-                <td>{{ r.status }}</td>
-                <td>{% if r.score is not none %}{{ r.score }}%{% else %}—{% endif %}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
     <div class="footer">
-        <span class="ap-badge">Assess Pulse</span>
+        <span class="mq-badge">MindQ</span>
         <p class="muted" style="margin-top: 8px;">
-            Generated by Assess Pulse · © {{ current_year }} Assess Pulse. All rights reserved.
+            This is an auto-generated Mind Queue report. This cannot be reproduced, edited or redistributed without the written consent of Mind Queue Private Limited.
+        </p>
+        <p class="disclaimer">
+            This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis over an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.
         </p>
     </div>
 </body>

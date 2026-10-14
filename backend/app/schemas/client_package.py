@@ -227,7 +227,7 @@ class ClientScorecardAssessment(BaseModel):
 
 
 class ClientScorecardResponse(BaseModel):
-    """Read-only Gemini scorecard with psychometric modules removed."""
+    """Read-only scorecard with psychometric modules removed (no fit or recommendation)."""
 
     candidate_id: UUID
     full_name: str
@@ -235,8 +235,6 @@ class ClientScorecardResponse(BaseModel):
     package_title: str
     pipeline_status: str
     avg_score: float | None = None
-    jd_fit: float | None = None
-    recommendation: str | None = None
     summary: str | None = None
     assessments: list[ClientScorecardAssessment] = Field(default_factory=list)
     evaluation: dict[str, Any] | None = None
@@ -255,7 +253,6 @@ class ClientPipelineRow(BaseModel):
     total_assessments: int = 0
     avg_score: float | None = None
     technical_score: float | None = None
-    jd_fit: float | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -606,102 +603,3 @@ class HrInviteResponse(BaseModel):
     success: bool = True
     message: str = "Access link sent"
     email: str | None = None
-
-
-class TechnicalReportModule(BaseModel):
-    """One technical assessment row for the printable report."""
-
-    id: UUID
-    title: str
-    score: float | None = None
-    status: str | None = None
-    completed_at: datetime | None = None
-
-
-class TechnicalReportCompetency(BaseModel):
-    """Named competency score for executive progress bars."""
-
-    name: str
-    score: float
-
-
-class TechnicalReportCustomQuestion(BaseModel):
-    """Sanitized custom / technical item evaluation (no answer keys)."""
-
-    id: str
-    prompt: str
-    question_type: str
-    score: float | None = None
-    response_summary: str | None = None
-    evaluated_competency: str | None = None
-    # Gemini / JD-fit notes for this item or its parent technical assessment.
-    ai_evaluation: str | None = None
-    # Discriminator from response JSONB: ``ok`` | ``failed`` (legacy ``unavailable``).
-    ai_eval_status: str | None = None
-    # Per-item Gemini scorecard bullets (not flattened into feedback).
-    scorecard: list[str] | None = None
-
-
-ReportCategoryKey = Literal["cognitive", "behavioral", "personality", "technical"]
-
-
-class ReportCompletedAssessment(BaseModel):
-    """A module the candidate completed, listed near the top of the report."""
-
-    id: UUID
-    title: str
-    category: ReportCategoryKey
-    category_label: str
-    completed_at: datetime | None = None
-
-
-class ReportAssessmentScore(BaseModel):
-    """Module-level score inside a competency group (no item-level data)."""
-
-    id: UUID
-    title: str
-    score: float | None = None
-
-
-class ReportCompetencyGroup(BaseModel):
-    """Cognitive / Behavioral / Personality / Technical sub-topic breakdown."""
-
-    key: ReportCategoryKey
-    label: str
-    average_score: float | None = None
-    assessments: list[ReportAssessmentScore] = Field(default_factory=list)
-    narrative: str
-
-
-class TechnicalReportData(BaseModel):
-    """MindQ Report payload for on-screen preview and client-side PDF export.
-
-    Psychometric modules contribute module-level scores only; item responses,
-    facet traits, and answer keys are never included.
-    """
-
-    candidate_id: UUID
-    company_name: str
-    candidate_name: str
-    candidate_email: str
-    target_role: str | None = None
-    completed_at: datetime | None = None
-    overall_technical_score: float | None = None
-    # Absolute https logo only (localhost filtered out for PDF safety).
-    company_logo_url: str | None = None
-    # JD-fit executive dashboard fields from Gemini evaluation payload.
-    overall_fit: float | None = None
-    recommendation_key: str | None = None
-    recommendation_label: str | None = None
-    mcq_score: float | None = None
-    strengths: list[str] = Field(default_factory=list)
-    risks: list[str] = Field(default_factory=list)
-    competencies: list[TechnicalReportCompetency] = Field(default_factory=list)
-    # Top-level Gemini executive summary (psychometric evidence already stripped).
-    ai_summary: str | None = None
-    # JD-fit synthesis outcome so the UI can tell "failed" apart from "not yet run".
-    jd_eval_status: Literal["ok", "failed", "skipped", "pending"] = "pending"
-    modules: list[TechnicalReportModule] = Field(default_factory=list)
-    custom_questions: list[TechnicalReportCustomQuestion] = Field(default_factory=list)
-    completed_assessments: list[ReportCompletedAssessment] = Field(default_factory=list)
-    competency_groups: list[ReportCompetencyGroup] = Field(default_factory=list)

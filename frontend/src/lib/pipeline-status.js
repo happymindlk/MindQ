@@ -5,7 +5,7 @@ export function pipelineStatus(row) {
   const completed = Number(row.completed_assessments) || 0;
   if (row.pipeline_status) return row.pipeline_status;
   if (total > 0 && completed >= total) {
-    return row.jd_fit != null ? 'completed' : 'scoring';
+    return row.evaluated ? 'completed' : 'scoring';
   }
   if (completed > 0 || row.logged_in_at) return 'scoring';
   return 'pending';

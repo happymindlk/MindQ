@@ -35,8 +35,8 @@ from app.schemas.client_package import (
     ClientPipelineRow,
     ClientScorecardResponse,
     ClientSessionResponse,
-    TechnicalReportData,
 )
+from app.schemas.mindq_report import MindQReportResponse
 from app.security import (
     enforce_rate_limit,
     enforce_user_rate_limit,
@@ -180,7 +180,7 @@ async def client_scorecard(
         raise HTTPException(status_code=503, detail=schema_drift_detail(exc)) from exc
 
 
-@router.get("/candidates/{candidate_id}/report-data", response_model=TechnicalReportData)
+@router.get("/candidates/{candidate_id}/report-data", response_model=MindQReportResponse)
 async def client_report_data(
     candidate_id: UUID,
     client: ClientUserContext = Depends(get_current_client_user),

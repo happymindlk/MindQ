@@ -1,7 +1,10 @@
-"""Job-description fit scoring (Gemini).
+"""MindQ Report synthesis (Gemini): executive summary, strengths, risks, and
+one sentence per completed assessment. No fit score, no hiring recommendation.
 
-Triggered after the last test is submitted (background) and again on HR report
-download (cache hit when possible). Answer keys are stripped from evidence.
+Triggered after the last test is submitted (background) and again on report
+view/download (cache hit when possible). Answer keys are stripped from evidence.
+The cache key covers the prompt version, the role brief, and the completed
+scores, so a prompt change or a re-graded assessment regenerates the synthesis.
 
 Outcomes are persisted on ``candidate_evaluations.status``: ``ok`` rows carry the
 payload; ``failed`` rows carry ``last_error`` and are retried on the next call.
@@ -33,10 +36,17 @@ from app.models.candidate_evaluation import CandidateEvaluation
 from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.models.package import Package
-from app.prompts.jd_scoring import SYSTEM_INSTRUCTION, build_user_prompt
+from app.prompts.jd_scoring import PROMPT_VERSION, SYSTEM_INSTRUCTION, build_user_prompt
 from app.schemas.candidate import CandidateQuestion
-from app.schemas.jd_evaluation import JD_FIT_JSON_SCHEMA, JdFitEvaluation
+from app.schemas.jd_evaluation import REPORT_SYNTHESIS_JSON_SCHEMA, ReportSynthesis
 from app.services.profiles import DerivedProfile
+from app.services.report_synthesis import (
+    ModuleOutcome,
+    build_module_outcomes,
+    load_catalog_categories,
+    outcomes_fingerprint,
+    prompt_assessments,
+)
 from app.services.scoring import _extract_answer, crt_credit, sjt_credit
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -85,6 +95,22 @@ def evaluation_is_ok(row: CandidateEvaluation | None) -> bool:
 
 def hash_job_description(job_description: str) -> str:
     return hashlib.sha256(job_description.strip().encode("utf-8")).hexdigest()
+
+
+def synthesis_cache_key(job_description: str, outcomes: list[ModuleOutcome]) -> str:
+    """Cache key for a stored synthesis.
+
+    Args:
+        job_description: Resolved role brief.
+        outcomes: Completed module outcomes the synthesis is written against.
+
+    Returns:
+        Hex SHA-256 over prompt version, role brief, and completed scores.
+    """
+    material = "\n".join(
+        (PROMPT_VERSION, hash_job_description(job_description), outcomes_fingerprint(outcomes))
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def resolve_job_description(package: Package | None) -> str:
@@ -292,7 +318,7 @@ def complete_with_gemini(user_prompt: str) -> str:
                 system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.2,
                 response_mime_type="application/json",
-                response_json_schema=JD_FIT_JSON_SCHEMA,
+                response_json_schema=REPORT_SYNTHESIS_JSON_SCHEMA,
             ),
         )
     except GeminiUnavailable as exc:
@@ -303,14 +329,14 @@ def complete_with_gemini(user_prompt: str) -> str:
     return ModelText.tagged(text, served_model(response, settings.GEMINI_MODEL))
 
 
-def parse_evaluation_json(raw: str) -> JdFitEvaluation:
+def parse_evaluation_json(raw: str) -> ReportSynthesis:
     """Accept raw JSON, including accidental markdown fences from the model."""
     text = (raw or "").strip()
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:].lstrip()
-    return JdFitEvaluation.model_validate_json(text)
+    return ReportSynthesis.model_validate_json(text)
 
 
 _ANSWER_KEY_FIELDS = frozenset({"correct_answer", "is_correct"})
@@ -336,31 +362,43 @@ def score_against_jd_with_model(
     candidate_name: str,
     package_title: str,
     evidence: list[dict[str, Any]],
+    assessment_scores: list[dict[str, Any]] | None = None,
+    target_role: str = "",
     complete: CompleteFn | None = None,
-) -> tuple[JdFitEvaluation, str]:
-    """Score evidence against the JD and report which model produced the result.
+) -> tuple[ReportSynthesis, str]:
+    """Generate the report synthesis and report which model produced it.
 
     Args:
         job_description: JD text (or synthesized role brief).
         candidate_name: Candidate display name.
         package_title: Package title for context.
         evidence: Output of ``build_evidence``.
+        assessment_scores: Output of ``prompt_assessments`` (server-computed).
+        target_role: Role the candidate is assessed for.
         complete: Optional completion stub (tests).
 
     Returns:
-        Parsed evaluation and the serving model name.
+        Parsed synthesis and the serving model name.
     """
     assert_no_answer_key_fields(evidence)
-    dumped = json.dumps(evidence, ensure_ascii=False, default=str)
     prompt = build_user_prompt(
+        target_role=target_role,
         job_description=job_description,
         candidate_name=candidate_name,
         package_title=package_title,
-        evidence_json=dumped,
+        assessment_scores_json=json.dumps(assessment_scores or [], ensure_ascii=False),
+        evidence_json=json.dumps(evidence, ensure_ascii=False, default=str),
     )
     raw = (complete or complete_with_gemini)(prompt)
     model = getattr(raw, "model", None) or settings.GEMINI_MODEL
-    return parse_evaluation_json(raw), model
+    synthesis = parse_evaluation_json(raw)
+    expected = {row["assessment_key"] for row in assessment_scores or []}
+    missing = expected - set(synthesis.summaries_by_key())
+    if missing:
+        logger.warning(
+            "report_synthesis_missing_summaries keys=%s model=%s", sorted(missing), model
+        )
+    return synthesis, model
 
 
 def score_against_jd(
@@ -369,28 +407,34 @@ def score_against_jd(
     candidate_name: str,
     package_title: str,
     evidence: list[dict[str, Any]],
+    assessment_scores: list[dict[str, Any]] | None = None,
+    target_role: str = "",
     complete: CompleteFn | None = None,
-) -> JdFitEvaluation:
-    """Score evidence against the JD.
+) -> ReportSynthesis:
+    """Generate the report synthesis.
 
     Args:
         job_description: JD text (or synthesized role brief).
         candidate_name: Candidate display name.
         package_title: Package title for context.
         evidence: Output of ``build_evidence``.
+        assessment_scores: Output of ``prompt_assessments`` (server-computed).
+        target_role: Role the candidate is assessed for.
         complete: Optional completion stub (tests).
 
     Returns:
-        Parsed evaluation.
+        Parsed synthesis.
     """
-    evaluation, _model = score_against_jd_with_model(
+    synthesis, _model = score_against_jd_with_model(
         job_description=job_description,
         candidate_name=candidate_name,
         package_title=package_title,
         evidence=evidence,
+        assessment_scores=assessment_scores,
+        target_role=target_role,
         complete=complete,
     )
-    return evaluation
+    return synthesis
 
 
 class JdScoringService:
@@ -403,9 +447,10 @@ class JdScoringService:
         assessments: list[Assessment],
         progresses: list[CandidateProgress],
         responses: list[CandidateResponse],
+        outcomes: list[ModuleOutcome] | None = None,
         complete: CompleteFn | None = None,
-    ) -> tuple[JdFitEvaluation | None, str]:
-        """Return cached or freshly generated JD fit.
+    ) -> tuple[ReportSynthesis | None, str]:
+        """Return the cached or freshly generated report synthesis.
 
         Status is one of: cached, generated, skipped, failed. Failures never raise
         to the report download path; they are persisted as ``status='failed'``
@@ -415,21 +460,28 @@ class JdScoringService:
         Args:
             session: Async SQLAlchemy session.
             candidate: Candidate being scored.
-            package: Candidate's package (JD source).
+            package: Candidate's package (role / JD source).
             assessments: Package assessments.
             progresses: Candidate progress rows.
             responses: Candidate response rows.
+            outcomes: Pre-computed module outcomes (computed when omitted).
             complete: Optional completion stub (tests).
 
         Returns:
-            ``(evaluation | None, status)``.
+            ``(synthesis | None, status)``.
         """
         jd = resolve_job_description(package)
         if not jd:
             logger.info("jd_scoring_skipped_no_role candidate_id=%s", candidate.id)
             return None, "skipped"
 
-        digest = hash_job_description(jd)
+        if outcomes is None:
+            catalog = await load_catalog_categories(session, assessments)
+            outcomes = build_module_outcomes(assessments, progresses, responses, catalog)
+        if not outcomes:
+            logger.info("jd_scoring_skipped_no_completed candidate_id=%s", candidate.id)
+            return None, "skipped"
+        digest = synthesis_cache_key(jd, outcomes)
         existing = (
             await session.execute(
                 select(CandidateEvaluation).where(
@@ -439,8 +491,8 @@ class JdScoringService:
         ).scalars().first()
         if existing and existing.jd_hash == digest and evaluation_is_ok(existing):
             try:
-                return JdFitEvaluation.model_validate(existing.payload), "cached"
-            except Exception:
+                return ReportSynthesis.model_validate(existing.payload), "cached"
+            except ValidationError:
                 logger.warning(
                     "jd_scoring_cache_invalid candidate_id=%s", candidate.id
                 )
@@ -454,6 +506,8 @@ class JdScoringService:
                     candidate_name=candidate.full_name,
                     package_title=package.title if package else "",
                     evidence=evidence,
+                    assessment_scores=prompt_assessments(outcomes),
+                    target_role=(getattr(package, "target_role", None) or "") if package else "",
                     complete=complete,
                 ),
                 timeout=overall_deadline_seconds(),
@@ -482,7 +536,7 @@ class JdScoringService:
         if existing:
             existing.jd_hash = digest
             existing.model = model
-            existing.overall_fit = evaluation.overall_fit
+            existing.overall_fit = None
             existing.payload = payload
             existing.status = EVAL_STATUS_OK
             existing.last_error = None
@@ -495,7 +549,7 @@ class JdScoringService:
                     package_id=candidate.package_id,
                     jd_hash=digest,
                     model=model,
-                    overall_fit=evaluation.overall_fit,
+                    overall_fit=None,
                     payload=payload,
                     status=EVAL_STATUS_OK,
                     last_error=None,
@@ -504,10 +558,10 @@ class JdScoringService:
             )
         await session.commit()
         logger.info(
-            "jd_scoring_generated candidate_id=%s model=%s overall_fit=%s",
+            "jd_scoring_generated candidate_id=%s model=%s assessments=%s",
             candidate.id,
             model,
-            evaluation.overall_fit,
+            len(evaluation.competency_breakdown),
         )
         return evaluation, "generated"
 

@@ -1,4 +1,4 @@
-import { REPORT_TITLE } from './report-copy';
+import { REPORT_FILE_PREFIX } from './report-copy';
 
 const ILLEGAL_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001f]+/g;
 const MAX_NAME_LENGTH = 120;
@@ -24,10 +24,10 @@ export function sanitizeFilenamePart(value, fallback = 'Candidate') {
 
 /**
  * @param {string | null | undefined} candidateName
- * @returns {string} `MindQ Report - [Candidate Full Name].pdf`
+ * @returns {string} `Mind Q Report - ${candidateFullName}.pdf`
  */
 export function reportFilename(candidateName) {
-  return `${REPORT_TITLE} - ${sanitizeFilenamePart(candidateName)}.pdf`;
+  return `${REPORT_FILE_PREFIX} - ${sanitizeFilenamePart(candidateName)}.pdf`;
 }
 
 /**
@@ -35,7 +35,7 @@ export function reportFilename(candidateName) {
  * @returns {string}
  */
 export function reportsZipFilename(packageTitle) {
-  return `MindQ Reports - ${sanitizeFilenamePart(packageTitle, 'Assessment Suite')}.zip`;
+  return `${REPORT_FILE_PREFIX}s - ${sanitizeFilenamePart(packageTitle, 'Assessment Suite')}.zip`;
 }
 
 /**

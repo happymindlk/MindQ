@@ -103,10 +103,11 @@ def test_public_review_prefers_custom_technical_questions():
 
 
 def test_pipeline_status_pending_scoring_completed():
-    assert pipeline_status(completed=0, total=3, logged_in=False, jd_fit=None) == "pending"
-    assert pipeline_status(completed=1, total=3, logged_in=True, jd_fit=None) == "scoring"
-    assert pipeline_status(completed=3, total=3, logged_in=True, jd_fit=None) == "scoring"
-    assert pipeline_status(completed=3, total=3, logged_in=True, jd_fit=81.0) == "completed"
+    assert pipeline_status(completed=0, total=3, logged_in=False, evaluated=False) == "pending"
+    assert pipeline_status(completed=1, total=3, logged_in=True, evaluated=False) == "scoring"
+    assert pipeline_status(completed=3, total=3, logged_in=True, evaluated=False) == "scoring"
+    assert pipeline_status(completed=3, total=3, logged_in=True, evaluated=True) == "completed"
+    assert pipeline_status(completed=1, total=3, logged_in=True, evaluated=True) == "scoring"
 
 
 def test_slugify_company_name_strips_and_hyphenates():

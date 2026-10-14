@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ChevronDown, Download, FileText } from 'lucide-react';
 import Badge from '../../components/ui/Badge';
@@ -10,11 +10,37 @@ import { useToast } from '../../components/ui/useToast';
 import { adminApi, candidateStatus, maskEmail } from '../../lib/adminApi';
 import { downloadMindQReport } from '../../features/mindq-report/render-report-pdf';
 
-const RECOMMENDATION = {
-  strong_hire: { label: 'Strong hire', variant: 'success' },
-  consider: { label: 'Consider', variant: 'warning' },
-  do_not_proceed: { label: 'Do not proceed', variant: 'danger' },
-};
+/**
+ * Narrative fields of a stored report synthesis; empty when the evaluation is
+ * missing, failed, or a pre-synthesis legacy row.
+ *
+ * @param {{ status?: string, payload?: Record<string, any> } | null | undefined} evaluation
+ */
+function readSynthesis(evaluation) {
+  const payload =
+    evaluation && (evaluation.status ?? 'ok') === 'ok' && evaluation.payload
+      ? evaluation.payload
+      : {};
+  const list = (value) =>
+    Array.isArray(value) ? value.map((v) => String(v ?? '').trim()).filter(Boolean) : [];
+  const summaryByName = {};
+  (Array.isArray(payload.competency_breakdown) ? payload.competency_breakdown : []).forEach(
+    (item) => {
+      const name = item && String(item.assessment_name || '').trim();
+      const sentence = item && String(item.performance_summary || '').trim();
+      if (name && sentence && !(name in summaryByName)) summaryByName[name] = sentence;
+    },
+  );
+  const summary =
+    typeof payload.executive_summary === 'string' ? payload.executive_summary.trim() : '';
+  return {
+    summary,
+    strengths: list(payload.strengths),
+    risks: list(payload.risks_and_antipatterns),
+    summaryByName,
+    ready: Boolean(summary),
+  };
+}
 
 function extractAnswer(value) {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -83,38 +109,6 @@ function statusPill(status) {
     );
   }
   return <Badge variant="pending">Invited</Badge>;
-}
-
-function recommendationPill(key) {
-  const rec = RECOMMENDATION[key];
-  if (!rec) return null;
-  return <Badge variant={rec.variant}>{rec.label}</Badge>;
-}
-
-function CompetencyBars({ competencies }) {
-  if (!competencies?.length) return null;
-  return (
-    <section>
-      <h2 className="metric-label mb-3">Competency breakdown</h2>
-      <ul className="space-y-3">
-        {competencies.map((item) => {
-          const score = Math.max(0, Math.min(100, Number(item.score) || 0));
-          return (
-            <li key={item.name} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3">
-              <span className="text-sm text-foreground truncate">{item.name}</span>
-              <div className="h-2 rounded-full bg-slate-200 dark:bg-neutral-800 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-violet-500"
-                  style={{ width: `${score}%` }}
-                />
-              </div>
-              <span className="tabular-data text-xs text-foreground w-10 text-right">{score}%</span>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
 }
 
 function QuestionRow({ question, defaultOpen = false }) {
@@ -194,29 +188,18 @@ export default function CandidateReport() {
 
   const candidate = data?.candidate;
   const status = candidate ? candidateStatus(candidate) : null;
-  const fit = data?.evaluation?.payload || {};
-  const overall =
-    data?.evaluation?.overall_fit != null
-      ? Number(data.evaluation.overall_fit)
-      : candidate?.jd_fit != null
-        ? Number(candidate.jd_fit)
-        : candidate?.avg_score != null
-          ? Number(candidate.avg_score)
-          : null;
+  const synthesis = useMemo(() => readSynthesis(data?.evaluation), [data?.evaluation]);
+  const average = candidate?.avg_score != null ? Number(candidate.avg_score) : null;
 
   const sections = useMemo(() => {
     if (!data) return [];
     const progressById = Object.fromEntries(
       (data.progress || []).map((row) => [row.assessment_id, row]),
     );
-    const notesByTitle = Object.fromEntries(
-      (fit.per_assessment || []).map((item) => [item.title, item]),
-    );
     const responses = data.responses || [];
 
     return (data.assessments || []).map((assessment) => {
       const progress = progressById[assessment.id];
-      const notes = notesByTitle[assessment.title];
       const questions = (assessment.questions || [])
         .filter((q) => q && typeof q === 'object')
         .map((q, idx) => {
@@ -245,12 +228,12 @@ export default function CandidateReport() {
       return {
         id: assessment.id,
         title: assessment.title,
-        score: progress?.score != null ? Number(progress.score) : notes?.fit ?? null,
-        notes: notes?.notes,
+        score: progress?.score != null ? Number(progress.score) : null,
+        notes: synthesis.summaryByName[assessment.title] ?? null,
         questions,
       };
     });
-  }, [data, fit.per_assessment]);
+  }, [data, synthesis]);
 
   const handleDownload = async () => {
     setDownloading(true);
@@ -258,7 +241,7 @@ export default function CandidateReport() {
       await downloadMindQReport(() => adminApi.getReportData(candidateId));
       toast({
         title: 'Report ready',
-        description: 'MindQ Report PDF downloaded.',
+        description: 'Assessment report PDF downloaded.',
         variant: 'success',
       });
     } catch (err) {
@@ -290,8 +273,6 @@ export default function CandidateReport() {
     );
   }
 
-  const rec = recommendationPill(fit.hiring_recommendation);
-
   return (
     <div className="space-y-5">
       <PageHeader
@@ -316,49 +297,44 @@ export default function CandidateReport() {
       <section className="rounded-lg border border-slate-200 dark:border-neutral-800 bg-surface px-4 py-4">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
-            <p className="metric-label">Weighted score</p>
+            <p className="metric-label">Average score</p>
             <p className="mt-1 text-3xl font-semibold tracking-tight tabular-data text-foreground">
-              {overall != null ? `${Math.round(overall)}%` : '—'}
+              {average != null ? `${Math.round(average)}%` : '—'}
             </p>
             <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400 tabular-data">
-              MCQ {candidate.avg_score != null ? `${candidate.avg_score}%` : '—'}
-              {' · '}
               {candidate.completed_assessments}/{candidate.total_assessments} assessments
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {statusPill(status)}
-            {rec}
-            {status === 'completed' && !fit.hiring_recommendation && (
+            {status === 'completed' && !synthesis.ready && (
               <Badge variant="scoring">Scoring</Badge>
             )}
           </div>
         </div>
       </section>
 
-      <CompetencyBars competencies={fit.competencies} />
-
-      {fit.summary && (
+      {synthesis.summary && (
         <section>
-          <h2 className="metric-label mb-2">Summary</h2>
-          <p className="text-sm text-foreground leading-relaxed max-w-3xl">{fit.summary}</p>
+          <h2 className="metric-label mb-2">Executive summary</h2>
+          <p className="text-sm text-foreground leading-relaxed max-w-3xl">{synthesis.summary}</p>
         </section>
       )}
 
-      {(fit.strengths?.length > 0 || fit.risks?.length > 0) && (
+      {(synthesis.strengths.length > 0 || synthesis.risks.length > 0) && (
         <section className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
             <h2 className="metric-label mb-2">Strengths</h2>
             <ul className="space-y-1.5 text-sm text-foreground">
-              {(fit.strengths || []).map((item) => (
+              {synthesis.strengths.map((item) => (
                 <li key={item}>{item}</li>
               ))}
             </ul>
           </div>
           <div>
-            <h2 className="metric-label mb-2">Risks</h2>
+            <h2 className="metric-label mb-2">Risks &amp; anti-patterns</h2>
             <ul className="space-y-1.5 text-sm text-foreground">
-              {(fit.risks || []).map((item) => (
+              {synthesis.risks.map((item) => (
                 <li key={item}>{item}</li>
               ))}
             </ul>

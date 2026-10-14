@@ -93,17 +93,6 @@ export default function PublicTrack() {
           </span>
         ),
       },
-      {
-        id: 'jd_fit',
-        header: 'JD fit',
-        tabular: true,
-        accessor: (row) => (row.jd_fit != null ? Number(row.jd_fit) : -1),
-        cell: (row) => (
-          <span className="tabular-data text-foreground">
-            {row.jd_fit != null ? `${row.jd_fit}%` : '—'}
-          </span>
-        ),
-      },
     ],
     [],
   );

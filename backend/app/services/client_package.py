@@ -387,7 +387,7 @@ def pipeline_status(
     completed: int,
     total: int,
     logged_in: bool,
-    jd_fit: float | None,
+    evaluated: bool,
 ) -> str:
     """Map progress counts to Pending / Scoring / Completed.
 
@@ -395,13 +395,13 @@ def pipeline_status(
         completed: Completed assessment count.
         total: Assessments in the package.
         logged_in: Whether the candidate has entered the portal.
-        jd_fit: Cached Gemini overall fit, if any.
+        evaluated: Whether a usable report synthesis has been stored.
 
     Returns:
         One of ``pending``, ``scoring``, ``completed``.
     """
     if total > 0 and completed >= total:
-        return "completed" if jd_fit is not None else "scoring"
+        return "completed" if evaluated else "scoring"
     if completed > 0 or logged_in:
         return "scoring"
     return "pending"
@@ -410,7 +410,7 @@ def pipeline_status(
 def client_status(*, completed: int, total: int, logged_in: bool) -> ClientCandidateStatus:
     """Map progress counts to the HR-facing Invited / In Progress / Completed.
 
-    Unlike ``pipeline_status`` this does not wait for the Gemini JD-fit score:
+    Unlike ``pipeline_status`` this does not wait for the report synthesis:
     HR sees Completed as soon as every assessment is submitted.
 
     Args:
@@ -436,7 +436,7 @@ class CandidateAggregates:
     completed: dict[UUID, int] = dc_field(default_factory=dict)
     avg_score: dict[UUID, float | None] = dc_field(default_factory=dict)
     completed_at: dict[UUID, datetime | None] = dc_field(default_factory=dict)
-    fit: dict[UUID, float | None] = dc_field(default_factory=dict)
+    evaluated: frozenset[UUID] = frozenset()
 
     def total_for(self, candidate: Candidate) -> int:
         """Assessment count of the candidate's package.
@@ -540,17 +540,13 @@ async def _candidate_aggregates(
             )
         )
     ).scalars().all()
-    fit = {
-        e.candidate_id: float(e.overall_fit) if e.overall_fit is not None else None
-        for e in evals
-    }
 
     return CandidateAggregates(
         assessment_counts=assessment_counts,
         completed=completed,
         avg_score=avg_score,
         completed_at=completed_at,
-        fit=fit,
+        evaluated=frozenset(e.candidate_id for e in evals if evaluation_is_ok(e)),
     )
 
 
@@ -1436,12 +1432,11 @@ class ClientPackageService:
         for cand in candidates:
             total = agg.total_for(cand)
             completed = agg.completed.get(cand.id, 0)
-            jd_fit = agg.fit.get(cand.id)
             status = pipeline_status(
                 completed=completed,
                 total=total,
                 logged_in=bool(cand.logged_in_at),
-                jd_fit=jd_fit,
+                evaluated=cand.id in agg.evaluated,
             )
             tech_score = agg.avg_score.get(cand.id)
             package_done = total > 0 and completed >= total
@@ -1457,7 +1452,6 @@ class ClientPackageService:
                     total_assessments=total,
                     avg_score=tech_score,
                     technical_score=tech_score,
-                    jd_fit=jd_fit,
                     created_at=cand.created_at,
                     completed_at=agg.completed_at.get(cand.id) if package_done else None,
                 )
@@ -1565,7 +1559,7 @@ class ClientPackageService:
     async def get_client_scorecard(
         session: AsyncSession, candidate_id: UUID, corporate_id: UUID
     ) -> ClientScorecardResponse:
-        """Gemini scorecard with psychometric assessments removed.
+        """Technical scorecard with psychometric assessments removed.
 
         Args:
             session: Async database session.
@@ -1573,8 +1567,8 @@ class ClientPackageService:
             corporate_id: Authenticated HR tenant (must own the candidate).
 
         Returns:
-            Sanitized scorecard. Evaluation payload is filtered to top-level
-            fit fields; per-item psychometric evidence is dropped.
+            Sanitized scorecard. Evaluation payload is filtered to the
+            synthesis narrative; per-item psychometric evidence is dropped.
 
         Raises:
             LookupError: Candidate missing or not in tenant.
@@ -1638,27 +1632,18 @@ class ClientPackageService:
                 )
             )
 
-        payload = eval_row.payload if evaluation_is_ok(eval_row) else None
+        evaluated = evaluation_is_ok(eval_row)
+        payload = eval_row.payload if evaluated and eval_row is not None else None
         sanitized: dict[str, Any] | None = None
-        recommendation = None
         summary = None
         if payload:
             sanitized = {
-                "overall_fit": payload.get("overall_fit"),
-                "recommendation": payload.get("recommendation"),
-                "executive_summary": payload.get("executive_summary")
-                or payload.get("summary"),
-                "strengths": payload.get("strengths"),
-                "risks": payload.get("risks") or payload.get("gaps"),
+                "executive_summary": payload.get("executive_summary"),
+                "strengths": payload.get("strengths") or [],
+                "risks_and_antipatterns": payload.get("risks_and_antipatterns") or [],
             }
-            recommendation = payload.get("recommendation")
-            summary = sanitized.get("executive_summary")
+            summary = sanitized["executive_summary"]
 
-        jd_fit = (
-            float(eval_row.overall_fit)
-            if eval_row and eval_row.overall_fit is not None
-            else None
-        )
         completed = sum(
             1 for p in progress_rows if p.status == "COMPLETED"
         )
@@ -1672,11 +1657,9 @@ class ClientPackageService:
                 completed=completed,
                 total=total,
                 logged_in=bool(candidate.logged_in_at),
-                jd_fit=jd_fit,
+                evaluated=evaluated,
             ),
             avg_score=round(sum(scores) / len(scores), 1) if scores else None,
-            jd_fit=jd_fit,
-            recommendation=recommendation if isinstance(recommendation, str) else None,
             summary=summary if isinstance(summary, str) else None,
             assessments=technical_assessments,
             evaluation=sanitized,

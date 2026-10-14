@@ -1,19 +1,14 @@
 import React from 'react';
 import MindQBrandMark from './mindq-brand-mark';
-import {
-  DISCLAIMER_BODY,
-  DISCLAIMER_TITLE,
-  FOOTER_NOTICE,
-  REPORT_TITLE,
-} from './report-copy';
+import { CATEGORY_ORDER, FIT_DISCLAIMER, FOOTER_NOTICE, REPORT_TITLE } from './report-copy';
 import { safeLogoUrl } from './report-logo';
 import { REPORT_CSS } from './report-styles';
 
-const RECOMMENDATION_FALLBACK = {
-  strong_hire: 'Strong Hire',
-  consider: 'Consider',
-  do_not_proceed: 'Do Not Proceed',
-};
+/**
+ * Applied to every section that must never be split across pages. The same
+ * rule lives in REPORT_CSS because the raster PDF path has no Tailwind.
+ */
+const KEEP_TOGETHER = 'break-inside-avoid print:break-inside-avoid print:break-after-auto';
 
 /**
  * @param {unknown} value
@@ -38,44 +33,12 @@ function asList(value) {
 }
 
 /**
- * @param {string | null | undefined} key
- * @param {string | null | undefined} label
- * @returns {{ label: string | null, tone: string }}
- */
-function resolveRecommendation(key, label) {
-  const normalized = String(key || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '_');
-  const resolvedKey = RECOMMENDATION_FALLBACK[normalized] ? normalized : null;
-  const resolvedLabel =
-    (label && String(label).trim()) ||
-    (resolvedKey ? RECOMMENDATION_FALLBACK[resolvedKey] : null);
-  let tone = 'neutral';
-  if (resolvedKey === 'strong_hire') tone = 'positive';
-  else if (resolvedKey === 'consider') tone = 'caution';
-  else if (resolvedKey === 'do_not_proceed') tone = 'negative';
-  return { label: resolvedLabel, tone };
-}
-
-/**
  * @param {number | null} score
  * @returns {string}
  */
 function formatScore(score) {
-  if (score == null) return '—';
+  if (score == null) return 'N/A';
   return `${Math.round(score * 10) / 10}%`;
-}
-
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function formatDate(value) {
-  if (!value) return '—';
-  const date = new Date(String(value));
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 /** @param {{ score: number | null }} props */
@@ -93,7 +56,7 @@ function SynthesisFallback({ status }) {
   if (status === 'failed') {
     return (
       <p className="mq-fallback" role="status">
-        The executive synthesis could not be completed on the last attempt. It retries
+        The executive summary could not be completed on the last attempt. It retries
         automatically when this report is reopened.
       </p>
     );
@@ -101,17 +64,67 @@ function SynthesisFallback({ status }) {
   if (status === 'skipped') {
     return (
       <p className="mq-fallback">
-        No Role Assessment Brief or target role is attached to this assessment suite, so role
-        fit was not scored.
+        An executive summary needs a target role and at least one completed assessment.
       </p>
     );
   }
   return (
     <p className="mq-fallback">
-      The executive synthesis is not available yet. Scoring may still be in progress; reopen
-      this report shortly.
+      The executive summary is not available yet. Scoring may still be in progress; reopen this
+      report shortly.
     </p>
   );
+}
+
+/**
+ * @typedef {{ category: string, assessmentName: string, score: number, summary: string }} BreakdownRow
+ * @typedef {{ category: string, average: number | null, rows: BreakdownRow[] }} CategoryGroup
+ */
+
+/**
+ * @param {unknown} raw
+ * @returns {BreakdownRow[]}
+ */
+function toBreakdownRows(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const score = asNumber(item.score);
+      const assessmentName = String(item.assessment_name || '').trim();
+      if (score == null || !assessmentName) return null;
+      return {
+        category: String(item.category || 'Technical'),
+        assessmentName,
+        score,
+        summary: String(item.performance_summary || '').trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+/**
+ * @param {BreakdownRow[]} rows
+ * @param {Record<string, number>} averages
+ * @returns {CategoryGroup[]}
+ */
+function groupByCategory(rows, averages) {
+  const byCategory = new Map();
+  rows.forEach((row) => {
+    if (!byCategory.has(row.category)) byCategory.set(row.category, []);
+    byCategory.get(row.category).push(row);
+  });
+  const rank = (category) => {
+    const index = CATEGORY_ORDER.indexOf(category);
+    return index === -1 ? CATEGORY_ORDER.length : index;
+  };
+  return [...byCategory.keys()]
+    .sort((a, b) => rank(a) - rank(b))
+    .map((category) => ({
+      category,
+      average: averages[category] ?? null,
+      rows: byCategory.get(category),
+    }));
 }
 
 /**
@@ -120,307 +133,280 @@ function SynthesisFallback({ status }) {
  * @param {Record<string, any>} data
  */
 function toViewModel(data) {
-  const competencyGroups = (Array.isArray(data.competency_groups) ? data.competency_groups : [])
-    .filter((g) => g && typeof g === 'object' && g.label)
-    .map((g) => ({
-      key: String(g.key || g.label),
-      label: String(g.label),
-      average: asNumber(g.average_score),
-      narrative: typeof g.narrative === 'string' ? g.narrative.trim() : '',
-      assessments: (Array.isArray(g.assessments) ? g.assessments : []).map((a) => ({
-        id: String(a.id || a.title),
-        title: String(a.title || '—'),
-        score: asNumber(a.score),
-      })),
-    }));
-
-  const roleCompetencies = (Array.isArray(data.competencies) ? data.competencies : [])
-    .map((row) => {
-      if (!row || typeof row !== 'object') return null;
-      const name = String(row.name || '').trim();
-      const score = asNumber(row.score);
-      return name && score != null ? { name, score } : null;
-    })
-    .filter(Boolean);
+  const rawAverages =
+    data.category_averages && typeof data.category_averages === 'object'
+      ? data.category_averages
+      : {};
+  /** @type {Record<string, number>} */
+  const averages = {};
+  Object.entries(rawAverages).forEach(([category, value]) => {
+    const n = asNumber(value);
+    if (n != null) averages[category] = n;
+  });
+  const breakdown = toBreakdownRows(data.competency_breakdown);
+  const summary =
+    typeof data.executive_summary === 'string' && data.executive_summary.trim()
+      ? data.executive_summary.trim()
+      : null;
 
   return {
-    companyName: String(data.company_name || '—'),
-    candidateName: String(data.candidate_name || 'Candidate'),
+    companyName: String(data.company_name || '').trim(),
+    candidateName: String(data.candidate_full_name || 'Candidate'),
     candidateEmail: String(data.candidate_email || '—'),
     targetRole: data.target_role ? String(data.target_role) : '—',
-    completed: formatDate(data.completed_at),
-    overallFit: asNumber(data.overall_fit),
-    mcqScore: asNumber(data.mcq_score),
-    overallTechnical: asNumber(data.overall_technical_score),
-    recommendation: resolveRecommendation(data.recommendation_key, data.recommendation_label),
-    summary:
-      typeof data.ai_summary === 'string' && data.ai_summary.trim() ? data.ai_summary.trim() : null,
-    synthesisStatus: typeof data.jd_eval_status === 'string' ? data.jd_eval_status : 'pending',
+    totalCompleted: Math.max(0, asNumber(data.total_assessments_completed) ?? 0),
+    scoreCards: CATEGORY_ORDER.map((category) => ({
+      category,
+      average: averages[category] ?? null,
+    })),
+    summary,
+    synthesisStatus: typeof data.synthesis_status === 'string' ? data.synthesis_status : 'pending',
     strengths: asList(data.strengths),
-    risks: asList(data.risks),
-    completedAssessments: Array.isArray(data.completed_assessments)
-      ? data.completed_assessments
-      : [],
-    competencyGroups,
-    roleCompetencies,
+    risks: asList(data.risks_and_antipatterns),
+    groups: groupByCategory(breakdown, averages),
     customs: Array.isArray(data.custom_questions) ? data.custom_questions : [],
   };
 }
 
+/** @param {{ group: CategoryGroup }} props */
+function CategoryBreakdown({ group }) {
+  return (
+    <article className={`mq-group ${KEEP_TOGETHER}`} data-pdf-block>
+      <div className="mq-group-head">
+        <h3>{group.category}</h3>
+        <span className="mq-avg">
+          <span className="mq-avg-label">Average</span>
+          {formatScore(group.average)}
+        </span>
+      </div>
+      <ul className="mq-score-list">
+        {group.rows.map((row, index) => (
+          <li key={`${row.assessmentName}-${index}`} className="mq-score-item" data-pdf-row>
+            <div className="mq-score-row">
+              <span className="mq-score-name">{row.assessmentName}</span>
+              <ScoreBar score={row.score} />
+              <span className="mq-score-value">{formatScore(row.score)}</span>
+            </div>
+            {row.summary && <p className="mq-score-summary">{row.summary}</p>}
+          </li>
+        ))}
+      </ul>
+    </article>
+  );
+}
+
 /**
- * MindQ Report: the single layout used for both the on-screen preview and the
- * exported PDF, so the two can never drift. Styles are embedded so SVG capture
- * does not depend on Tailwind (oklch colors break rasterization).
+ * Candidate Assessment Report: the single layout used for the on-screen
+ * preview, browser print, and the exported PDF, so they can never drift.
+ * Styles are embedded so SVG capture does not depend on Tailwind (oklch
+ * colors break rasterization).
  *
- * Elements marked `data-pdf-block` are safe page-break boundaries.
+ * Pagination contract (shared by print CSS and the PDF paginator):
+ * - `data-pdf-block` elements are kept whole when they fit on one page.
+ * - `data-pdf-row` elements are safe cut points inside oversized blocks.
+ * - `data-pdf-footer` is repeated at the bottom of every page.
  *
  * @param {{ data: Record<string, any> | null | undefined, logoSrc?: string | null }} props
- *   `logoSrc` overrides the logo URL (PDF export passes an inlined data URL).
+ *   `logoSrc` overrides the client logo URL (PDF export passes an inlined data URL).
  */
 export default function MindQReport({ data, logoSrc }) {
   if (!data) return null;
   const vm = toViewModel(data);
   const logo = safeLogoUrl(logoSrc ?? data.company_logo_url);
+  const [firstGroup, ...restGroups] = vm.groups;
 
   return (
     <div className="mindq-report">
       <style>{REPORT_CSS}</style>
 
-      <header className="mq-header" data-pdf-block>
-        <div className="mq-header-top">
-          {logo ? (
-            <img className="mq-logo" src={logo} alt={`${vm.companyName} logo`} />
-          ) : (
-            <div className="mq-logo-fallback" aria-hidden="true">
-              {(vm.companyName || 'A').charAt(0).toUpperCase()}
-            </div>
-          )}
-          <div className="mq-header-titles">
-            <p className="mq-eyebrow">{REPORT_TITLE}</p>
-            <h1 className="mq-title">{vm.candidateName}</h1>
-            <p className="mq-subtitle">{vm.companyName}</p>
-          </div>
-        </div>
-        <dl className="mq-meta-grid">
-          <div>
-            <dt>Target role</dt>
-            <dd>{vm.targetRole}</dd>
-          </div>
-          <div>
-            <dt>Email</dt>
-            <dd className="mq-break">{vm.candidateEmail}</dd>
-          </div>
-          <div>
-            <dt>Completed</dt>
-            <dd>{vm.completed}</dd>
-          </div>
-          <div>
-            <dt>Overall technical</dt>
-            <dd>{formatScore(vm.overallTechnical)}</dd>
-          </div>
-        </dl>
-      </header>
-
-      <section className="mq-card" data-pdf-block>
-        <h2>Completed Assessments</h2>
-        {vm.completedAssessments.length === 0 ? (
-          <p className="mq-fallback">No assessments have been completed yet.</p>
-        ) : (
-          <table className="mq-table">
-            <thead>
-              <tr>
-                <th>Assessment</th>
-                <th>Category</th>
-                <th className="mq-right">Completed on</th>
-              </tr>
-            </thead>
-            <tbody>
-              {vm.completedAssessments.map((row) => (
-                <tr key={String(row.id || row.title)}>
-                  <td>{String(row.title || '—')}</td>
-                  <td>{String(row.category_label || row.category || '—')}</td>
-                  <td className="mq-right">{formatDate(row.completed_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <section className="mq-dashboard" data-pdf-block>
-        <div className="mq-dash-card">
-          <p className="mq-dash-label">Overall Fit</p>
-          <p className="mq-dash-value">{formatScore(vm.overallFit)}</p>
-        </div>
-        <div className="mq-dash-card">
-          <p className="mq-dash-label">MCQ Score</p>
-          <p className="mq-dash-value">{formatScore(vm.mcqScore)}</p>
-        </div>
-        <div className="mq-dash-card">
-          <p className="mq-dash-label">Recommendation</p>
-          {vm.recommendation.label ? (
-            <span className={`mq-pill mq-pill-${vm.recommendation.tone}`}>
-              {vm.recommendation.label}
-            </span>
-          ) : (
-            <p className="mq-dash-muted">Pending recommendation</p>
-          )}
-        </div>
-      </section>
-
-      <section className="mq-card" data-pdf-block>
-        <h2>Executive Synthesis</h2>
-        {vm.summary ? (
-          <p className="mq-summary">{vm.summary}</p>
-        ) : (
-          <SynthesisFallback status={vm.synthesisStatus} />
-        )}
-      </section>
-
-      <section className="mq-section">
-        <h2 className="mq-section-title" data-pdf-block>
-          Competency Breakdown
-        </h2>
-        {vm.competencyGroups.length === 0 ? (
-          <p className="mq-fallback">Competency scores are not available yet.</p>
-        ) : (
-          <div className="mq-group-stack">
-            {vm.competencyGroups.map((group) => (
-              <article key={group.key} className="mq-group" data-pdf-block>
-                <div className="mq-group-head">
-                  <h3>{group.label}</h3>
-                  <span className="mq-avg">
-                    <span className="mq-avg-label">Average</span>
-                    {formatScore(group.average)}
-                  </span>
+      <div className="mq-print-frame">
+        <div className="mq-print-body">
+          {/* Page 1 is kept as one unit so the overview never splits. */}
+          <div className={`mq-first-page ${KEEP_TOGETHER}`} data-pdf-block>
+            <header className="mq-header">
+              <div className="mq-header-top">
+                <MindQBrandMark size={32} />
+                <div className="mq-client">
+                  {logo ? (
+                    <img
+                      className="mq-logo"
+                      src={logo}
+                      alt={`${vm.companyName || 'Client'} logo`}
+                    />
+                  ) : (
+                    <div className="mq-logo-fallback" aria-hidden="true">
+                      {(vm.companyName || 'C').charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  {vm.companyName && <p className="mq-client-name">{vm.companyName}</p>}
                 </div>
-                <ul className="mq-score-list">
-                  {group.assessments.map((a) => (
-                    <li key={a.id} className="mq-score-row">
-                      <span className="mq-score-name">{a.title}</span>
-                      <ScoreBar score={a.score} />
-                      <span className="mq-score-value">{formatScore(a.score)}</span>
-                    </li>
+              </div>
+              <p className="mq-eyebrow">{REPORT_TITLE}</p>
+              <h1 className="mq-title">{vm.candidateName}</h1>
+              <dl className="mq-meta-grid">
+                <div>
+                  <dt>Target role</dt>
+                  <dd>{vm.targetRole}</dd>
+                </div>
+                <div>
+                  <dt>Email</dt>
+                  <dd className="mq-break">{vm.candidateEmail}</dd>
+                </div>
+                <div>
+                  <dt>Assessments completed</dt>
+                  <dd>{vm.totalCompleted}</dd>
+                </div>
+              </dl>
+            </header>
+
+            <section className="mq-dashboard" aria-label="Category scores">
+              {vm.scoreCards.map(({ category, average }) => (
+                <div
+                  key={category}
+                  className={`mq-dash-card${average == null ? ' mq-dash-card-na' : ''}`}
+                >
+                  <p className="mq-dash-label">{category}</p>
+                  <p className="mq-dash-value">{formatScore(average)}</p>
+                  {average == null && <p className="mq-dash-muted">Not assessed</p>}
+                </div>
+              ))}
+            </section>
+
+            <section className="mq-card">
+              <h2>Executive Summary</h2>
+              {vm.summary ? (
+                <p className="mq-summary">{vm.summary}</p>
+              ) : (
+                <SynthesisFallback status={vm.synthesisStatus} />
+              )}
+            </section>
+          </div>
+
+          <section className="mq-section" aria-label="Competency Breakdown">
+            {firstGroup ? (
+              <>
+                {/* Title travels with the first group so it is never orphaned at a page end. */}
+                <div className={KEEP_TOGETHER} data-pdf-block>
+                  <h2 className="mq-section-title">Competency Breakdown</h2>
+                  <CategoryBreakdown group={firstGroup} />
+                </div>
+                {restGroups.map((group) => (
+                  <CategoryBreakdown key={group.category} group={group} />
+                ))}
+              </>
+            ) : (
+              <div className={KEEP_TOGETHER} data-pdf-block>
+                <h2 className="mq-section-title">Competency Breakdown</h2>
+                <p className="mq-fallback">Competency scores are not available yet.</p>
+              </div>
+            )}
+          </section>
+
+          <section className={`mq-strengths-risks ${KEEP_TOGETHER}`} data-pdf-block>
+            <div className="mq-sr-col mq-sr-strengths">
+              <h2>Strengths</h2>
+              {vm.strengths.length === 0 ? (
+                <p className="mq-fallback">No strengths recorded yet.</p>
+              ) : (
+                <ul>
+                  {vm.strengths.map((item) => (
+                    <li key={item}>{item}</li>
                   ))}
                 </ul>
-                {group.narrative && <p className="mq-narrative">{group.narrative}</p>}
-              </article>
-            ))}
-          </div>
-        )}
-
-        {vm.roleCompetencies.length > 0 && (
-          <article className="mq-group" data-pdf-block>
-            <div className="mq-group-head">
-              <h3>Role Competency Alignment</h3>
+              )}
             </div>
-            <ul className="mq-score-list">
-              {vm.roleCompetencies.map((c) => (
-                <li key={c.name} className="mq-score-row">
-                  <span className="mq-score-name">{c.name}</span>
-                  <ScoreBar score={c.score} />
-                  <span className="mq-score-value">{formatScore(c.score)}</span>
-                </li>
-              ))}
-            </ul>
-          </article>
-        )}
-      </section>
+            <div className="mq-sr-col mq-sr-risks">
+              <h2>Risks &amp; Anti-patterns</h2>
+              {vm.risks.length === 0 ? (
+                <p className="mq-fallback">No risks recorded yet.</p>
+              ) : (
+                <ul>
+                  {vm.risks.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
 
-      <section className="mq-strengths-risks" data-pdf-block>
-        <div className="mq-sr-col mq-sr-strengths">
-          <h2>Strengths</h2>
-          {vm.strengths.length === 0 ? (
-            <p className="mq-fallback">No strengths recorded yet.</p>
-          ) : (
-            <ul>
-              {vm.strengths.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
+          {vm.customs.length > 0 && (
+            <section className="mq-section">
+              <h2 className={`mq-section-title ${KEEP_TOGETHER}`} data-pdf-block>
+                Granular Technical Assessment
+              </h2>
+              <div className="mq-q-stack">
+                {vm.customs.map((q, index) => {
+                  const score = asNumber(q.score);
+                  const status = String(q.ai_eval_status || '').toLowerCase();
+                  const evaluation =
+                    typeof q.ai_evaluation === 'string' && q.ai_evaluation.trim()
+                      ? q.ai_evaluation.trim()
+                      : null;
+                  const showFallback = !evaluation || status === 'failed';
+                  const scorecard = asList(q.scorecard);
+                  const answer =
+                    q.response_summary != null && String(q.response_summary).trim()
+                      ? String(q.response_summary).trim()
+                      : null;
+
+                  return (
+                    <article
+                      key={String(q.id || index)}
+                      className={`mq-q-card ${KEEP_TOGETHER}`}
+                      data-pdf-block
+                    >
+                      <div className="mq-q-top">
+                        <p className="mq-q-index">Question {index + 1}</p>
+                        {score != null && (
+                          <span className="mq-score-badge">{formatScore(score)}</span>
+                        )}
+                      </div>
+                      <h3 className="mq-q-prompt">{String(q.prompt || 'Untitled question')}</h3>
+                      {q.evaluated_competency && (
+                        <p className="mq-chip">{String(q.evaluated_competency)}</p>
+                      )}
+                      {answer && (
+                        <blockquote className="mq-answer">
+                          <p className="mq-answer-label">Candidate answer</p>
+                          <pre>{answer}</pre>
+                        </blockquote>
+                      )}
+                      <div className="mq-eval-box">
+                        <p className="mq-eval-label">Evaluation / Feedback</p>
+                        {showFallback ? (
+                          <p className="mq-fallback">
+                            Evaluation pending or unavailable for this item.
+                          </p>
+                        ) : (
+                          <p className="mq-eval-text">{evaluation}</p>
+                        )}
+                        {!showFallback && scorecard.length > 0 && (
+                          <ul className="mq-scorecard">
+                            {scorecard.map((bullet) => (
+                              <li key={bullet}>{bullet}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
           )}
         </div>
-        <div className="mq-sr-col mq-sr-risks">
-          <h2>Risks &amp; Development Areas</h2>
-          {vm.risks.length === 0 ? (
-            <p className="mq-fallback">No risks recorded yet.</p>
-          ) : (
-            <ul>
-              {vm.risks.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          )}
+        {/* Print-only: a repeating table footer reserves room under the fixed footer on every page. */}
+        <div className="mq-print-footer-space" aria-hidden="true">
+          <div className="mq-print-footer-spacer" />
         </div>
-      </section>
+      </div>
 
-      {vm.customs.length > 0 && (
-        <section className="mq-section">
-          <h2 className="mq-section-title" data-pdf-block>
-            Granular Technical Assessment
-          </h2>
-          <div className="mq-q-stack">
-            {vm.customs.map((q, index) => {
-              const score = asNumber(q.score);
-              const status = String(q.ai_eval_status || '').toLowerCase();
-              const evaluation =
-                typeof q.ai_evaluation === 'string' && q.ai_evaluation.trim()
-                  ? q.ai_evaluation.trim()
-                  : null;
-              const showFallback = !evaluation || status === 'failed';
-              const scorecard = asList(q.scorecard);
-              const answer =
-                q.response_summary != null && String(q.response_summary).trim()
-                  ? String(q.response_summary).trim()
-                  : null;
-
-              return (
-                <article key={String(q.id || index)} className="mq-q-card" data-pdf-block>
-                  <div className="mq-q-top">
-                    <p className="mq-q-index">Question {index + 1}</p>
-                    {score != null && <span className="mq-score-badge">{formatScore(score)}</span>}
-                  </div>
-                  <h3 className="mq-q-prompt">{String(q.prompt || 'Untitled question')}</h3>
-                  {q.evaluated_competency && (
-                    <p className="mq-chip">{String(q.evaluated_competency)}</p>
-                  )}
-                  {answer && (
-                    <blockquote className="mq-answer">
-                      <p className="mq-answer-label">Candidate answer</p>
-                      <pre>{answer}</pre>
-                    </blockquote>
-                  )}
-                  <div className="mq-eval-box">
-                    <p className="mq-eval-label">Evaluation / Feedback</p>
-                    {showFallback ? (
-                      <p className="mq-fallback">Evaluation pending or unavailable for this item.</p>
-                    ) : (
-                      <p className="mq-eval-text">{evaluation}</p>
-                    )}
-                    {!showFallback && scorecard.length > 0 && (
-                      <ul className="mq-scorecard">
-                        {scorecard.map((bullet) => (
-                          <li key={bullet}>{bullet}</li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      <section className="mq-disclaimer" data-pdf-block>
-        <p>
-          <strong>{DISCLAIMER_TITLE}</strong> {DISCLAIMER_BODY}
-        </p>
-      </section>
-
-      <footer className="mq-footer" data-pdf-block>
+      <footer className="mq-footer" data-pdf-footer>
         <MindQBrandMark />
-        <p className="mq-footer-text">{FOOTER_NOTICE}</p>
+        <div className="mq-footer-notes">
+          <p className="mq-footer-text">{FOOTER_NOTICE}</p>
+          <p className="mq-footer-text mq-footer-disclaimer">{FIT_DISCLAIMER}</p>
+        </div>
       </footer>
     </div>
   );

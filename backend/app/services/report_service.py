@@ -7,7 +7,6 @@ from urllib.parse import urlparse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.config import settings
-from app.schemas.jd_evaluation import RECOMMENDATION_LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +17,8 @@ _env = Environment(
     loader=FileSystemLoader(TEMPLATE_DIR),
     autoescape=select_autoescape(enabled_extensions=("html", "htm", "xml"), default=True),
 )
+
+CATEGORY_DISPLAY_ORDER = ("Cognitive", "Personality", "Behavioral", "Technical")
 
 
 class ReportResourceBlocked(ValueError):
@@ -108,101 +109,62 @@ def _safe_logo(url: str | None) -> str:
     return ""
 
 
-def _mcq_aggregate(results: list | None) -> float | None:
-    """Average of non-null assessment scores (MCQ-driven percentages)."""
-    scores = [
-        float(r["score"])
-        for r in results or []
-        if isinstance(r, dict) and r.get("score") is not None
+def _ordered_category_averages(averages: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """All four category cards in display order; unassessed ones carry ``None``.
+
+    Args:
+        averages: ``category_averages`` from the MindQ Report payload.
+
+    Returns:
+        ``[{"category": str, "average": float | None}]`` in display order.
+    """
+    source = averages or {}
+    return [
+        {
+            "category": name,
+            "average": float(source[name]) if source.get(name) is not None else None,
+        }
+        for name in CATEGORY_DISPLAY_ORDER
     ]
-    if not scores:
-        return None
-    return round(sum(scores) / len(scores), 1)
 
 
 class ReportService:
     @staticmethod
-    def render_report_html(
-        candidate_name: str,
-        package_title: str,
-        results: list,
-        jd_fit: dict | None = None,
-        jd_status: str | None = None,
-        corporate_name: str | None = None,
-        corporate_logo_url: str | None = None,
-    ) -> str:
+    def render_report_html(report: dict[str, Any]) -> str:
         """Render the report template with every dynamic value HTML-escaped.
 
         Args:
-            candidate_name: Candidate display name (candidate-controlled).
-            package_title: Package title.
-            results: Per-assessment score rows.
-            jd_fit: Gemini JD-fit payload, if available.
-            jd_status: JD-fit pipeline status.
-            corporate_name: Tenant display name.
-            corporate_logo_url: Tenant logo; dropped unless on an allowlisted https host.
+            report: ``MindQReportResponse.model_dump(mode="json")``. Candidate
+                name and Gemini prose are attacker-influenced and rely on
+                template autoescaping.
 
         Returns:
             Rendered HTML string.
         """
         template = _env.get_template("report.html")
         now = datetime.now(timezone.utc)
-        fit = dict(jd_fit) if jd_fit else None
-        recommendation_key = (fit or {}).get("hiring_recommendation") or "consider"
-        if recommendation_key not in RECOMMENDATION_LABELS:
-            recommendation_key = "consider"
-        recommendation_label = RECOMMENDATION_LABELS.get(recommendation_key, "Consider")
         return template.render(
-            candidate_name=candidate_name,
-            package_title=package_title,
-            results=results,
-            jd_fit=fit,
-            jd_status=jd_status,
-            mcq_score=_mcq_aggregate(results),
-            recommendation_label=recommendation_label,
-            recommendation_key=recommendation_key,
-            corporate_name=corporate_name or "",
-            corporate_logo_url=_safe_logo(corporate_logo_url),
+            report=report,
+            category_averages=_ordered_category_averages(report.get("category_averages")),
+            corporate_logo_url=_safe_logo(report.get("company_logo_url")),
             generated_at=now.strftime("%B %d, %Y at %H:%M UTC"),
             current_year=now.year,
         )
 
     @staticmethod
-    def generate_report_bytes(
-        candidate_name: str,
-        package_title: str,
-        results: list,
-        jd_fit: dict | None = None,
-        jd_status: str | None = None,
-        corporate_name: str | None = None,
-        corporate_logo_url: str | None = None,
-    ) -> tuple[bytes, bool]:
+    def generate_report_bytes(report: dict[str, Any]) -> tuple[bytes, bool]:
         """Render the report and return (content_bytes, is_pdf).
 
         Renders in-memory (no writes to the working directory). Falls back to
         HTML bytes if WeasyPrint's native libraries are unavailable.
 
         Args:
-            candidate_name: Candidate display name.
-            package_title: Package title.
-            results: Per-assessment score rows.
-            jd_fit: Gemini JD-fit payload, if available.
-            jd_status: JD-fit pipeline status.
-            corporate_name: Tenant display name.
-            corporate_logo_url: Tenant logo URL.
+            report: ``MindQReportResponse.model_dump(mode="json")``.
 
         Returns:
             Tuple of (PDF or HTML bytes, is_pdf flag).
         """
-        html_content = ReportService.render_report_html(
-            candidate_name=candidate_name,
-            package_title=package_title,
-            results=results,
-            jd_fit=jd_fit,
-            jd_status=jd_status,
-            corporate_name=corporate_name,
-            corporate_logo_url=corporate_logo_url,
-        )
+        html_content = ReportService.render_report_html(report)
 
         try:
             from weasyprint import HTML

@@ -5,12 +5,12 @@ import { jsPDF } from 'jspdf';
 import MindQReport from './mindq-report';
 import { safeLogoUrl } from './report-logo';
 import { computePageSlices } from './pdf-pagination';
-import { REPORT_TITLE } from './report-copy';
 import { reportFilename } from './report-filename';
 import { REPORT_WIDTH_PX } from './report-styles';
 
 const PAGE_MARGIN_MM = 10;
-const FOOTER_BAND_MM = 8;
+const FOOTER_GAP_MM = 3;
+const PAGE_NUMBER_BAND_MM = 4;
 const MAX_CANVAS_HEIGHT_PX = 30000;
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const LOGO_FETCH_TIMEOUT_MS = 8000;
@@ -101,61 +101,114 @@ function rasterizeReportHtml(reportHtml, widthPx, heightPx, scale) {
 }
 
 /**
- * Collect safe break offsets (block bottoms) relative to the report root.
+ * @typedef {{ top: number, bottom: number }} Range
+ * @typedef {{
+ *   contentHeight: number,
+ *   breakpoints: number[],
+ *   keepTogether: Range[],
+ *   footer: Range | null,
+ * }} ReportLayout
+ */
+
+/**
+ * Measure pagination hints relative to the report root.
+ *
+ * Content stops where the footer starts: the footer is stamped onto every
+ * page separately instead of appearing once at the end.
  *
  * @param {HTMLElement} root
- * @returns {number[]}
+ * @returns {ReportLayout}
  */
-function collectBreakpoints(root) {
+export function measureReportLayout(root) {
   const rootTop = root.getBoundingClientRect().top;
-  const points = [];
-  root.querySelectorAll('[data-pdf-block], tr').forEach((el) => {
+  const rangeOf = (el) => {
     const rect = el.getBoundingClientRect();
-    points.push(rect.top - rootTop, rect.bottom - rootTop);
+    return { top: rect.top - rootTop, bottom: rect.bottom - rootTop };
+  };
+
+  const footerEl = root.querySelector('[data-pdf-footer]');
+  const footer = footerEl ? rangeOf(footerEl) : null;
+  const contentHeight = footer ? footer.top : root.scrollHeight;
+
+  const keepTogether = [...root.querySelectorAll('[data-pdf-block]')].map(rangeOf);
+  const breakpoints = [];
+  keepTogether.forEach((r) => breakpoints.push(r.top, r.bottom));
+  root.querySelectorAll('[data-pdf-row], tr').forEach((el) => {
+    const r = rangeOf(el);
+    breakpoints.push(r.top, r.bottom);
   });
-  return points;
+
+  return {
+    contentHeight,
+    breakpoints: breakpoints.filter((b) => b < contentHeight),
+    keepTogether: keepTogether.filter((r) => r.bottom <= contentHeight),
+    footer,
+  };
 }
 
 /**
- * Build a paginated A4 PDF from the rasterized report.
+ * @param {HTMLCanvasElement} source
+ * @param {number} scale
+ * @param {number} topPx
+ * @param {number} heightPx
+ * @returns {HTMLCanvasElement}
+ */
+function cropCanvas(source, scale, topPx, heightPx) {
+  const out = document.createElement('canvas');
+  out.width = source.width;
+  out.height = Math.max(1, Math.round(heightPx * scale));
+  const ctx = out.getContext('2d');
+  if (!ctx) throw new Error('Canvas unavailable for PDF pagination');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(
+    source,
+    0,
+    Math.round(topPx * scale),
+    source.width,
+    out.height,
+    0,
+    0,
+    out.width,
+    out.height,
+  );
+  return out;
+}
+
+/**
+ * Build a paginated A4 PDF from the rasterized report, repeating the
+ * branded disclaimer footer at the bottom of every page.
  *
  * @param {HTMLCanvasElement} canvas
  * @param {number} scale Canvas px per CSS px.
  * @param {number} widthPx Report width (CSS px).
- * @param {number} heightPx Report height (CSS px).
- * @param {number[]} breakpoints Safe break offsets (CSS px).
+ * @param {ReportLayout} layout
  * @returns {Blob}
  */
-function canvasToPdfBlob(canvas, scale, widthPx, heightPx, breakpoints) {
+function canvasToPdfBlob(canvas, scale, widthPx, layout) {
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const usableWidth = pageWidth - PAGE_MARGIN_MM * 2;
-  const usableHeight = pageHeight - PAGE_MARGIN_MM * 2 - FOOTER_BAND_MM;
   const mmPerPx = usableWidth / widthPx;
+
+  const footerHeightPx = layout.footer ? layout.footer.bottom - layout.footer.top : 0;
+  const footerHeightMm = footerHeightPx * mmPerPx;
+  const footerImage =
+    layout.footer && footerHeightPx > 0
+      ? cropCanvas(canvas, scale, layout.footer.top, footerHeightPx).toDataURL('image/jpeg', 0.95)
+      : null;
+
+  const usableHeight =
+    pageHeight - PAGE_MARGIN_MM * 2 - footerHeightMm - FOOTER_GAP_MM - PAGE_NUMBER_BAND_MM;
   const pageHeightPx = usableHeight / mmPerPx;
 
-  const slices = computePageSlices(heightPx, pageHeightPx, breakpoints);
+  const slices = computePageSlices(layout.contentHeight, pageHeightPx, layout.breakpoints, {
+    keepTogether: layout.keepTogether,
+  });
   slices.forEach((slice, index) => {
     const sliceHeightPx = slice.end - slice.start;
-    const pageCanvas = document.createElement('canvas');
-    pageCanvas.width = canvas.width;
-    pageCanvas.height = Math.max(1, Math.round(sliceHeightPx * scale));
-    const ctx = pageCanvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas unavailable for PDF pagination');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-    ctx.drawImage(
-      canvas,
-      0,
-      Math.round(slice.start * scale),
-      canvas.width,
-      pageCanvas.height,
-      0,
-      0,
-      pageCanvas.width,
-      pageCanvas.height,
-    );
+    const pageCanvas = cropCanvas(canvas, scale, slice.start, sliceHeightPx);
 
     if (index > 0) pdf.addPage();
     pdf.addImage(
@@ -167,12 +220,21 @@ function canvasToPdfBlob(canvas, scale, widthPx, heightPx, breakpoints) {
       sliceHeightPx * mmPerPx,
     );
 
-    const footerY = pageHeight - PAGE_MARGIN_MM;
+    const pageNumberY = pageHeight - PAGE_MARGIN_MM;
+    if (footerImage) {
+      pdf.addImage(
+        footerImage,
+        'JPEG',
+        PAGE_MARGIN_MM,
+        pageNumberY - PAGE_NUMBER_BAND_MM - footerHeightMm,
+        usableWidth,
+        footerHeightMm,
+      );
+    }
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(8);
     pdf.setTextColor(107, 114, 128);
-    pdf.text(REPORT_TITLE, PAGE_MARGIN_MM, footerY);
-    pdf.text(`Page ${index + 1} of ${slices.length}`, pageWidth - PAGE_MARGIN_MM, footerY, {
+    pdf.text(`Page ${index + 1} of ${slices.length}`, pageWidth - PAGE_MARGIN_MM, pageNumberY, {
       align: 'right',
     });
   });
@@ -217,11 +279,11 @@ export async function renderReportPdf(data) {
     const widthPx = Math.max(element.scrollWidth || REPORT_WIDTH_PX, REPORT_WIDTH_PX);
     const heightPx = Math.max(element.scrollHeight || 0, 200);
     const scale = Math.min(2, MAX_CANVAS_HEIGHT_PX / heightPx);
-    const breakpoints = collectBreakpoints(element);
+    const layout = measureReportLayout(element);
     const canvas = await rasterizeReportHtml(element.outerHTML, widthPx, heightPx, scale);
     return {
-      blob: canvasToPdfBlob(canvas, scale, widthPx, heightPx, breakpoints),
-      filename: reportFilename(data.candidate_name),
+      blob: canvasToPdfBlob(canvas, scale, widthPx, layout),
+      filename: reportFilename(data.candidate_full_name),
     };
   } finally {
     root.unmount();
@@ -248,7 +310,7 @@ export function saveBlob(blob, filename) {
 }
 
 /**
- * Fetch report data and download `MindQ Report - [Candidate Full Name].pdf`.
+ * Fetch report data and download `Mind Q Report - ${candidateFullName}.pdf`.
  *
  * @param {() => Promise<Record<string, any>>} fetchReportData
  * @returns {Promise<void>}

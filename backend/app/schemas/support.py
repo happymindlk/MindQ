@@ -22,7 +22,6 @@ class PublicTrackCandidate(BaseModel):
     status: str
     progress: str
     avg_score: Optional[float] = None
-    jd_fit: Optional[float] = None
 
 
 class PublicTrackResponse(BaseModel):

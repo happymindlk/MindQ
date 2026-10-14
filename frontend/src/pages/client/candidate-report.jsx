@@ -38,22 +38,24 @@ export default function ClientCandidateReport() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title={data?.candidate_name || REPORT_TITLE}
-        description={data ? `${REPORT_TITLE} · ${data.target_role || data.company_name}` : undefined}
-        actions={
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => navigate('/client/dashboard')}>
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Dashboard
-            </Button>
-            <Button size="sm" onClick={onDownload} isLoading={downloading} disabled={!data}>
-              {!downloading && <Download className="h-3.5 w-3.5" />}
-              Download PDF
-            </Button>
-          </div>
-        }
-      />
+      <div className="print:hidden">
+        <PageHeader
+          title={data?.candidate_full_name || REPORT_TITLE}
+          description={data ? `${REPORT_TITLE} · ${data.target_role || data.company_name}` : undefined}
+          actions={
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={() => navigate('/client/dashboard')}>
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Dashboard
+              </Button>
+              <Button size="sm" onClick={onDownload} isLoading={downloading} disabled={!data}>
+                {!downloading && <Download className="h-3.5 w-3.5" />}
+                Download PDF
+              </Button>
+            </div>
+          }
+        />
+      </div>
 
       {loading && <SkeletonRows rows={8} />}
 
@@ -68,8 +70,8 @@ export default function ClientCandidateReport() {
       )}
 
       {!loading && !error && data && (
-        <div className="overflow-x-auto rounded-lg border border-border bg-surface-raised p-4 sm:p-8">
-          <div className="mx-auto w-fit rounded-sm shadow-lg ring-1 ring-black/5">
+        <div className="overflow-x-auto rounded-lg border border-border bg-surface-raised p-4 sm:p-8 print:overflow-visible print:rounded-none print:border-0 print:bg-white print:p-0">
+          <div className="mx-auto w-fit rounded-sm shadow-lg ring-1 ring-black/5 print:w-full print:shadow-none print:ring-0">
             <MindQReport data={data} />
           </div>
         </div>

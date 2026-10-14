@@ -1,9 +1,11 @@
-export const REPORT_TITLE = 'MindQ Report';
+export const REPORT_TITLE = 'Assessment Report';
 
-export const DISCLAIMER_TITLE = 'Important: Use of Assessment Results.';
+export const REPORT_FILE_PREFIX = 'Mind Q Report';
 
-export const DISCLAIMER_BODY =
-  "The results of this psychometric assessment are intended to provide additional insights into a candidate's behavioural, cognitive, and personality characteristics and should be considered as part of the overall recruitment and selection process. MindQ does not make or determine employment decisions based on assessment results. The final decision remains with the organization.";
+export const CATEGORY_ORDER = ['Cognitive', 'Personality', 'Behavioral', 'Technical'];
 
 export const FOOTER_NOTICE =
-  'This is an automatically generated report. The contents of this report must not be edited, altered, or modified without prior written authorization from MindQ.';
+  'This is an auto-generated Mind Queue report. This cannot be reproduced, edited or redistributed without the written consent of Mind Queue Private Limited.';
+
+export const FIT_DISCLAIMER =
+  'This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis over an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.';

@@ -124,15 +124,19 @@ export const adminApi = {
     );
     const blob = await res.blob();
     const reportType = res.headers.get('x-report-type') || '';
-    const jdStatus = res.headers.get('x-jd-fit-status') || '';
+    const synthesisStatus = res.headers.get('x-report-synthesis-status') || '';
     const isHtml = reportType === 'HTML' || (res.headers.get('content-type') || '').includes('text/html');
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `report-${candidateId}.${isHtml ? 'html' : 'pdf'}`;
+    const disposition = res.headers.get('content-disposition') || '';
+    const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+    a.download = encodedName
+      ? decodeURIComponent(encodedName)
+      : `Mind Q Report - ${candidateId}.${isHtml ? 'html' : 'pdf'}`;
     a.click();
     window.URL.revokeObjectURL(url);
-    return { isHtml, jdStatus };
+    return { isHtml, synthesisStatus };
   },
 
   async inviteCandidate({ candidateEmail, packageId, corporateId }) {
@@ -158,7 +162,7 @@ export const adminApi = {
     const [evalRes, assessRes, respRes, progRes] = await Promise.all([
       supabase
         .from('candidate_evaluations')
-        .select('payload, overall_fit, generated_at')
+        .select('payload, status, generated_at')
         .eq('candidate_id', candidateId)
         .maybeSingle(),
       supabase
@@ -413,7 +417,7 @@ export const adminApi = {
 
 // Client-side CSV export of the (already RLS-scoped) candidate overview rows.
 export function exportCandidatesCsv(candidates) {
-  const headers = ['Name', 'Email', 'Package', 'Status', 'Progress', 'Avg Score', 'JD Fit'];
+  const headers = ['Name', 'Email', 'Package', 'Status', 'Progress', 'Avg Score'];
   const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = candidates.map((c) => [
     c.full_name,
@@ -422,7 +426,6 @@ export function exportCandidatesCsv(candidates) {
     candidateStatus(c),
     `${c.completed_assessments}/${c.total_assessments}`,
     c.avg_score != null ? `${c.avg_score}%` : '-',
-    c.jd_fit != null ? `${c.jd_fit}%` : '-',
   ].map(escape).join(','));
   const csv = [headers.map(escape).join(','), ...rows].join('\n');
 

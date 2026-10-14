@@ -7,7 +7,7 @@ Steps:
   1. Print resolved Gemini settings (key length only, never the key) incl. fallback.
   2. Trivial ping with token usage metadata.
   3. DB snapshot: today's candidate_evaluations / technical eval statuses.
-  4. Real ``build_evidence`` + ``score_against_jd`` against a candidate, capturing
+  4. Real ``build_evidence`` + report synthesis against a candidate, capturing
      the exact prompt size, raw response, and usage metadata. Nothing is persisted.
 
 Exits 0 when both Gemini calls succeed, 1 otherwise.
@@ -33,7 +33,7 @@ from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.models.package import Package
 from app.prompts.jd_scoring import SYSTEM_INSTRUCTION, build_user_prompt
-from app.schemas.jd_evaluation import JD_FIT_JSON_SCHEMA
+from app.schemas.jd_evaluation import REPORT_SYNTHESIS_JSON_SCHEMA
 from app.services.gemini_client import (
     fallback_models,
     generate_content_sync,
@@ -42,9 +42,14 @@ from app.services.gemini_client import (
 from app.services.jd_scoring import (
     build_evidence,
     evaluation_is_ok,
-    hash_job_description,
     parse_evaluation_json,
     resolve_job_description,
+    synthesis_cache_key,
+)
+from app.services.report_synthesis import (
+    build_module_outcomes,
+    load_catalog_categories,
+    prompt_assessments,
 )
 
 DEFAULT_CANDIDATE = "99a13504-be3c-41ff-9b5a-55e3c09610b0"
@@ -190,7 +195,12 @@ async def step_jd_pipeline(session: Any, candidate_id: UUID) -> bool:
     if not jd:
         print("SKIP: no JD / role -> get_or_evaluate returns 'skipped' without calling Gemini")
         return False
-    digest = hash_job_description(jd)
+    catalog = await load_catalog_categories(session, list(assessments))
+    outcomes = build_module_outcomes(list(assessments), list(progresses), list(responses), catalog)
+    if not outcomes:
+        print("SKIP: no completed assessments -> get_or_evaluate returns 'skipped'")
+        return False
+    digest = synthesis_cache_key(jd, outcomes)
     cached = (
         await session.execute(
             select(CandidateEvaluation).where(CandidateEvaluation.candidate_id == candidate.id)
@@ -207,12 +217,17 @@ async def step_jd_pipeline(session: Any, candidate_id: UUID) -> bool:
 
     evidence = build_evidence(assessments, progresses, responses)
     evidence_json = json.dumps(evidence, ensure_ascii=False, default=str)
+    scores = prompt_assessments(outcomes)
     prompt = build_user_prompt(
+        target_role=(package.target_role or "") if package else "",
         job_description=jd,
         candidate_name=candidate.full_name,
         package_title=package.title if package else "",
+        assessment_scores_json=json.dumps(scores, ensure_ascii=False),
         evidence_json=evidence_json,
     )
+    for row in scores:
+        print(f"  {row['assessment_key']} {row['category']} {row['assessment_name']!r}: {row['score']}")
     print(f"evidence_modules={len(evidence)} evidence_chars={len(evidence_json)} prompt_chars={len(prompt)}")
     for module in evidence:
         counts = {
@@ -239,7 +254,7 @@ async def step_jd_pipeline(session: Any, candidate_id: UUID) -> bool:
                 system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.2,
                 response_mime_type="application/json",
-                response_json_schema=JD_FIT_JSON_SCHEMA,
+                response_json_schema=REPORT_SYNTHESIS_JSON_SCHEMA,
             ),
         )
     except Exception as exc:  # noqa: BLE001 - diagnostic surface
@@ -253,7 +268,11 @@ async def step_jd_pipeline(session: Any, candidate_id: UUID) -> bool:
     except Exception as exc:  # noqa: BLE001 - diagnostic surface
         print(f"FAIL: schema validation: {exc}")
         return False
-    print(f"parsed overall_fit={evaluation.overall_fit} (not persisted)")
+    print(
+        f"parsed summaries={len(evaluation.competency_breakdown)} "
+        f"strengths={len(evaluation.strengths)} "
+        f"risks={len(evaluation.risks_and_antipatterns)} (not persisted)"
+    )
     return True
 
 

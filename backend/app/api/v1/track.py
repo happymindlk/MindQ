@@ -6,7 +6,6 @@ import logging
 from app.database import get_db
 from app.models.assessment import Assessment
 from app.models.candidate import Candidate
-from app.models.candidate_evaluation import CandidateEvaluation
 from app.models.candidate_progress import CandidateProgress
 from app.models.corporate import Corporate
 from app.models.package import Package
@@ -70,21 +69,12 @@ async def public_package_track(
         elif completed > 0 or cand.logged_in_at:
             status = "in_progress"
 
-        eval_row = (
-            await db.execute(
-                select(CandidateEvaluation).where(
-                    CandidateEvaluation.candidate_id == cand.id
-                )
-            )
-        ).scalars().first()
-
         rows.append(
             PublicTrackCandidate(
                 full_name=cand.full_name,
                 status=status,
                 progress=f"{completed}/{total_assessments}",
                 avg_score=round(sum(scores) / len(scores), 1) if scores else None,
-                jd_fit=float(eval_row.overall_fit) if eval_row and eval_row.overall_fit is not None else None,
             )
         )
 

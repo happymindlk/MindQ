@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Search, Download, Bell, Users, RefreshCw } from 'lucide-react';
 import Button from '../../components/ui/Button';
@@ -101,7 +101,7 @@ export default function CandidateTracker() {
         await downloadMindQReport(() => adminApi.getReportData(candidateId));
         toast({
           title: 'Report ready',
-          description: 'MindQ Report PDF downloaded.',
+          description: 'Assessment report PDF downloaded.',
           variant: 'success',
         });
         const data = await adminApi.getCandidates(packageId);
@@ -189,13 +189,12 @@ export default function CandidateTracker() {
         ),
       },
       {
-        id: 'jd_fit',
-        header: 'JD fit',
-        tabular: true,
-        accessor: (row) => (row.jd_fit != null ? Number(row.jd_fit) : -1),
+        id: 'report',
+        header: 'Report',
+        accessor: (row) => (row.evaluated ? 1 : 0),
         cell: (row) => {
-          if (row.jd_fit != null) {
-            return <span className="tabular-data text-foreground">{row.jd_fit}%</span>;
+          if (row.evaluated) {
+            return <Badge variant="completed">Ready</Badge>;
           }
           if (candidateStatus(row) === 'completed') {
             return <Badge variant="scoring">Scoring</Badge>;
@@ -218,7 +217,7 @@ export default function CandidateTracker() {
                   size="sm"
                   onClick={() => handleDownloadReport(row.id)}
                   isLoading={downloadingId === row.id}
-                  title="Download MindQ Report"
+                  title="Download assessment report"
                 >
                   <Download className="w-3.5 h-3.5" />
                   Download Report

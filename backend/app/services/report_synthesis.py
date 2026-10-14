@@ -1,42 +1,45 @@
-"""MindQ Report synthesis: competency grouping, averages, and narratives.
+"""MindQ Report scoring: module outcomes, category averages, breakdown merge.
 
-Narratives are rule-based rather than model-generated so that two candidates
-with identical scores always receive identical wording — a requirement for a
-defensible, auditable selection document.
+Everything numeric in the report is computed here, deterministically. Gemini
+only contributes prose (see ``app.schemas.jd_evaluation.ReportSynthesis``),
+which is merged onto these outcomes by a stable ``assessment_key``.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Iterable, Literal, Mapping, Sequence
+from typing import Any, Literal
 from uuid import UUID
 
-from app.schemas.client_package import (
-    ReportAssessmentScore,
-    ReportCompetencyGroup,
-    ReportCompletedAssessment,
-)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-ReportCategory = Literal["cognitive", "behavioral", "personality", "technical"]
+from app.models.assessment import Assessment
+from app.models.candidate_progress import CandidateProgress
+from app.models.candidate_response import CandidateResponse
+from app.models.global_module import GlobalModule
+from app.schemas.jd_evaluation import ReportSynthesis
+from app.schemas.mindq_report import AssessmentBreakdownItem, ReportCategory
+from app.services.candidate_service import COMPLETED_STATUS
+from app.services.scoring import _extract_answer, _normalize_answer_set
+
+CategoryKey = Literal["cognitive", "behavioral", "personality", "technical"]
 Band = Literal["exceptional", "strong", "moderate", "developing", "emerging"]
 
-CATEGORY_ORDER: tuple[ReportCategory, ...] = (
-    "cognitive",
-    "behavioral",
-    "personality",
-    "technical",
-)
-CATEGORY_LABELS: dict[ReportCategory, str] = {
+CATEGORY_ORDER: tuple[CategoryKey, ...] = ("cognitive", "personality", "behavioral", "technical")
+CATEGORY_LABELS: dict[CategoryKey, ReportCategory] = {
     "cognitive": "Cognitive",
-    "behavioral": "Behavioral",
     "personality": "Personality",
+    "behavioral": "Behavioral",
     "technical": "Technical",
 }
 PSYCHOMETRIC_CATEGORIES = frozenset({"cognitive", "behavioral", "personality"})
 
 LIKERT_MIN = 1.0
 LIKERT_MAX = 5.0
-NOTABLE_SPREAD = 15.0
 
 BAND_THRESHOLDS: tuple[tuple[float, Band], ...] = (
     (80.0, "exceptional"),
@@ -45,149 +48,106 @@ BAND_THRESHOLDS: tuple[tuple[float, Band], ...] = (
     (35.0, "developing"),
 )
 
-BAND_COPY: dict[ReportCategory, dict[Band, str]] = {
-    "cognitive": {
-        "exceptional": (
-            "This indicates exceptional reasoning ability: {first} processes complex "
-            "information quickly, identifies patterns accurately, and is likely to resolve "
-            "novel problems with minimal guidance."
-        ),
-        "strong": (
-            "This reflects strong analytical capability; {first} interprets information "
-            "accurately and should handle demanding problem-solving tasks with confidence."
-        ),
-        "moderate": (
-            "This reflects solid, functional reasoning; {first} handles routine analytical "
-            "tasks reliably but may need additional time or structure on highly complex, "
-            "unfamiliar problems."
-        ),
-        "developing": (
-            "This suggests reasoning skills that are still developing; {first} may benefit "
-            "from clear procedures and support when facing complex or ambiguous problems."
-        ),
-        "emerging": (
-            "This indicates that complex analytical tasks are currently a challenge; roles "
-            "with heavy problem-solving demands may require targeted support and development."
-        ),
-    },
-    "behavioral": {
-        "exceptional": (
-            "This indicates highly effective workplace judgement: {first} consistently "
-            "selects constructive, well-calibrated responses to interpersonal and "
-            "situational challenges."
-        ),
-        "strong": (
-            "This reflects sound judgement in workplace situations; {first} generally "
-            "chooses effective, professional courses of action."
-        ),
-        "moderate": (
-            "This reflects generally appropriate workplace judgement, with some situations "
-            "where alternative responses would have been more effective."
-        ),
-        "developing": (
-            "This suggests situational judgement that is still developing; {first} may "
-            "benefit from guidance on prioritisation and handling interpersonal challenges."
-        ),
-        "emerging": (
-            "This indicates that {first}'s preferred responses often diverged from the most "
-            "effective approaches; behavioural expectations should be explored further "
-            "during interview."
-        ),
-    },
-    "personality": {
-        "exceptional": (
-            "This indicates a very strong expression of the measured work-related traits, "
-            "pointing to a consistent and well-defined behavioural style."
-        ),
-        "strong": (
-            "This reflects a clear tendency toward the measured traits, suggesting a stable "
-            "and recognisable working style."
-        ),
-        "moderate": (
-            "This reflects a balanced profile; {first} adapts their style across situations "
-            "rather than showing a strong preference."
-        ),
-        "developing": (
-            "This suggests a lower expression of the measured traits; {first} may prefer "
-            "working approaches that differ from the profile assessed."
-        ),
-        "emerging": (
-            "This indicates a markedly low expression of the measured traits; fit with roles "
-            "that demand these characteristics should be explored during interview."
-        ),
-    },
-    "technical": {
-        "exceptional": (
-            "This indicates expert-level command of the assessed technical domain; {first} "
-            "is likely to contribute independently from the outset."
-        ),
-        "strong": (
-            "This reflects strong technical proficiency; {first} demonstrates a dependable "
-            "grasp of the core concepts required for the role."
-        ),
-        "moderate": (
-            "This reflects working technical knowledge with some gaps; {first} should "
-            "perform well on familiar tasks with support on advanced topics."
-        ),
-        "developing": (
-            "This suggests technical knowledge that is still developing; structured "
-            "onboarding and mentoring would likely be required."
-        ),
-        "emerging": (
-            "This indicates significant gaps in the assessed technical domain relative to "
-            "the role's requirements."
-        ),
-    },
+# Used only when Gemini is unavailable or omits an assessment, so every
+# breakdown row still carries exactly one sentence.
+FALLBACK_SENTENCES: dict[Band, str] = {
+    "exceptional": "{first} scored {score} on {name}, an exceptional result well above typical benchmarks.",
+    "strong": "{first} scored {score} on {name}, a strong result indicating solid capability in this area.",
+    "moderate": "{first} scored {score} on {name}, a moderate result indicating functional capability with room to grow.",
+    "developing": "{first} scored {score} on {name}, a developing result suggesting this area may need support.",
+    "emerging": "{first} scored {score} on {name}, a low result indicating this area is currently a gap.",
 }
 
 
 @dataclass(frozen=True)
 class ModuleOutcome:
-    """One completed assessment resolved for report synthesis.
+    """One completed assessment resolved for reporting.
 
     Attributes:
+        key: Stable prompt key (``A1``, ``A2``…) used to merge Gemini prose.
         id: Assessment id.
         title: Assessment title shown to HR.
         category: Resolved competency category.
-        score: Percentage score (0–100), or None when ungradable.
+        score: Percentage (0–100), or None when nothing was gradable.
         completed_at: Completion timestamp.
     """
 
+    key: str
     id: UUID
     title: str
-    category: ReportCategory
+    category: CategoryKey
     score: float | None
     completed_at: datetime | None
+
+
+def question_type(question: Mapping[str, Any]) -> str:
+    """Normalize a stored question's type.
+
+    Args:
+        question: Stored question dict.
+
+    Returns:
+        Lower-cased type, defaulting to ``open_ended``.
+    """
+    raw = question.get("type") or question.get("question_type") or question.get("builder_type")
+    return str(raw or "open_ended").lower()
+
+
+def _ai_score(response_raw: Any) -> float | None:
+    if not isinstance(response_raw, dict):
+        return None
+    value = response_raw.get("ai_score")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def score_item(question: Mapping[str, Any], response_raw: Any) -> float | None:
+    """Score one technical item: 100/0 for keyed MCQ, graded ``ai_score`` otherwise.
+
+    Args:
+        question: Stored question (with answer keys).
+        response_raw: ``candidate_responses.response`` JSONB.
+
+    Returns:
+        Item percentage, or None when ungraded.
+    """
+    qtype = question_type(question)
+    correct = question.get("correct_answer")
+    if correct is None and qtype == "mcq":
+        correct = question.get("correct_answer_or_rubric")
+    if qtype == "mcq" and correct is not None:
+        expected = _normalize_answer_set(correct)
+        if expected:
+            given = _normalize_answer_set(_extract_answer(response_raw))
+            return 100.0 if given == expected else 0.0
+    return _ai_score(response_raw)
 
 
 def resolve_category(
     module_kind: str | None,
     catalog_category: str | None,
     questions: Sequence[Any] | None,
-) -> ReportCategory:
+) -> CategoryKey:
     """Resolve the competency category for an assessment.
 
     The catalog's ``assessment_category`` wins; legacy psychometric modules
     without one are inferred from their item formats.
 
     Args:
-        module_kind: ``assessments.module_kind`` (``technical`` | ``psychometric``).
+        module_kind: ``assessments.module_kind``.
         catalog_category: ``global_modules.assessment_category`` when linked.
         questions: Stored question bank for format-based inference.
 
     Returns:
-        One of ``cognitive``, ``behavioral``, ``personality``, ``technical``.
+        Internal category key.
     """
     if (module_kind or "technical").strip().lower() != "psychometric":
         return "technical"
     normalized = (catalog_category or "").strip().lower()
     if normalized in PSYCHOMETRIC_CATEGORIES:
         return normalized  # type: ignore[return-value]
-    types = {
-        str(q.get("type") or q.get("question_type") or "").strip().lower()
-        for q in questions or []
-        if isinstance(q, dict)
-    }
+    types = {question_type(q) for q in questions or [] if isinstance(q, dict)}
     if "likert" in types:
         return "personality"
     if "sjt" in types:
@@ -200,12 +160,11 @@ def module_percentage(
 ) -> float | None:
     """Return a 0–100 score for a completed module.
 
-    Gradable modules use their stored percentage. Likert-only modules have no
-    right/wrong score, so their n-weighted facet means are mapped linearly from
-    the 1–5 scale onto 0–100.
+    Likert-only modules have no right/wrong score, so their n-weighted facet
+    means are mapped linearly from the 1–5 scale onto 0–100.
 
     Args:
-        score: ``candidate_progress.score`` (percentage) or None.
+        score: ``candidate_progress.score`` or None.
         facet_scores: ``{facet: {"mean": float, "n": int}}`` from Likert items.
 
     Returns:
@@ -234,6 +193,113 @@ def module_percentage(
     return round((mean_rating - LIKERT_MIN) / (LIKERT_MAX - LIKERT_MIN) * 100, 1)
 
 
+def _item_average(questions: Sequence[Any] | None, responses: Mapping[str, Any]) -> float | None:
+    """Mean graded item score for technical modules with only open-ended items."""
+    scores = [
+        s
+        for q in questions or []
+        if isinstance(q, dict)
+        and (s := score_item(q, responses.get(str(q.get("id") or "")))) is not None
+    ]
+    return round(sum(scores) / len(scores), 1) if scores else None
+
+
+async def load_catalog_categories(
+    db: AsyncSession, assessments: Iterable[Assessment]
+) -> dict[UUID, str | None]:
+    """Fetch ``assessment_category`` for linked catalog modules in one query.
+
+    Args:
+        db: Async session.
+        assessments: Package assessments.
+
+    Returns:
+        ``global_modules.id`` → category.
+    """
+    ids = {a.global_module_id for a in assessments if a.global_module_id}
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(GlobalModule.id, GlobalModule.assessment_category).where(GlobalModule.id.in_(ids))
+    )
+    return {row.id: row.assessment_category for row in rows.all()}
+
+
+def build_module_outcomes(
+    assessments: Sequence[Assessment],
+    progresses: Iterable[CandidateProgress],
+    responses: Iterable[CandidateResponse],
+    catalog_categories: Mapping[UUID, str | None],
+) -> list[ModuleOutcome]:
+    """Resolve every *completed* assessment into a scored outcome.
+
+    Args:
+        assessments: Package assessments in display order.
+        progresses: Candidate progress rows.
+        responses: Candidate response rows.
+        catalog_categories: Output of ``load_catalog_categories``.
+
+    Returns:
+        Outcomes in assessment order, keyed ``A1``…``An``.
+    """
+    progress_by_id = {p.assessment_id: p for p in progresses}
+    responses_by_assessment: dict[UUID, dict[str, Any]] = {}
+    for row in responses:
+        responses_by_assessment.setdefault(row.assessment_id, {})[str(row.question_id)] = row.response
+
+    outcomes: list[ModuleOutcome] = []
+    for assessment in assessments:
+        prog = progress_by_id.get(assessment.id)
+        if prog is None or str(prog.status or "").upper() != COMPLETED_STATUS:
+            continue
+        category = resolve_category(
+            assessment.module_kind,
+            catalog_categories.get(assessment.global_module_id)
+            if assessment.global_module_id
+            else None,
+            assessment.questions,
+        )
+        score = module_percentage(prog.score, prog.facet_scores)
+        if score is None and category == "technical":
+            score = _item_average(
+                assessment.questions, responses_by_assessment.get(assessment.id, {})
+            )
+        outcomes.append(
+            ModuleOutcome(
+                key=f"A{len(outcomes) + 1}",
+                id=assessment.id,
+                title=assessment.title,
+                category=category,
+                score=score,
+                completed_at=prog.completed_at,
+            )
+        )
+    return outcomes
+
+
+def compute_category_averages(outcomes: Iterable[ModuleOutcome]) -> dict[ReportCategory, float]:
+    """Average score per category over the assessments actually completed.
+
+    No weights are assumed for missing assessments: a category is present only
+    when at least one completed assessment in it produced a score.
+
+    Args:
+        outcomes: Completed module outcomes.
+
+    Returns:
+        ``{"Cognitive": 72.5, ...}`` in fixed category order.
+    """
+    buckets: dict[CategoryKey, list[float]] = {}
+    for outcome in outcomes:
+        if outcome.score is not None:
+            buckets.setdefault(outcome.category, []).append(outcome.score)
+    return {
+        CATEGORY_LABELS[key]: round(sum(buckets[key]) / len(buckets[key]), 1)
+        for key in CATEGORY_ORDER
+        if buckets.get(key)
+    }
+
+
 def score_band(score: float) -> Band:
     """Map a percentage onto a descriptive band.
 
@@ -241,7 +307,7 @@ def score_band(score: float) -> Band:
         score: Percentage in 0–100.
 
     Returns:
-        Band key used to select narrative copy.
+        Band key.
     """
     for threshold, band in BAND_THRESHOLDS:
         if score >= threshold:
@@ -254,116 +320,101 @@ def _first_name(full_name: str) -> str:
     return parts[0] if parts else "The candidate"
 
 
-def _format_pct(value: float) -> str:
-    return f"{value:g}%"
-
-
-def build_narrative(
-    category: ReportCategory,
-    candidate_name: str,
-    modules: Sequence[ModuleOutcome],
-    average: float | None,
-) -> str:
-    """Compose the descriptive paragraph for one competency group.
+def fallback_performance_summary(candidate_name: str, outcome: ModuleOutcome) -> str:
+    """Deterministic one-sentence summary used when Gemini prose is missing.
 
     Args:
-        category: Competency category being described.
-        candidate_name: Candidate full name (first name is used in prose).
-        modules: Completed modules in this category.
-        average: Group average percentage, or None when nothing is scorable.
+        candidate_name: Candidate full name.
+        outcome: Scored module outcome.
 
     Returns:
-        A short, deterministic paragraph explaining the candidate's abilities.
+        One sentence.
     """
-    first = _first_name(candidate_name)
-    label = CATEGORY_LABELS[category].lower()
-    if average is None:
-        return (
-            f"{first} completed the {label} assessments, but scores are not yet available "
-            "for interpretation."
-        )
-
-    scored = [m for m in modules if m.score is not None]
-    noun = "assessment" if len(scored) == 1 else "assessments"
-    opener = (
-        f"{first} achieved an average of {_format_pct(average)} across "
-        f"{len(scored)} {label} {noun}."
+    score = outcome.score or 0.0
+    return FALLBACK_SENTENCES[score_band(score)].format(
+        first=_first_name(candidate_name), score=f"{score:g}%", name=outcome.title
     )
-    body = BAND_COPY[category][score_band(average)].format(first=first)
-
-    closing = ""
-    if len(scored) >= 2:
-        best = max(scored, key=lambda m: m.score or 0.0)
-        worst = min(scored, key=lambda m: m.score or 0.0)
-        if (best.score or 0.0) - (worst.score or 0.0) >= NOTABLE_SPREAD:
-            closing = (
-                f" Performance was strongest in {best.title} ({_format_pct(best.score or 0.0)})"
-                f" and comparatively lower in {worst.title} "
-                f"({_format_pct(worst.score or 0.0)}), indicating a relative strength in the "
-                "former area."
-            )
-        else:
-            closing = " Results were consistent across modules, indicating a stable profile."
-    return f"{opener} {body}{closing}"
 
 
-def build_competency_groups(
-    candidate_name: str, modules: Iterable[ModuleOutcome]
-) -> list[ReportCompetencyGroup]:
-    """Group completed modules by category with averages and narratives.
+def performance_summaries(
+    candidate_name: str,
+    outcomes: Iterable[ModuleOutcome],
+    synthesis: ReportSynthesis | None,
+) -> dict[UUID, str]:
+    """One sentence per scored assessment: Gemini's when present, else fallback.
 
     Args:
-        candidate_name: Candidate full name for narrative copy.
-        modules: Completed module outcomes in display order.
+        candidate_name: Candidate full name (fallback copy).
+        outcomes: Completed module outcomes.
+        synthesis: Gemini synthesis, or None when unavailable.
 
     Returns:
-        Groups in fixed Cognitive → Behavioral → Personality → Technical order;
-        categories with no completed modules are omitted.
+        Assessment id → sentence, for scored outcomes only.
     """
-    by_category: dict[ReportCategory, list[ModuleOutcome]] = {}
-    for module in modules:
-        by_category.setdefault(module.category, []).append(module)
-
-    groups: list[ReportCompetencyGroup] = []
-    for category in CATEGORY_ORDER:
-        members = by_category.get(category)
-        if not members:
-            continue
-        scores = [m.score for m in members if m.score is not None]
-        average = round(sum(scores) / len(scores), 1) if scores else None
-        groups.append(
-            ReportCompetencyGroup(
-                key=category,
-                label=CATEGORY_LABELS[category],
-                average_score=average,
-                assessments=[
-                    ReportAssessmentScore(id=m.id, title=m.title, score=m.score)
-                    for m in members
-                ],
-                narrative=build_narrative(category, candidate_name, members, average),
-            )
-        )
-    return groups
+    sentences = synthesis.summaries_by_key() if synthesis else {}
+    return {
+        o.id: sentences.get(o.key) or fallback_performance_summary(candidate_name, o)
+        for o in outcomes
+        if o.score is not None
+    }
 
 
-def build_completed_assessments(
-    modules: Iterable[ModuleOutcome],
-) -> list[ReportCompletedAssessment]:
-    """List completed modules for the report's "Completed Assessments" section.
+def build_competency_breakdown(
+    outcomes: Iterable[ModuleOutcome], summaries: Mapping[UUID, str]
+) -> list[AssessmentBreakdownItem]:
+    """Merge sentences onto server-computed scores.
+
+    Unscored outcomes are excluded (a breakdown row always has a real score).
 
     Args:
-        modules: Completed module outcomes in display order.
+        outcomes: Completed module outcomes.
+        summaries: Output of ``performance_summaries``.
 
     Returns:
-        One row per completed module with its category label and completion date.
+        Breakdown rows in category order, then assessment order.
+    """
+    scored = [o for o in outcomes if o.score is not None and o.id in summaries]
+    scored.sort(key=lambda o: CATEGORY_ORDER.index(o.category))
+    return [
+        AssessmentBreakdownItem(
+            category=CATEGORY_LABELS[o.category],
+            assessment_name=o.title,
+            score=max(0.0, min(100.0, o.score or 0.0)),
+            performance_summary=summaries[o.id],
+        )
+        for o in scored
+    ]
+
+
+def prompt_assessments(outcomes: Iterable[ModuleOutcome]) -> list[dict[str, Any]]:
+    """Score table handed to Gemini (only scored, completed assessments).
+
+    Args:
+        outcomes: Completed module outcomes.
+
+    Returns:
+        ``[{assessment_key, assessment_name, category, score}]``.
     """
     return [
-        ReportCompletedAssessment(
-            id=m.id,
-            title=m.title,
-            category=m.category,
-            category_label=CATEGORY_LABELS[m.category],
-            completed_at=m.completed_at,
-        )
-        for m in modules
+        {
+            "assessment_key": o.key,
+            "assessment_name": o.title,
+            "category": CATEGORY_LABELS[o.category],
+            "score": o.score,
+        }
+        for o in outcomes
+        if o.score is not None
     ]
+
+
+def outcomes_fingerprint(outcomes: Iterable[ModuleOutcome]) -> str:
+    """Stable digest of the scores a synthesis was written against.
+
+    Args:
+        outcomes: Completed module outcomes.
+
+    Returns:
+        Hex SHA-256; changes whenever any completed score or category changes.
+    """
+    payload = json.dumps(prompt_assessments(outcomes), sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
