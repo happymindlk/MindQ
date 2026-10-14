@@ -21,3 +21,8 @@ docker-compose.override.yml
 # Database
 *.db
 *.sqlite3
+
+uvicorn.log
+backend/uvicorn.log
+.env
+.env.*
