@@ -11,9 +11,13 @@ alter table public.corporates
 alter table public.packages
     add column if not exists track_secret text;
 
+-- Vanilla Postgres has no Supabase `extensions` schema. Install pgcrypto here
+-- so gen_random_bytes resolves from the default search path (public).
+create extension if not exists pgcrypto;
+
 -- Backfill unique secrets for existing packages.
 update public.packages
-set track_secret = encode(extensions.gen_random_bytes(24), 'hex')
+set track_secret = encode(gen_random_bytes(24), 'hex')
 where track_secret is null;
 
 alter table public.packages

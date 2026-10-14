@@ -67,6 +67,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: Ensure pgcrypto and extensions schema
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          psql -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -c "CREATE SCHEMA IF NOT EXISTS extensions;"
+          psql -v ON_ERROR_STOP=1 -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;"
       - name: Verify migrations + RLS isolation
         env:
           PGHOST: localhost
