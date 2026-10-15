@@ -66,24 +66,6 @@ app.add_middleware(
 
 app.add_middleware(SecurityHeadersMiddleware)
 
-
-@app.middleware("http")
-async def baseline_security_headers(request: Request, call_next):
-    """Ensure baseline browser security headers on every HTTP response.
-
-    Args:
-        request: Incoming request.
-        call_next: Next handler in the ASGI stack.
-
-    Returns:
-        The downstream response with baseline headers filled in when absent.
-    """
-    response = await call_next(request)
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    return response
-
 app.include_router(api_router, prefix="/api/v1")
 # Gated beta waitlist (exact path requested by product): POST /api/request-beta-access
 app.include_router(beta_access_router, prefix="/api")

@@ -35,7 +35,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # jsdom 30 and Vitest 5 require Node >= 22; Node 20 cannot load jsdom in the worker.
           node-version: "24"
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
