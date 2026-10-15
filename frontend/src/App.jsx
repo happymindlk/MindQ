@@ -93,6 +93,7 @@ function App() {
             }
           >
             <Route index element={<Dashboard />} />
+            <Route path="dashboard" element={<Dashboard />} />
             <Route path="corporates" element={<Corporates />} />
             <Route path="corporates/:corporateId" element={<CorporateDetail />} />
             <Route path="library" element={<AssessmentLibrary />} />

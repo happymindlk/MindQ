@@ -1,49 +1,28 @@
-import React, { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Mail, Lock, ArrowRight, Package } from 'lucide-react';
+import React, { useCallback } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Mail, Lock, ArrowRight, ArrowLeft, Package } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
 import { useAuth } from '../../context/useAuth';
-import { isOpsRole, resolveRole } from '../../lib/auth-role';
-import { isSupabaseConfigured, supabase } from '../../lib/supabaseClient';
+import { isSupabaseConfigured } from '../../lib/supabaseClient';
+import OtpCodeInput from '../../features/admin-auth/otp-code-input';
+import { formatClock, useAdminOtpLogin } from '../../features/admin-auth/use-admin-otp-login';
 
 export default function AdminLogin() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { signIn, refreshMembership } = useAuth();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const { refreshMembership } = useAuth();
 
-  const from = location.state?.from?.pathname || '/admin/history';
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError(null);
-    setIsLoading(true);
+  const finish = useCallback(async () => {
     try {
-      const { error: signInError } = await signIn(email, password);
-      if (signInError) throw signInError;
-      const membership = await refreshMembership();
-      if (!membership?.corporateId) {
-        navigate('/pending-approval', { replace: true });
-        return;
-      }
-      const { data } = await supabase.auth.getSession();
-      const role = membership.role || resolveRole(data.session, null);
-      if (!isOpsRole(role)) {
-        navigate('/client/dashboard', { replace: true });
-        return;
-      }
-      navigate(from.startsWith('/admin') ? from : '/admin/history', { replace: true });
-    } catch (err) {
-      setError(err.message || 'Login failed');
-    } finally {
-      setIsLoading(false);
+      await refreshMembership();
+    } catch {
+      // The session is already stored. The route guard reads it on arrival.
     }
-  };
+    navigate('/admin/dashboard', { replace: true });
+  }, [navigate, refreshMembership]);
+
+  const login = useAdminOtpLogin(finish);
 
   return (
     <div className="min-h-screen bg-canvas flex flex-col justify-center items-center p-4">
@@ -56,9 +35,13 @@ export default function AdminLogin() {
         </div>
 
         <Card variant="elevated" className="p-8">
-          <h1 className="text-xl font-semibold text-foreground mb-1">Admin Portal</h1>
-          <p className="text-neutral-400 text-sm mb-6">
-            Enter your credentials to access the administrative console.
+          <h1 className="text-xl font-semibold text-foreground mb-1">
+            {login.step === 'otp' ? 'Verification code' : 'Admin Portal'}
+          </h1>
+          <p id="admin-otp-instructions" className="text-muted text-sm mb-6">
+            {login.step === 'otp'
+              ? 'Enter the 6-digit verification code sent to your registered email address.'
+              : 'Enter your credentials to access the administrative console.'}
           </p>
 
           {!isSupabaseConfigured && (
@@ -68,37 +51,100 @@ export default function AdminLogin() {
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-5">
-            <Input
-              label="Email"
-              type="email"
-              icon={Mail}
-              placeholder="ops@mindq.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-            <Input
-              label="Password"
-              type="password"
-              icon={Lock}
-              placeholder="Your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+          {login.step === 'credentials' ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void login.submitCredentials();
+              }}
+              className="space-y-5"
+            >
+              <Input
+                label="Email"
+                type="email"
+                icon={Mail}
+                autoComplete="username"
+                placeholder="ops@mindq.com"
+                value={login.email}
+                onChange={(event) => login.setEmail(event.target.value)}
+                required
+              />
+              <Input
+                label="Password"
+                type="password"
+                icon={Lock}
+                autoComplete="current-password"
+                placeholder="Your password"
+                value={login.password}
+                onChange={(event) => login.setPassword(event.target.value)}
+                required
+              />
 
-            {error && (
-              <div className="text-sm text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">
-                {error}
-              </div>
-            )}
+              {login.error && (
+                <div role="alert" className="text-sm text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">
+                  {login.error}
+                </div>
+              )}
 
-            <Button type="submit" className="w-full" size="lg" isLoading={isLoading} disabled={!email || !password}>
-              Sign In
-              {!isLoading && <ArrowRight className="w-5 h-5 ml-2" />}
-            </Button>
-          </form>
+              <Button
+                type="submit"
+                className="w-full"
+                size="lg"
+                isLoading={login.loading}
+                disabled={!login.email || !login.password}
+              >
+                Sign In
+                {!login.loading && <ArrowRight className="w-5 h-5 ml-2" />}
+              </Button>
+            </form>
+          ) : (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void login.verify(login.code);
+              }}
+              className="space-y-5"
+            >
+              <OtpCodeInput
+                value={login.code}
+                onChange={login.setCode}
+                disabled={login.loading || login.expired}
+                invalid={Boolean(login.error)}
+                describedBy="admin-otp-instructions admin-otp-timer"
+              />
+              <p id="admin-otp-timer" className="font-mono text-sm tabular-nums text-muted">
+                Code expires in {formatClock(login.secondsRemaining)}
+              </p>
+
+              {login.error && (
+                <div role="alert" className="text-sm text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">
+                  {login.error}
+                </div>
+              )}
+
+              <Button
+                type="button"
+                variant="secondary"
+                className="w-full"
+                size="lg"
+                disabled={!login.canResend || login.loading}
+                onClick={() => {
+                  void login.resend();
+                }}
+              >
+                {login.resendCooldown > 0 ? `Resend code in ${formatClock(login.resendCooldown)}` : 'Resend code'}
+              </Button>
+              <button
+                type="button"
+                onClick={login.backToCredentials}
+                disabled={login.loading}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-sm text-muted hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-50"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                Use a different account
+              </button>
+            </form>
+          )}
         </Card>
 
         <p className="mt-6 text-center text-sm text-neutral-400">

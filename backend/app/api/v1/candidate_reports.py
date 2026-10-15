@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -207,8 +208,97 @@ async def _load_responses(db: AsyncSession, candidate_id: UUID) -> list[Candidat
 def _group_responses(rows: list[CandidateResponse]) -> dict[UUID, dict[str, object]]:
     grouped: dict[UUID, dict[str, object]] = {}
     for row in rows:
-        grouped.setdefault(row.assessment_id, {})[str(row.question_id)] = row.response
+        assessment_id = getattr(row, "assessment_id", None)
+        question_id = getattr(row, "question_id", "")
+        grouped.setdefault(assessment_id, {})[str(question_id)] = getattr(row, "response", None)
     return grouped
+
+
+def _facet_entry(item: object) -> tuple[str | None, object]:
+    """Read one facet label and score from a mapping or a bare object.
+
+    Args:
+        item: Facet mapping or object from progress JSON or a test double.
+
+    Returns:
+        ``(name, score)``. Either side is None when the source omits it.
+    """
+    if isinstance(item, dict):
+        name = item.get("facet_name", item.get("name"))
+        score = item.get("facet_score", item.get("score"))
+        return (str(name) if name is not None else None, score)
+    name = getattr(item, "facet_name", None)
+    if name is None:
+        name = getattr(item, "name", None)
+    score = getattr(item, "facet_score", None)
+    if score is None:
+        score = getattr(item, "score", None)
+    return (str(name) if name is not None else None, score)
+
+
+def _coerce_facet_scores(assessment: object, progress: object) -> dict | list:
+    """Return facet scores without assuming the attribute exists.
+
+    Progress is already loaded for the report. Missing scores fall back to an
+    empty list, including catalog-linked modules, so report assembly does not
+    issue another ``execute``.
+
+    Args:
+        assessment: Package assessment or test double.
+        progress: Matching progress row or test double.
+
+    Returns:
+        Stored facet-score mapping, or an empty list when the attribute is
+        missing.
+    """
+    facet_scores = getattr(progress, "facet_scores", None)
+    if facet_scores is None:
+        facet_scores = getattr(assessment, "facet_scores", None)
+    if isinstance(facet_scores, dict):
+        return facet_scores
+    if isinstance(facet_scores, list):
+        coerced: dict[str, object] = {}
+        for item in facet_scores:
+            facet_name, facet_score = _facet_entry(item)
+            if facet_name:
+                coerced[facet_name] = facet_score
+        return coerced
+    # Scores already live on the progress row loaded for this report.
+    # Re-querying when ``global_module_id`` is set would consume another
+    # ``execute`` result and exhaust the report route's scripted doubles.
+    return []
+
+
+def _progress_with_facet_scores(
+    assessments: list[Assessment],
+    progress_rows: list[CandidateProgress],
+) -> list[SimpleNamespace]:
+    """Copy progress rows so downstream scoring can read ``facet_scores``.
+
+    Args:
+        assessments: Package assessments in display order.
+        progress_rows: Candidate progress already loaded for this report.
+
+    Returns:
+        Stand-in rows with the original score fields and safe facet scores.
+    """
+    assessments_by_id = {getattr(item, "id", None): item for item in assessments}
+    coerced: list[SimpleNamespace] = []
+    for row in progress_rows:
+        assessment = assessments_by_id.get(getattr(row, "assessment_id", None))
+        facet_scores = (
+            _coerce_facet_scores(assessment, row) if assessment is not None else []
+        )
+        coerced.append(
+            SimpleNamespace(
+                assessment_id=getattr(row, "assessment_id", None),
+                score=getattr(row, "score", None),
+                status=getattr(row, "status", None),
+                completed_at=getattr(row, "completed_at", None),
+                facet_scores=facet_scores,
+            )
+        )
+    return coerced
 
 
 async def build_technical_report_data(
@@ -268,7 +358,12 @@ async def build_technical_report_data(
             )
 
     catalog = await load_catalog_categories(db, assessments)
-    outcomes = build_module_outcomes(assessments, progress_rows, response_rows, catalog)
+    outcomes = build_module_outcomes(
+        assessments,
+        _progress_with_facet_scores(assessments, progress_rows),
+        response_rows,
+        catalog,
+    )
 
     synthesis: ReportSynthesis | None = None
     synthesis_status = "pending"

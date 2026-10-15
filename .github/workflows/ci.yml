@@ -45,7 +45,8 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
       - name: Unit tests
-        run: npm test
+        working-directory: frontend
+        run: npx vitest run --no-file-parallelism
       - name: Build
         run: npm run build
 
