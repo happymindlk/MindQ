@@ -37,5 +37,11 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx,js,jsx}'],
     css: false,
+    // Vitest 5 removed poolOptions.forks.singleFork. One fork and no file
+    // parallelism is the supported equivalent, so CI does not spawn a jsdom
+    // child process per test file.
+    pool: 'forks',
+    maxWorkers: 1,
+    fileParallelism: false,
   },
 });
