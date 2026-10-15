@@ -87,15 +87,8 @@ values (
   'pat@acme.test',
   'HM-AAAAAA-1'
 );
-insert into public.candidate_progress (id, corporate_id, candidate_id, assessment_id, status, score)
-values (
-  'eeeeeeee-0000-0000-0000-000000000005',
-  '22222222-2222-2222-2222-222222222222',
-  'dddddddd-0000-0000-0000-000000000004',
-  'cccccccc-0000-0000-0000-000000000003',
-  'COMPLETED',
-  42.00
-);
+-- Responses before the COMPLETED progress row: candidate_responses_lock_completed
+-- rejects any answer insert once the assessment is COMPLETED.
 insert into public.candidate_responses (id, corporate_id, candidate_id, assessment_id, question_id, response)
 values (
   'ffffffff-0000-0000-0000-000000000006',
@@ -104,6 +97,15 @@ values (
   'cccccccc-0000-0000-0000-000000000003',
   'q1',
   '{"answer": "4"}'::jsonb
+);
+insert into public.candidate_progress (id, corporate_id, candidate_id, assessment_id, status, score)
+values (
+  'eeeeeeee-0000-0000-0000-000000000005',
+  '22222222-2222-2222-2222-222222222222',
+  'dddddddd-0000-0000-0000-000000000004',
+  'cccccccc-0000-0000-0000-000000000003',
+  'COMPLETED',
+  42.00
 );
 reset role;
 
@@ -258,11 +260,12 @@ begin
   ) then
     raise exception 'HR SELECT: psychometric assessment leaked';
   end if;
-  if not exists (
+  -- security_hardening: technical snapshots carry answer keys, so assessments are ops-only.
+  if exists (
     select 1 from public.assessments
      where id = 'cccccccc-0000-0000-0000-000000000003'
   ) then
-    raise exception 'HR SELECT: technical assessment should remain visible';
+    raise exception 'HR SELECT: technical assessment leaked to non-ops HR';
   end if;
   if (select count(*) from public.global_modules) <> 0 then
     raise exception 'HR SELECT: global_modules catalog leaked, got %',
@@ -298,11 +301,12 @@ begin
   ) then
     raise exception 'HR SELECT: psychometric response leaked';
   end if;
-  if not exists (
+  -- security_hardening: raw responses are ops-only; HR reads curated results via FastAPI.
+  if exists (
     select 1 from public.candidate_responses
      where id = 'ffffffff-0000-0000-0000-000000000006'
   ) then
-    raise exception 'HR SELECT: technical response should remain visible';
+    raise exception 'HR SELECT: technical response leaked to non-ops HR';
   end if;
 end $$;
 reset role;
