@@ -1,7 +1,33 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-canvas: var(--ap-canvas);
+  --color-surface: var(--ap-surface);
+  --color-surface-raised: var(--ap-surface-raised);
+  --color-border: var(--ap-border);
+  --color-foreground: var(--ap-foreground);
+  --color-muted: var(--ap-muted);
+  --color-primary: var(--ap-primary);
+  --color-primary-fg: var(--ap-primary-fg);
+  --color-primary-hover: var(--ap-primary-hover);
+  --color-primary-active: var(--ap-primary-active);
+  --color-primary-text: var(--ap-primary-text);
+  --color-success: var(--ap-success);
+  --color-warning: var(--ap-warning);
+  --color-danger: var(--ap-danger);
+  --color-ring: var(--ap-ring);
+
+  /* Builder accents: reserve for focus, active, CTA, and key/feedback states only. */
+  --color-accent-cyan: var(--ap-accent-cyan);
+  --color-accent-violet: var(--ap-accent-violet);
+  --color-accent-emerald: var(--ap-accent-emerald);
+
+  /* Legacy aliases — prefer semantic tokens in new code */
   --color-primary-50: #eef2ff;
   --color-primary-100: #e0e7ff;
   --color-primary-200: #c7d2fe;
@@ -13,49 +39,118 @@
   --color-primary-800: #3730a3;
   --color-primary-900: #312e81;
   --color-primary-950: #1e1b4b;
-  
-  --color-accent-50: #f0fdfa;
-  --color-accent-100: #ccfbf1;
-  --color-accent-200: #99f6e4;
-  --color-accent-300: #5eead4;
-  --color-accent-400: #2dd4bf;
-  --color-accent-500: #14b8a6;
-  --color-accent-600: #0d9488;
-  --color-accent-700: #0f766e;
-  --color-accent-800: #115e59;
-  --color-accent-900: #134e4a;
-  --color-accent-950: #042f2e;
 
-  /* Overrides for background/surface elements in dark mode */
-  --color-surface-900: #0f172a;
-  --color-surface-800: #1e293b;
-  --color-surface-700: #334155;
+  --color-surface-900: var(--ap-canvas);
+  --color-surface-800: var(--ap-surface);
+  --color-surface-700: var(--ap-border);
+}
+
+:root {
+  --ap-canvas: #fafafb;
+  --ap-surface: #ffffff;
+  --ap-surface-raised: #f1f5f9;
+  --ap-border: #e2e8f0;
+  --ap-foreground: #0f172a;
+  --ap-muted: #64748b;
+  --ap-primary: #4f46e5;
+  --ap-primary-fg: #ffffff;
+  --ap-primary-hover: #4338ca;
+  --ap-primary-active: #3730a3;
+  --ap-primary-text: #4338ca;
+  --ap-success: #059669;
+  --ap-warning: #d97706;
+  --ap-danger: #dc2626;
+  --ap-ring: #4f46e5;
+  --ap-accent-cyan: #0891b2;
+  --ap-accent-violet: #4f46e5;
+  --ap-accent-emerald: #059669;
+}
+
+.dark {
+  --ap-canvas: #0b0f19;
+  --ap-surface: #0f172a;
+  --ap-surface-raised: #1e293b;
+  --ap-border: #1e293b;
+  --ap-foreground: #f1f5f9;
+  --ap-muted: #94a3b8;
+  --ap-primary: #4f46e5;
+  --ap-primary-fg: #ffffff;
+  --ap-primary-hover: #4338ca;
+  --ap-primary-active: #3730a3;
+  --ap-primary-text: #a5b4fc;
+  --ap-success: #34d399;
+  --ap-warning: #fbbf24;
+  --ap-danger: #f87171;
+  --ap-ring: #818cf8;
+  --ap-accent-cyan: #06b6d4;
+  --ap-accent-violet: #818cf8;
+  --ap-accent-emerald: #34d399;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-canvas text-foreground font-sans antialiased;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-primary) 35%, transparent);
+    color: var(--color-foreground);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    .animate-spin,
+    .animate-pulse {
+      animation: none !important;
+    }
+
+    * {
+      transition-duration: 0.01ms !important;
+    }
+  }
 }
 
 @layer utilities {
-  .glass {
-    @apply bg-slate-900/60 backdrop-blur-xl border border-slate-700/50;
+  .tabular-data {
+    @apply font-mono tabular-nums;
   }
-  .glass-card {
-    @apply bg-surface-900/60 backdrop-blur-xl border border-surface-700 shadow-xl;
+
+  .metric-label {
+    @apply text-xs font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400;
   }
 }
 
-/* Custom Scrollbar for dark theme */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #020617; 
+  background: var(--color-canvas);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155; 
+  background: var(--color-border);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569; 
+  background: color-mix(in oklab, var(--color-muted) 60%, var(--color-border));
 }
+

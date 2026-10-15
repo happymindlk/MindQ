@@ -1,14 +1,25 @@
 import React from 'react';
 
-export default function Card({ children, className = '', variant = 'default', padding = 'p-6', ...props }) {
-  const variants = {
-    default: "bg-slate-900/60 backdrop-blur-xl border border-slate-800 shadow-xl",
-    elevated: "bg-slate-800/80 backdrop-blur-xl border border-slate-700 shadow-2xl",
-    interactive: "bg-slate-900/60 backdrop-blur-xl border border-slate-800 shadow-xl hover:border-indigo-500/50 hover:shadow-indigo-500/10 transition-all duration-300 cursor-pointer hover:-translate-y-1"
-  };
+const variants = {
+  default: 'bg-surface border border-slate-200 dark:border-neutral-800',
+  elevated: 'bg-surface-raised border border-slate-200 dark:border-neutral-800',
+  interactive:
+    'bg-surface border border-slate-200 dark:border-neutral-800 cursor-pointer transition-colors duration-150 ease-out hover:border-neutral-400 dark:hover:border-neutral-700',
+  flush: 'bg-transparent border-0',
+};
 
+export default function Card({
+  children,
+  className = '',
+  variant = 'default',
+  padding = 'p-3',
+  ...props
+}) {
   return (
-    <div className={`rounded-2xl overflow-hidden ${variants[variant]} ${padding} ${className}`} {...props}>
+    <div
+      className={`rounded-lg overflow-hidden ${variants[variant] ?? variants.default} ${padding} ${className}`}
+      {...props}
+    >
       {children}
     </div>
   );

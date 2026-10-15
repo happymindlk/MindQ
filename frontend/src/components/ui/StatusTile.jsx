@@ -1,51 +1,97 @@
 import React from 'react';
-import Card from './Card';
 import Badge from './Badge';
-import { ArrowRight, CheckCircle, Clock, FileText } from 'lucide-react';
+import { ArrowRight, CheckCircle, Clock, FileText, Lock } from 'lucide-react';
 
-export default function StatusTile({ title, description, status, onClick }) {
+/**
+ * Compact assessment status tile for the candidate dashboard.
+ *
+ * @param {object} props
+ * @param {string} props.title
+ * @param {string | null} [props.description]
+ * @param {'not_started' | 'in_progress' | 'completed'} props.status
+ * @param {() => void} [props.onClick]
+ * @param {string | null} [props.lockedReason] When set, the tile cannot be launched and shows why.
+ */
+export default function StatusTile({ title, description, status, onClick, lockedReason = null }) {
   const isCompleted = status === 'completed';
   const isInProgress = status === 'in_progress';
-  
-  const getStatusIcon = () => {
-    if (isCompleted) return <CheckCircle className="w-8 h-8 text-emerald-400" />;
-    if (isInProgress) return <Clock className="w-8 h-8 text-amber-400" />;
-    return <FileText className="w-8 h-8 text-slate-500" />;
-  };
+  const isLocked = !isCompleted && Boolean(lockedReason);
+  const interactive = !isCompleted && !isLocked && typeof onClick === 'function';
 
-  const getStatusBadge = () => {
-    if (isCompleted) return <Badge variant="success" showDot>Completed</Badge>;
-    if (isInProgress) return <Badge variant="warning" showDot>In Progress</Badge>;
-    return <Badge variant="neutral" showDot>Not Started</Badge>;
-  };
+  const icon = isCompleted ? (
+    <CheckCircle className="w-5 h-5 text-success" />
+  ) : isLocked ? (
+    <Lock className="w-5 h-5 text-muted" />
+  ) : isInProgress ? (
+    <Clock className="w-5 h-5 text-blue-400" />
+  ) : (
+    <FileText className="w-5 h-5 text-muted" />
+  );
+
+  const badge = isCompleted ? (
+    <Badge variant="completed" showDot>
+      Completed
+    </Badge>
+  ) : isInProgress ? (
+    <Badge variant="active" showDot>
+      In Progress
+    </Badge>
+  ) : (
+    <Badge variant="pending">Not started</Badge>
+  );
 
   return (
-    <Card 
-      variant={isCompleted ? 'default' : 'interactive'} 
-      className={`relative overflow-hidden ${isInProgress ? 'ring-1 ring-amber-500/30' : ''}`}
-      onClick={!isCompleted ? onClick : undefined}
+    <div
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={interactive ? onClick : undefined}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      className={`
+        rounded-lg border border-slate-200 dark:border-neutral-800 bg-surface p-3
+        ${isInProgress && !isLocked ? 'border-blue-500/40' : ''}
+        ${isLocked ? 'opacity-70' : ''}
+        ${
+          interactive
+            ? 'cursor-pointer transition-colors duration-150 ease-out hover:border-neutral-400 dark:hover:border-neutral-700 focus-visible:ring-2 focus-visible:ring-primary'
+            : ''
+        }
+      `}
     >
-      {isInProgress && (
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-amber-300 opacity-50" />
-      )}
-      <div className="flex items-start justify-between">
-        <div className="p-3 bg-slate-800 rounded-xl">
-          {getStatusIcon()}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface-raised">
+          {icon}
         </div>
-        {getStatusBadge()}
-      </div>
-      
-      <div className="mt-5">
-        <h3 className="text-lg font-semibold text-slate-50">{title}</h3>
-        <p className="mt-2 text-sm text-slate-400 line-clamp-2">{description}</p>
+        {badge}
       </div>
 
-      {!isCompleted && (
-        <div className="mt-6 flex items-center text-sm font-medium text-indigo-400 group-hover:text-indigo-300">
-          {isInProgress ? 'Continue Test' : 'Start Test'}
-          <ArrowRight className="w-4 h-4 ml-1 transform group-hover:translate-x-1 transition-transform" />
+      <div className="mt-3">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        {description && (
+          <p className="mt-1 text-xs text-muted line-clamp-2 leading-relaxed">{description}</p>
+        )}
+      </div>
+
+      {interactive && (
+        <div className="mt-4 flex items-center text-xs font-medium text-primary-text">
+          {isInProgress ? 'Continue test' : 'Start test'}
+          <ArrowRight className="w-3.5 h-3.5 ml-1" />
         </div>
       )}
-    </Card>
+      {isLocked && (
+        <p className="mt-4 flex items-center gap-1 text-xs font-medium text-muted">
+          <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+          {lockedReason}
+        </p>
+      )}
+    </div>
   );
 }

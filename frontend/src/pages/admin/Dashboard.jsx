@@ -1,146 +1,203 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Users, CheckCircle, TrendingUp, Plus, Search, Copy, Eye, Edit } from 'lucide-react';
-import Card from '../../components/ui/Card';
+import { AlertTriangle, Building2, Plus, Search, SearchX } from 'lucide-react';
 import Button from '../../components/ui/Button';
-import Badge from '../../components/ui/Badge';
+import EmptyState from '../../components/ui/EmptyState';
 import Input from '../../components/ui/Input';
-import { api } from '../../api/client';
+import PageHeader from '../../components/ui/PageHeader';
+import Skeleton from '../../components/ui/Skeleton';
+import CorporateCard from './corporates/corporate-card';
+import CorporateModal from './corporates/corporate-modal';
+import { filterCorporates, useCorporates } from './corporates/use-corporates';
 
-export default function Dashboard() {
-  const navigate = useNavigate();
-  const [search, setSearch] = useState('');
-  const [packages, setPackages] = useState([]);
-  const [candidates, setCandidates] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+const GRID = 'grid grid-cols-1 lg:grid-cols-2 gap-4';
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const pkgs = await api.admin.getPackages();
-        const cands = await api.admin.getCandidates();
-        setPackages(pkgs || []);
-        setCandidates(cands || []);
-      } catch (err) {
-        console.error('Failed to load dashboard data:', err);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    loadData();
-  }, []);
+function CorporateGridSkeleton({ count = 6 }) {
+  return (
+    <div className={GRID} role="status" aria-label="Loading corporates">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="h-24 flex items-center gap-4 px-4 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900"
+        >
+          <Skeleton className="h-16 w-16 rounded-md shrink-0" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-3 w-1/3" />
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <Skeleton className="h-5 w-16 rounded-full" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
-  const totalPackages = packages.length;
-  const activeCandidates = candidates.filter(c => c.logged_in_at).length;
-  
-  // Calculate completed (let's assume candidates who logged in and have all completed)
-  // For display, we show actual counts
-  const stats = [
-    { name: 'Total Packages', value: totalPackages, icon: Package, change: 'Total created' },
-    { name: 'Active Candidates', value: activeCandidates, icon: Users, change: 'Candidates logged in' },
-    { name: 'Total Registered', value: candidates.length, icon: CheckCircle, change: 'Registered candidates' },
-    { name: 'Completion Rate', value: candidates.length > 0 ? `${Math.round((activeCandidates / candidates.length) * 100)}%` : '0%', icon: TrendingUp, change: 'Logins / Registrations' },
-  ];
-
-  const handleCopyCode = (code) => {
-    navigator.clipboard.writeText(code);
-    alert('Code copied: ' + code);
+function CorporateFilterBar({ value, onChange, onSearch, onReset, canReset }) {
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    onSearch();
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat) => (
-          <Card key={stat.name} className="flex flex-col">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm font-medium text-slate-400">{stat.name}</p>
-                <p className="mt-2 text-3xl font-bold text-slate-50">{stat.value}</p>
-              </div>
-              <div className="p-3 bg-indigo-500/10 rounded-xl">
-                <stat.icon className="w-5 h-5 text-indigo-400" />
-              </div>
-            </div>
-            <div className="mt-4 text-sm text-slate-400">
-              <span className="text-emerald-400">{stat.change.split(' ')[0]}</span>
-              {' ' + stat.change.split(' ').slice(1).join(' ')}
-            </div>
-          </Card>
+    <form
+      role="search"
+      aria-label="Filter corporates"
+      onSubmit={handleSubmit}
+      className="flex flex-wrap items-center justify-end gap-2"
+    >
+      <div className="w-full sm:w-64">
+        <Input
+          icon={Search}
+          type="search"
+          placeholder="Keyword"
+          aria-label="Keyword"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </div>
+      <Button type="submit" variant="primary" size="md">
+        Search
+      </Button>
+      <Button type="button" variant="secondary" size="md" onClick={onReset} disabled={!canReset}>
+        Reset
+      </Button>
+    </form>
+  );
+}
+
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const { corporates, isLoading, error, reload, saveCorporate } = useCorporates();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [draftKeyword, setDraftKeyword] = useState('');
+  const [appliedKeyword, setAppliedKeyword] = useState('');
+
+  const visibleCorporates = useMemo(
+    () => filterCorporates(corporates, appliedKeyword),
+    [corporates, appliedKeyword],
+  );
+
+  const applySearch = useCallback(() => setAppliedKeyword(draftKeyword.trim()), [draftKeyword]);
+
+  const resetSearch = useCallback(() => {
+    setDraftKeyword('');
+    setAppliedKeyword('');
+  }, []);
+
+  const openCreate = useCallback(() => {
+    setEditing(null);
+    setModalOpen(true);
+  }, []);
+
+  const openEdit = useCallback((corporate) => {
+    setEditing(corporate);
+    setModalOpen(true);
+  }, []);
+
+  const openCorporate = useCallback(
+    (corporate) => navigate(`/admin/corporates/${corporate.id}`),
+    [navigate],
+  );
+
+  const closeModal = useCallback(() => setModalOpen(false), []);
+
+  let body;
+  if (isLoading && corporates.length === 0) {
+    body = <CorporateGridSkeleton />;
+  } else if (error) {
+    body = (
+      <div
+        role="alert"
+        className="flex flex-col items-center gap-3 rounded-lg border border-danger/30 bg-danger/5 px-4 py-8 text-center"
+      >
+        <AlertTriangle className="w-5 h-5 text-danger" aria-hidden="true" />
+        <div>
+          <p className="text-sm font-semibold text-foreground">Could not load corporates</p>
+          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{error}</p>
+        </div>
+        <Button variant="secondary" size="sm" onClick={reload}>
+          Retry
+        </Button>
+      </div>
+    );
+  } else if (corporates.length === 0) {
+    body = (
+      <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-800">
+        <EmptyState
+          icon={Building2}
+          title="No corporates yet"
+          description="Create your first client to start building assessment suites for them."
+          actionLabel="Create Corporate"
+          onAction={openCreate}
+        />
+      </div>
+    );
+  } else if (visibleCorporates.length === 0) {
+    body = (
+      <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-800">
+        <EmptyState
+          icon={SearchX}
+          title="No matching corporates"
+          description={`Nothing matches "${appliedKeyword}". Try a different keyword.`}
+          actionLabel="Reset filters"
+          onAction={resetSearch}
+        />
+      </div>
+    );
+  } else {
+    body = (
+      <div className={GRID}>
+        {visibleCorporates.map((corporate) => (
+          <CorporateCard
+            key={corporate.id}
+            corporate={corporate}
+            onOpen={openCorporate}
+            onEdit={openEdit}
+          />
         ))}
       </div>
+    );
+  }
 
-      {/* Packages Section */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mt-8">
-        <h2 className="text-lg font-semibold text-slate-50">Recent Packages</h2>
-        <div className="flex items-center gap-3 w-full sm:w-auto">
-          <Input 
-            icon={Search} 
-            placeholder="Search packages..." 
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full sm:w-64"
-          />
-          <Button onClick={() => navigate('/admin/packages/create')} className="shrink-0">
-            <Plus className="w-4 h-4 mr-2" />
-            Create Package
+  const countLabel = appliedKeyword
+    ? `${visibleCorporates.length} of ${corporates.length} companies`
+    : `${corporates.length} client ${corporates.length === 1 ? 'company' : 'companies'}`;
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="Manage Corporates"
+        description={
+          isLoading || error ? 'Client companies, HR contacts, and branding.' : countLabel
+        }
+        actions={
+          <Button variant="accent" size="sm" onClick={openCreate}>
+            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+            Create Corporate
           </Button>
-        </div>
-      </div>
+        }
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {packages
-          .filter(pkg => pkg.title.toLowerCase().includes(search.toLowerCase()) || pkg.access_code.toLowerCase().includes(search.toLowerCase()))
-          .map((pkg) => {
-            const status = pkg.is_active ? 'active' : 'archived';
-            return (
-              <Card key={pkg.id} variant="elevated" className="flex flex-col">
-                <div className="flex justify-between items-start mb-4">
-                  <Badge variant={status === 'active' ? 'success' : 'neutral'}>
-                    {status === 'active' ? 'Active' : 'Archived'}
-                  </Badge>
-                  <div className="flex items-center gap-1">
-                    <button className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-md transition-colors" title="View">
-                      <Eye className="w-4 h-4" />
-                    </button>
-                    <button className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-slate-800 rounded-md transition-colors" title="Edit">
-                      <Edit className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-                
-                <h3 className="text-lg font-semibold text-slate-50 mb-1">{pkg.title}</h3>
-                <p className="text-sm text-slate-400 line-clamp-2 mb-4">{pkg.description}</p>
-                
-                <div className="flex items-center justify-between mt-auto pt-4 border-t border-slate-800">
-                  <div className="flex items-center gap-2 bg-slate-900/50 px-3 py-1.5 rounded-lg border border-slate-700">
-                    <span className="text-sm font-mono text-indigo-300">{pkg.access_code}</span>
-                    <button 
-                      onClick={() => handleCopyCode(pkg.access_code)}
-                      className="text-slate-400 hover:text-slate-50 transition-colors"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className="flex items-center text-sm text-slate-400">
-                    <Users className="w-4 h-4 mr-1" />
-                    {pkg.candidate_count ?? 0}
-                  </div>
-                </div>
-              </Card>
-            );
-          })}
-      </div>
-      {packages.length === 0 && !isLoading && (
-        <div className="text-center py-12 text-slate-500 italic">
-          No assessment packages found. Click "Create Package" to make one!
-        </div>
-      )}
-      {isLoading && (
-        <div className="text-center py-12 text-slate-500">
-          Loading assessment packages...
-        </div>
-      )}
+      <CorporateFilterBar
+        value={draftKeyword}
+        onChange={setDraftKeyword}
+        onSearch={applySearch}
+        onReset={resetSearch}
+        canReset={Boolean(draftKeyword || appliedKeyword)}
+      />
+
+      {body}
+
+      <CorporateModal
+        isOpen={modalOpen}
+        corporate={editing}
+        onClose={closeModal}
+        onSave={saveCorporate}
+      />
     </div>
   );
 }

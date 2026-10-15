@@ -1,34 +1,40 @@
-import React, { forwardRef } from 'react';
+import React, { forwardRef, useId } from 'react';
 
-const Input = forwardRef(({ label, error, icon: Icon, className = '', ...props }, ref) => {
+const Input = forwardRef(({ label, error, icon: Icon, className = '', id, ...props }, ref) => {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
+  const errorId = error ? `${inputId}-error` : undefined;
   return (
     <div className="w-full">
       {label && (
-        <label className="block text-sm font-medium text-slate-300 mb-1.5">
+        <label htmlFor={inputId} className="metric-label mb-1.5 block">
           {label}
         </label>
       )}
       <div className="relative">
         {Icon && (
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Icon className="h-5 w-5 text-slate-500" />
+          <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
+            <Icon className="h-4 w-4 text-muted" />
           </div>
         )}
         <input
           ref={ref}
+          id={inputId}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={errorId}
           className={`
-            block w-full rounded-lg bg-slate-900 border text-slate-50 text-sm
-            focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all
-            ${Icon ? 'pl-10' : 'pl-4'} pr-4 py-2.5
-            ${error ? 'border-rose-500' : 'border-slate-700 hover:border-slate-600'}
+            block w-full h-9 rounded-md bg-canvas border text-foreground text-sm
+            placeholder:text-muted/70
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary
+            transition-colors duration-150 ease-out
+            ${Icon ? 'pl-9' : 'pl-3'} pr-3
+            ${error ? 'border-danger' : 'border-slate-200 dark:border-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-700'}
             ${className}
           `}
           {...props}
         />
       </div>
-      {error && (
-        <p className="mt-1.5 text-sm text-rose-400">{error}</p>
-      )}
+      {error && <p id={errorId} className="mt-1.5 text-xs text-danger">{error}</p>}
     </div>
   );
 });

@@ -1,0 +1,3 @@
+Testing & Deployment Updates
+> Before move to next mcq question user must select the correct answer
+> When we fully enter the question and enter it's need to move to the next section means the answer box
