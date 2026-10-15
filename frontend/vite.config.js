@@ -37,6 +37,13 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx,js,jsx}'],
     css: false,
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        singleThread: true,
+      },
+    },
+    maxWorkers: 1,
     fileParallelism: false,
   },
 });
