@@ -69,6 +69,7 @@ reset role;
 
 -- 5) HR (authenticated) cannot write scores or responses. Seed as the
 -- privileged role, then attempt UPDATE/INSERT as the tenant.
+set role service_role;
 insert into public.assessments (id, corporate_id, package_id, title, questions)
 values (
   'cccccccc-0000-0000-0000-000000000003',
@@ -104,6 +105,7 @@ values (
   'q1',
   '{"answer": "4"}'::jsonb
 );
+reset role;
 
 set role authenticated;
 select set_config(
