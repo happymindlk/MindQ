@@ -327,3 +327,57 @@ def render_package_share_html(
     <p style="font-size:12px;color:#64748b;margin-top:28px;">This message was sent by Assess Pulse on behalf of your account team.</p>
   </div>
 </body></html>"""
+
+
+def admin_otp_message(otp: str) -> str:
+    """Plain-text body of the admin sign-in code email.
+
+    Args:
+        otp: Six-digit verification code.
+
+    Returns:
+        The sentence delivered to the admin inbox.
+    """
+    return f"Your MindQ Admin Verification Code is: {otp}. Valid for 5 minutes."
+
+
+def render_admin_otp_html(otp: str) -> str:
+    """HTML wrapper for the admin sign-in code. The code is escaped.
+
+    Args:
+        otp: Six-digit verification code.
+
+    Returns:
+        HTML document whose visible sentence is ``admin_otp_message``.
+    """
+    message = html.escape(admin_otp_message(otp))
+    return f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#0B0F17;color:#E8EDF5;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+  <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
+    <p style="font-size:16px;line-height:1.5;margin:0 0 16px;">{message}</p>
+    <p style="font-size:13px;line-height:1.5;color:#9AA8BC;margin:0;">If you did not try to sign in, you can ignore this email.</p>
+  </div>
+</body></html>"""
+
+
+async def send_admin_otp_email(to_email: str, otp: str) -> None:
+    """Deliver an admin sign-in code through the configured transactional mailer.
+
+    The code is not written to logs. Delivery failures raise so the caller can
+    discard the challenge instead of issuing a temp token nobody can complete.
+
+    Args:
+        to_email: Admin inbox that just passed the password check.
+        otp: Six-digit verification code.
+
+    Raises:
+        RuntimeError: The mailer is not configured or rejected the message.
+    """
+    result = await send_transactional_email_async(
+        to_email,
+        "Your MindQ Admin Verification Code",
+        render_admin_otp_html(otp),
+        raise_on_error=True,
+    )
+    if not result:
+        raise RuntimeError("Verification email was not sent")
