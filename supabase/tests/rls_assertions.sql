@@ -8,9 +8,9 @@
 insert into public.corporates (id, name, slug) values
   ('22222222-2222-2222-2222-222222222222', 'Acme', 'acme'),
   ('33333333-3333-3333-3333-333333333333', 'Beta', 'beta');
-insert into public.packages (id, corporate_id, title, access_code) values
-  ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'Acme Pkg', 'HM-AAAAAA-1'),
-  ('bbbbbbbb-0000-0000-0000-000000000002', '33333333-3333-3333-3333-333333333333', 'Beta Pkg', 'HM-BBBBBB-2');
+insert into public.packages (id, corporate_id, title, access_code, track_secret) values
+  ('aaaaaaaa-0000-0000-0000-000000000001', '22222222-2222-2222-2222-222222222222', 'Acme Pkg', 'HM-AAAAAA-1', 'secret_test_token_1'),
+  ('bbbbbbbb-0000-0000-0000-000000000002', '33333333-3333-3333-3333-333333333333', 'Beta Pkg', 'HM-BBBBBB-2', 'secret_test_token_2');
 
 -- Act as an authenticated HR user of tenant A.
 set role authenticated;
@@ -35,8 +35,8 @@ end $$;
 do $$
 begin
   begin
-    insert into public.packages (corporate_id, title, access_code)
-    values ('33333333-3333-3333-3333-333333333333', 'Cross', 'HM-CCCCCC-3');
+    insert into public.packages (corporate_id, title, access_code, track_secret)
+    values ('33333333-3333-3333-3333-333333333333', 'Cross', 'HM-CCCCCC-3', 'secret_test_token_3');
     raise exception 'RLS INSERT: cross-tenant insert unexpectedly succeeded';
   exception
     when insufficient_privilege then null;  -- expected: WITH CHECK violation
