@@ -1,7 +1,4 @@
-<<<<<<< HEAD
 from .admin_login_challenge import AdminLoginChallenge
-=======
->>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
 from .corporate import Corporate
 from .hr_user import HRUser
 from .package import Package
@@ -17,10 +14,7 @@ from .custom_technical_question import CustomTechnicalQuestion
 from .template_question import TemplateQuestion
 
 __all__ = [
-<<<<<<< HEAD
     "AdminLoginChallenge",
-=======
->>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
     "Corporate",
     "HRUser",
     "Package",

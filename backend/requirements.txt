@@ -8,10 +8,7 @@ pydantic>=2.9.0
 pydantic-settings>=2.5.0
 email-validator>=2.1.0
 pyjwt>=2.9.0
-<<<<<<< HEAD
 cryptography>=42.0.0
-=======
->>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
 supabase>=2.7.0
 weasyprint>=62.3
 jinja2>=3.1.4

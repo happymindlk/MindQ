@@ -327,7 +327,6 @@ def render_package_share_html(
     <p style="font-size:12px;color:#64748b;margin-top:28px;">This message was sent by Assess Pulse on behalf of your account team.</p>
   </div>
 </body></html>"""
-<<<<<<< HEAD
 
 
 def admin_otp_message(otp: str) -> str:
@@ -382,5 +381,3 @@ async def send_admin_otp_email(to_email: str, otp: str) -> None:
     )
     if not result:
         raise RuntimeError("Verification email was not sent")
-=======
->>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
