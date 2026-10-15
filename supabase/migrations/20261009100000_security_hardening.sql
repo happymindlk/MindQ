@@ -68,13 +68,25 @@ create policy "corporates_update_ops" on public.corporates
     with check ((select private.user_is_ops()));
 
 -- 6. Public logo bucket: only raster images, bounded size (no SVG/HTML payloads).
-update storage.buckets
-   set allowed_mime_types = array['image/png', 'image/jpeg', 'image/webp'],
-       file_size_limit = 2097152
- where id = 'corporate-logos';
+--    Reports bucket stays private; re-assert in case of dashboard drift.
+--    Skipped on vanilla Postgres (CI RLS job), which has no storage schema.
+do $$
+begin
+    if exists (
+        select 1
+        from pg_catalog.pg_namespace n
+        join pg_catalog.pg_class c on c.relnamespace = n.oid
+        where n.nspname = 'storage' and c.relname = 'buckets'
+    ) then
+        update storage.buckets
+           set allowed_mime_types = array['image/png', 'image/jpeg', 'image/webp'],
+               file_size_limit = 2097152
+         where id = 'corporate-logos';
 
--- Reports bucket stays private; re-assert in case of dashboard drift.
-update storage.buckets set public = false where id = 'reports';
+        update storage.buckets set public = false where id = 'reports';
+    end if;
+end
+$$;
 
 -- 7. Database-level answer lock. Even if an application bug skips the
 --    COMPLETED check, a candidate's answer cannot change after submission.

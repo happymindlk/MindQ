@@ -64,6 +64,8 @@ app.add_middleware(
     expose_headers=["X-Request-Id", "X-Report-Type", "X-Report-Synthesis-Status"],
 )
 
+app.add_middleware(SecurityHeadersMiddleware)
+
 app.include_router(api_router, prefix="/api/v1")
 # Gated beta waitlist (exact path requested by product): POST /api/request-beta-access
 app.include_router(beta_access_router, prefix="/api")
