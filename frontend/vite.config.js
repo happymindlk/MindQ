@@ -37,5 +37,7 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx,js,jsx}'],
     css: false,
+    // user-event typing tests absorb jsdom cold start; 2-vCPU CI runners exceed the 5s default.
+    testTimeout: 15000,
   },
 });
