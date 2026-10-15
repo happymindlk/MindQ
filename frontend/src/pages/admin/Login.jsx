@@ -1,10 +1,17 @@
+<<<<<<< HEAD
 import React, { useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, ArrowLeft, Package } from 'lucide-react';
+=======
+import React, { useState } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Mail, Lock, ArrowRight, Package } from 'lucide-react';
+>>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
 import { useAuth } from '../../context/useAuth';
+<<<<<<< HEAD
 import { isSupabaseConfigured } from '../../lib/supabaseClient';
 import OtpCodeInput from '../../features/admin-auth/otp-code-input';
 import { formatClock, useAdminOtpLogin } from '../../features/admin-auth/use-admin-otp-login';
@@ -23,6 +30,47 @@ export default function AdminLogin() {
   }, [navigate, refreshMembership]);
 
   const login = useAdminOtpLogin(finish);
+=======
+import { isOpsRole, resolveRole } from '../../lib/auth-role';
+import { isSupabaseConfigured, supabase } from '../../lib/supabaseClient';
+
+export default function AdminLogin() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { signIn, refreshMembership } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const from = location.state?.from?.pathname || '/admin/history';
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setIsLoading(true);
+    try {
+      const { error: signInError } = await signIn(email, password);
+      if (signInError) throw signInError;
+      const membership = await refreshMembership();
+      if (!membership?.corporateId) {
+        navigate('/pending-approval', { replace: true });
+        return;
+      }
+      const { data } = await supabase.auth.getSession();
+      const role = membership.role || resolveRole(data.session, null);
+      if (!isOpsRole(role)) {
+        navigate('/client/dashboard', { replace: true });
+        return;
+      }
+      navigate(from.startsWith('/admin') ? from : '/admin/history', { replace: true });
+    } catch (err) {
+      setError(err.message || 'Login failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+>>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
 
   return (
     <div className="min-h-screen bg-canvas flex flex-col justify-center items-center p-4">
@@ -35,6 +83,7 @@ export default function AdminLogin() {
         </div>
 
         <Card variant="elevated" className="p-8">
+<<<<<<< HEAD
           <h1 className="text-xl font-semibold text-foreground mb-1">
             {login.step === 'otp' ? 'Verification code' : 'Admin Portal'}
           </h1>
@@ -42,6 +91,11 @@ export default function AdminLogin() {
             {login.step === 'otp'
               ? 'Enter the 6-digit verification code sent to your registered email address.'
               : 'Enter your credentials to access the administrative console.'}
+=======
+          <h1 className="text-xl font-semibold text-foreground mb-1">Admin Portal</h1>
+          <p className="text-neutral-400 text-sm mb-6">
+            Enter your credentials to access the administrative console.
+>>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
           </p>
 
           {!isSupabaseConfigured && (
@@ -51,6 +105,7 @@ export default function AdminLogin() {
             </div>
           )}
 
+<<<<<<< HEAD
           {login.step === 'credentials' ? (
             <form
               onSubmit={(event) => {
@@ -145,6 +200,39 @@ export default function AdminLogin() {
               </button>
             </form>
           )}
+=======
+          <form onSubmit={handleLogin} className="space-y-5">
+            <Input
+              label="Email"
+              type="email"
+              icon={Mail}
+              placeholder="ops@mindq.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+            <Input
+              label="Password"
+              type="password"
+              icon={Lock}
+              placeholder="Your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+
+            {error && (
+              <div className="text-sm text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
+
+            <Button type="submit" className="w-full" size="lg" isLoading={isLoading} disabled={!email || !password}>
+              Sign In
+              {!isLoading && <ArrowRight className="w-5 h-5 ml-2" />}
+            </Button>
+          </form>
+>>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
         </Card>
 
         <p className="mt-6 text-center text-sm text-neutral-400">

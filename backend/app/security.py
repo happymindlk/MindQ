@@ -139,12 +139,15 @@ public_limiter = RateLimiter(max_requests=60, window_seconds=60)
 report_limiter = RateLimiter(max_requests=20, window_seconds=10 * 60)
 # Outbound email triggers (nudges, invites): stop HR accounts being used as a spam relay.
 email_limiter = RateLimiter(max_requests=30, window_seconds=60 * 60)
+<<<<<<< HEAD
 # Admin password step. Each accepted attempt can send mail, so this is separate
 # from candidate/client login. Per-address send caps live in Postgres.
 admin_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
 # OTP guesses. The 3-strike lock is stored on the challenge row; this only
 # slows a single IP that is cycling stolen temp tokens.
 admin_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
+=======
+>>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
 # Invites are legitimately bulk (a hiring round), so the budget is higher than nudges.
 invite_limiter = RateLimiter(max_requests=200, window_seconds=60 * 60)
 

@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import logging
+<<<<<<< HEAD
 from types import SimpleNamespace
+=======
+>>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -208,6 +211,7 @@ async def _load_responses(db: AsyncSession, candidate_id: UUID) -> list[Candidat
 def _group_responses(rows: list[CandidateResponse]) -> dict[UUID, dict[str, object]]:
     grouped: dict[UUID, dict[str, object]] = {}
     for row in rows:
+<<<<<<< HEAD
         assessment_id = getattr(row, "assessment_id", None)
         question_id = getattr(row, "question_id", "")
         grouped.setdefault(assessment_id, {})[str(question_id)] = getattr(row, "response", None)
@@ -301,6 +305,12 @@ def _progress_with_facet_scores(
     return coerced
 
 
+=======
+        grouped.setdefault(row.assessment_id, {})[str(row.question_id)] = row.response
+    return grouped
+
+
+>>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
 async def build_technical_report_data(
     db: AsyncSession, candidate: Candidate
 ) -> MindQReportResponse:
@@ -358,12 +368,16 @@ async def build_technical_report_data(
             )
 
     catalog = await load_catalog_categories(db, assessments)
+<<<<<<< HEAD
     outcomes = build_module_outcomes(
         assessments,
         _progress_with_facet_scores(assessments, progress_rows),
         response_rows,
         catalog,
     )
+=======
+    outcomes = build_module_outcomes(assessments, progress_rows, response_rows, catalog)
+>>>>>>> f2ea5da40ec4de18df112e656d9be4777af7d5a7
 
     synthesis: ReportSynthesis | None = None
     synthesis_status = "pending"
