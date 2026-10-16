@@ -22,10 +22,10 @@ async function authHeaders(json) {
  *
  * @param {string} path Path starting with `/api`.
  * @param {string} fallback Message used when the error body carries nothing readable.
- * @param {{ method?: string, body?: unknown, formData?: FormData }} [options]
+ * @param {{ method?: string, body?: unknown, formData?: FormData, signal?: AbortSignal }} [options]
  * @returns {Promise<any>}
  */
-async function authedJson(path, fallback, { method = 'GET', body, formData } = {}) {
+async function authedJson(path, fallback, { method = 'GET', body, formData, signal } = {}) {
   const hasJson = body !== undefined;
   return requestJson(
     `${API_BASE}${path}`,
@@ -33,6 +33,7 @@ async function authedJson(path, fallback, { method = 'GET', body, formData } = {
       method,
       headers: await authHeaders(hasJson),
       body: formData ?? (hasJson ? JSON.stringify(body) : undefined),
+      signal,
     },
     fallback,
   );
@@ -315,10 +316,16 @@ export const adminApi = {
     return authedJson(`/api/v1/admin/packages/${packageId}`, 'Failed to load package');
   },
 
-  async updateAdminPackage(packageId, body) {
+  /**
+   * @param {string} packageId
+   * @param {unknown} body
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  async updateAdminPackage(packageId, body, { signal } = {}) {
     return authedJson(`/api/v1/admin/packages/${packageId}`, 'Failed to update package', {
       method: 'PUT',
       body,
+      signal,
     });
   },
 
@@ -363,11 +370,17 @@ export const adminApi = {
     return authedJson(`/api/v1/packages/drafts/${packageId}`, 'Failed to load draft');
   },
 
-  async saveDraftPackage(body, packageId) {
+  /**
+   * @param {unknown} body
+   * @param {string | null} packageId
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  async saveDraftPackage(body, packageId, { signal } = {}) {
     const path = packageId ? `/api/v1/packages/drafts/${packageId}` : '/api/v1/packages/drafts';
     return authedJson(path, 'Failed to save draft', {
       method: packageId ? 'PUT' : 'POST',
       body,
+      signal,
     });
   },
 
