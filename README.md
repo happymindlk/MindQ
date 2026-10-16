@@ -1,4 +1,4 @@
-# Assess Pulse
+# MindQ
 
 Hybrid stack: **Supabase** (Auth, Postgres + RLS, Storage) + thin **FastAPI**
 (candidate access-code flow, scoring, reports, Gemini JD fit).

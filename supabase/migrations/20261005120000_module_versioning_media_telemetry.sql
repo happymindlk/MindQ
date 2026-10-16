@@ -177,56 +177,70 @@ comment on column public.candidate_progress.server_duration_seconds is
 -- assessment-media: public-read puzzle assets, ops-only writes.
 -- SVG is excluded: it can carry script and is served from the project origin.
 -- ---------------------------------------------------------------------------
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values (
-    'assessment-media',
-    'assessment-media',
-    true,
-    5242880,
-    array['image/png', 'image/jpeg', 'image/webp']
-)
-on conflict (id) do update
-    set public = excluded.public,
-        file_size_limit = excluded.file_size_limit,
-        allowed_mime_types = excluded.allowed_mime_types;
+-- Skipped on vanilla Postgres (CI RLS job), which has no storage schema.
+do $$
+begin
+    if exists (
+        select 1
+        from pg_catalog.pg_namespace n
+        join pg_catalog.pg_class c on c.relnamespace = n.oid
+        where n.nspname = 'storage' and c.relname = 'buckets'
+    ) then
 
-drop policy if exists "assessment_media_public_read" on storage.objects;
-create policy "assessment_media_public_read"
-    on storage.objects
-    for select
-    to anon, authenticated
-    using (bucket_id = 'assessment-media');
+        insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+        values (
+            'assessment-media',
+            'assessment-media',
+            true,
+            5242880,
+            array['image/png', 'image/jpeg', 'image/webp']
+        )
+        on conflict (id) do update
+            set public = excluded.public,
+                file_size_limit = excluded.file_size_limit,
+                allowed_mime_types = excluded.allowed_mime_types;
 
-drop policy if exists "assessment_media_ops_insert" on storage.objects;
-create policy "assessment_media_ops_insert"
-    on storage.objects
-    for insert
-    to authenticated
-    with check (
-        bucket_id = 'assessment-media'
-        and (select private.user_is_ops())
-    );
+        drop policy if exists "assessment_media_public_read" on storage.objects;
+        create policy "assessment_media_public_read"
+            on storage.objects
+            for select
+            to anon, authenticated
+            using (bucket_id = 'assessment-media');
 
-drop policy if exists "assessment_media_ops_update" on storage.objects;
-create policy "assessment_media_ops_update"
-    on storage.objects
-    for update
-    to authenticated
-    using (
-        bucket_id = 'assessment-media'
-        and (select private.user_is_ops())
-    )
-    with check (
-        bucket_id = 'assessment-media'
-        and (select private.user_is_ops())
-    );
+        drop policy if exists "assessment_media_ops_insert" on storage.objects;
+        create policy "assessment_media_ops_insert"
+            on storage.objects
+            for insert
+            to authenticated
+            with check (
+                bucket_id = 'assessment-media'
+                and (select private.user_is_ops())
+            );
 
-drop policy if exists "assessment_media_ops_delete" on storage.objects;
-create policy "assessment_media_ops_delete"
-    on storage.objects
-    for delete
-    to authenticated
-    using (
-        bucket_id = 'assessment-media'
-        and (select private.user_is_ops())
-    );
+        drop policy if exists "assessment_media_ops_update" on storage.objects;
+        create policy "assessment_media_ops_update"
+            on storage.objects
+            for update
+            to authenticated
+            using (
+                bucket_id = 'assessment-media'
+                and (select private.user_is_ops())
+            )
+            with check (
+                bucket_id = 'assessment-media'
+                and (select private.user_is_ops())
+            );
+
+        drop policy if exists "assessment_media_ops_delete" on storage.objects;
+        create policy "assessment_media_ops_delete"
+            on storage.objects
+            for delete
+            to authenticated
+            using (
+                bucket_id = 'assessment-media'
+                and (select private.user_is_ops())
+            );
+
+    end if;
+end
+$$;

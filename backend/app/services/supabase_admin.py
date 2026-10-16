@@ -192,8 +192,10 @@ def invite_hr_user_by_email(email: str, redirect_to: str | None = None) -> UUID:
     """
     normalized = _normalize_email(email)
 
+    from app.services.email import resolve_frontend_origin
+
     destination = (redirect_to or "").strip() or (
-        f"{settings.FRONTEND_URL.rstrip('/')}/client/dashboard"
+        f"{resolve_frontend_origin()}/client/dashboard"
     )
     client = _admin_client()
     options = {"redirect_to": destination}

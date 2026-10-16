@@ -5,7 +5,7 @@ import asyncio
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +43,7 @@ from app.services.client_package import (
     PackageLockedError,
 )
 from app.services.library import LibraryConflictError, LibraryError, LibraryService
+from app.services.email import resolve_frontend_origin
 from app.services.package_share import (
     PackageShareError,
     list_corporate_packages,
@@ -255,7 +256,9 @@ async def create_draft_package(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PackageLockedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409, detail="Package is published and locked"
+        ) from exc
     except ClientPackageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ProgrammingError as exc:
@@ -275,7 +278,9 @@ async def update_draft_package(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PackageLockedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=409, detail="Package is published and locked"
+        ) from exc
     except ClientPackageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ProgrammingError as exc:
@@ -331,6 +336,7 @@ async def add_template_to_package(
 
 @router.get("", response_model=list[CorporatePackageItem])
 async def list_packages_for_corporate(
+    request: Request,
     corporate_id: UUID = Query(..., description="Corporate whose packages to list"),
     db: AsyncSession = Depends(get_db),
     _: HRUserContext = Depends(get_current_ops_user),
@@ -338,6 +344,7 @@ async def list_packages_for_corporate(
     """Corporate history: packages with invited / completed counts and share links.
 
     Args:
+        request: Incoming request (Origin used when FRONTEND_URL is unset).
         corporate_id: Target corporate UUID.
         db: Async database session.
         _: Authenticated ops user.
@@ -346,7 +353,9 @@ async def list_packages_for_corporate(
         The corporate's packages, newest first.
     """
     try:
-        return await list_corporate_packages(db, corporate_id)
+        return await list_corporate_packages(
+            db, corporate_id, origin=resolve_frontend_origin(request)
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -354,21 +363,30 @@ async def list_packages_for_corporate(
 _SHARE_ERROR_STATUS: dict[str, int] = {
     "not_published": 409,
     "no_recipient": 422,
-    "delivery_failed": 502,
 }
 
 
-@router.post("/{package_id}/share", response_model=SharePackageResponse)
+@router.post(
+    "/{package_id}/share",
+    response_model=SharePackageResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def share_package_endpoint(
     package_id: UUID,
+    background_tasks: BackgroundTasks,
+    request: Request,
     body: SharePackageRequest | None = None,
     db: AsyncSession = Depends(get_db),
     _: HRUserContext = Depends(get_current_ops_user),
 ):
-    """Email candidate access (link + PIN) and HR portal access for a published package.
+    """Queue candidate access (link + PIN) and HR portal access via SES.
+
+    Returns 202 immediately; SES delivery runs in a background task.
 
     Args:
         package_id: Target package UUID.
+        background_tasks: FastAPI background task queue.
+        request: Incoming request (Origin used when FRONTEND_URL is unset).
         body: Optional recipient override; defaults to the corporate HR email.
         db: Async database session.
         _: Authenticated ops user.
@@ -378,7 +396,13 @@ async def share_package_endpoint(
     """
     recipient = body.recipient_email if body else None
     try:
-        return await share_package(db, package_id, recipient)
+        return await share_package(
+            db,
+            package_id,
+            recipient,
+            background_tasks=background_tasks,
+            origin=resolve_frontend_origin(request),
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PackageShareError as exc:

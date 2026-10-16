@@ -17,13 +17,14 @@ from app.models.package import Package
 from app.services.email import render_package_share_html
 
 ORIGIN = "https://app.assesspulse.test"
-SEND = "app.services.package_share.send_transactional_email_async"
+SEND = "app.services.package_share.send_transactional_email"
 
 
 @pytest.fixture(autouse=True)
 def _origin():
     with patch("app.services.email.frontend_origin", return_value=ORIGIN):
-        yield
+        with patch("app.api.v1.packages.resolve_frontend_origin", return_value=ORIGIN):
+            yield
 
 
 def _corporate(**overrides: object) -> Corporate:
@@ -83,10 +84,10 @@ def test_share_falls_back_to_corporate_contact_email_and_opens_enrollment():
     pkg = _package(corp)
     session = _session_for_share((pkg, corp))
 
-    with patch(SEND, new_callable=AsyncMock, return_value={"id": "msg_1"}) as send:
+    with patch(SEND, return_value={"id": "msg_1"}) as send:
         res = _client(session).post(f"/packages/{pkg.id}/share", json={})
 
-    assert res.status_code == 200
+    assert res.status_code == 202
     assert res.json() == {
         "success": True,
         "sent_to": "hr@acme.test",
@@ -94,11 +95,10 @@ def test_share_falls_back_to_corporate_contact_email_and_opens_enrollment():
         "access_code": "HM-ABC123-1",
         "hr_login_link": f"{ORIGIN}/client/login",
     }
-    to_email, subject, html_content = send.await_args.args
+    to_email, subject, html_content = send.call_args.args
     assert to_email == "hr@acme.test"
     assert "Data Analyst" in subject
     assert "HM-ABC123-1" in html_content
-    assert send.await_args.kwargs == {"raise_on_error": True}
     assert pkg.allow_open_enrollment is True
     session.commit.assert_awaited_once()
 
@@ -108,10 +108,10 @@ def test_share_without_body_uses_fallback():
     pkg = _package(corp)
     session = _session_for_share((pkg, corp))
 
-    with patch(SEND, new_callable=AsyncMock, return_value={"id": "m"}):
+    with patch(SEND, return_value={"id": "m"}):
         res = _client(session).post(f"/packages/{pkg.id}/share")
 
-    assert res.status_code == 200
+    assert res.status_code == 202
     assert res.json()["sent_to"] == "hr@acme.test"
 
 
@@ -120,14 +120,14 @@ def test_share_explicit_recipient_overrides_contact_email():
     pkg = _package(corp)
     session = _session_for_share((pkg, corp))
 
-    with patch(SEND, new_callable=AsyncMock, return_value={"id": "m"}) as send:
+    with patch(SEND, return_value={"id": "m"}) as send:
         res = _client(session).post(
             f"/packages/{pkg.id}/share", json={"recipient_email": " Talent@Acme.Test "}
         )
 
-    assert res.status_code == 200
+    assert res.status_code == 202
     assert res.json()["sent_to"] == "talent@acme.test"
-    assert send.await_args.args[0] == "talent@acme.test"
+    assert send.call_args.args[0] == "talent@acme.test"
 
 
 def test_share_already_open_package_does_not_commit_again():
@@ -135,16 +135,16 @@ def test_share_already_open_package_does_not_commit_again():
     pkg = _package(corp, allow_open_enrollment=True)
     session = _session_for_share((pkg, corp))
 
-    with patch(SEND, new_callable=AsyncMock, return_value={"id": "m"}):
+    with patch(SEND, return_value={"id": "m"}):
         res = _client(session).post(f"/packages/{pkg.id}/share", json={})
 
-    assert res.status_code == 200
+    assert res.status_code == 202
     session.commit.assert_not_called()
 
 
 def test_share_unknown_package_returns_404():
     session = _session_for_share(None)
-    with patch(SEND, new_callable=AsyncMock) as send:
+    with patch(SEND) as send:
         res = _client(session).post(f"/packages/{uuid4()}/share", json={})
     assert res.status_code == 404
     send.assert_not_called()
@@ -160,7 +160,7 @@ def test_share_unpublished_package_returns_409(overrides: dict):
     pkg = _package(corp, **overrides)
     session = _session_for_share((pkg, corp))
 
-    with patch(SEND, new_callable=AsyncMock) as send:
+    with patch(SEND) as send:
         res = _client(session).post(f"/packages/{pkg.id}/share", json={})
 
     assert res.status_code == 409
@@ -174,7 +174,7 @@ def test_share_without_any_recipient_returns_422(contact_email: str | None):
     pkg = _package(corp)
     session = _session_for_share((pkg, corp))
 
-    with patch(SEND, new_callable=AsyncMock) as send:
+    with patch(SEND) as send:
         res = _client(session).post(f"/packages/{pkg.id}/share", json={"recipient_email": ""})
 
     assert res.status_code == 422
@@ -191,38 +191,27 @@ def test_share_rejects_malformed_recipient():
     session.execute.assert_not_called()
 
 
-def test_share_delivery_failure_returns_502_and_keeps_enrollment_closed():
+def test_share_queues_email_even_when_ses_later_fails():
+    """Enrollment opens on accept; SES failures are logged in the background."""
     corp = _corporate()
     pkg = _package(corp)
     session = _session_for_share((pkg, corp))
 
     with patch(
         SEND,
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("Resend rejected the email: domain not verified"),
+        side_effect=RuntimeError("SES rejected the email: domain not verified"),
     ):
-        res = _client(session).post(f"/packages/{pkg.id}/share", json={})
-
-    assert res.status_code == 502
-    assert "domain not verified" in res.json()["detail"]
-    assert pkg.allow_open_enrollment is False
-    session.commit.assert_not_called()
-
-
-def test_share_resend_unconfigured_returns_502():
-    corp = _corporate()
-    pkg = _package(corp)
-    session = _session_for_share((pkg, corp))
-
-    with patch(
-        SEND,
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("Resend is not configured (RESEND_API_KEY missing)"),
-    ):
-        res = _client(session).post(f"/packages/{pkg.id}/share", json={})
-
-    assert res.status_code == 502
-    session.commit.assert_not_called()
+        # TestClient still runs background tasks; a raised sync task surfaces as
+        # an error after the response is built — capture via raises if needed.
+        try:
+            res = _client(session).post(f"/packages/{pkg.id}/share", json={})
+            assert res.status_code == 202
+            assert pkg.allow_open_enrollment is True
+            session.commit.assert_awaited_once()
+        except RuntimeError as exc:
+            # Older Starlette may propagate bg-task errors through TestClient.
+            assert "SES rejected" in str(exc)
+            assert pkg.allow_open_enrollment is True
 
 
 # --------------------------------------------------------------------------- email html
@@ -233,6 +222,7 @@ def test_share_html_contains_both_sections_and_escapes_values():
         corporate_name="<script>alert(1)</script> & Co",
         package_title="Analyst <b>II</b>",
         access_code="HM-ABC123-1",
+        origin=ORIGIN,
     )
     assert "CANDIDATE ACCESS" in html_content
     assert "HR PORTAL ACCESS" in html_content

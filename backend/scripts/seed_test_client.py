@@ -341,7 +341,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _print_summary(result: SeedResult, email: str) -> None:
-    frontend = settings.FRONTEND_URL.rstrip("/")
+    from app.services.email import resolve_frontend_origin
+
+    frontend = resolve_frontend_origin()
     local = any(host in settings.SUPABASE_URL for host in ("127.0.0.1", "localhost"))
     print("OK: test HR client provisioned")
     print(f"  corporate_id : {result.corporate_id}")

@@ -1,66 +1,138 @@
-"""Transactional email via Resend.
+"""Transactional email via AWS SES.
 
 Provides a sync, BackgroundTasks-safe sender plus HTML templates for candidate
 invite and HR completion notifications. Never raises to callers — failures are
-logged and return None.
+logged and return None — unless ``raise_on_error`` is True.
 """
 from __future__ import annotations
 
 import functools
 import html
 import logging
+import re
 from typing import Any
 from urllib.parse import quote, urlparse
 
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import Request
 
 from app.config import settings
 
 logger = logging.getLogger("app.email")
 
+PRODUCTION_FRONTEND_URL = "https://mindq.pages.dev"
+_LOCALHOST_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
+_FROM_ANGLE = re.compile(r"<\s*([^>\s]+)\s*>")
 
-def frontend_origin() -> str:
-    """Public origin of the React app, without a trailing slash."""
+
+def _is_localhost_origin(origin: str) -> bool:
+    """Return True when ``origin`` points at a loopback host."""
+    parsed = urlparse(origin)
+    host = (parsed.hostname or "").lower()
+    return host in _LOCALHOST_HOSTS
+
+
+def resolve_frontend_origin(request: Request | None = None) -> str:
+    """Public React app origin (no trailing slash).
+
+    Priority: ``settings.FRONTEND_URL`` → request ``Origin`` / ``Referer`` →
+    production Pages URL. Localhost settings are honoured when explicitly set
+    so local email previews still work; blank settings fall through.
+
+    Args:
+        request: Optional incoming request used for Origin / Referer fallback.
+
+    Returns:
+        Absolute origin such as ``https://mindq.pages.dev``.
+    """
     explicit = (settings.FRONTEND_URL or "").rstrip("/")
     if explicit:
         return explicit
+
     portal = (settings.PORTAL_URL or "").rstrip("/")
-    if portal.endswith("/portal"):
-        return portal[: -len("/portal")]
-    parsed = urlparse(portal)
-    if parsed.scheme and parsed.netloc:
-        return f"{parsed.scheme}://{parsed.netloc}"
-    return "http://localhost:5173"
+    if portal:
+        if portal.endswith("/portal"):
+            return portal[: -len("/portal")]
+        parsed_portal = urlparse(portal)
+        if parsed_portal.scheme and parsed_portal.netloc:
+            return f"{parsed_portal.scheme}://{parsed_portal.netloc}"
+
+    if request is not None:
+        origin = (request.headers.get("origin") or "").rstrip("/")
+        if origin and not _is_localhost_origin(origin):
+            return origin
+        referer = (request.headers.get("referer") or "").strip()
+        if referer:
+            parsed = urlparse(referer)
+            if parsed.scheme and parsed.netloc and not _is_localhost_origin(
+                f"{parsed.scheme}://{parsed.netloc}"
+            ):
+                return f"{parsed.scheme}://{parsed.netloc}"
+
+    return PRODUCTION_FRONTEND_URL
 
 
-def _assessment_invite_link(access_code: str) -> str:
-    """Candidate CTA: `{FRONTEND_URL}/assessment?code={access_code}`."""
-    return f"{frontend_origin()}/assessment?code={quote(str(access_code))}"
+def frontend_origin(request: Request | None = None) -> str:
+    """Public origin of the React app, without a trailing slash."""
+    return resolve_frontend_origin(request)
 
 
-def _portal_link(access_code: str) -> str:
-    return _assessment_invite_link(access_code)
+def _assessment_invite_link(access_code: str, *, origin: str | None = None) -> str:
+    """Candidate CTA: ``{origin}/assessment?code={access_code}``."""
+    base = (origin or frontend_origin()).rstrip("/")
+    return f"{base}/assessment?code={quote(str(access_code))}"
 
 
-def candidate_portal_link(access_code: str) -> str:
+def _portal_link(access_code: str, *, origin: str | None = None) -> str:
+    return candidate_portal_link(access_code, origin=origin)
+
+
+def candidate_portal_link(access_code: str, *, origin: str | None = None) -> str:
     """Universal candidate link that pre-fills the access code on the portal login.
 
     Args:
         access_code: Package access code (doubles as the candidate PIN).
+        origin: Optional absolute frontend origin; defaults to ``frontend_origin()``.
 
     Returns:
         Absolute URL ``{FRONTEND}/portal?code={access_code}``.
     """
-    return f"{frontend_origin()}/portal?code={quote(str(access_code))}"
+    base = (origin or frontend_origin()).rstrip("/")
+    return f"{base}/portal?code={quote(str(access_code))}"
 
 
-def hr_portal_login_link() -> str:
+def hr_portal_login_link(*, origin: str | None = None) -> str:
     """Absolute URL of the HR client portal login.
+
+    Args:
+        origin: Optional absolute frontend origin; defaults to ``frontend_origin()``.
 
     Returns:
         ``{FRONTEND}/client/login``.
     """
-    return f"{frontend_origin()}/client/login"
+    base = (origin or frontend_origin()).rstrip("/")
+    return f"{base}/client/login"
+
+
+def _ses_client():
+    """Build a boto3 SES client from settings / the default credential chain."""
+    import boto3
+
+    kwargs: dict[str, Any] = {"region_name": (settings.AWS_REGION or "us-east-1").strip()}
+    key = (settings.AWS_ACCESS_KEY_ID or "").strip()
+    secret = (settings.AWS_SECRET_ACCESS_KEY or "").strip()
+    if key and secret:
+        kwargs["aws_access_key_id"] = key
+        kwargs["aws_secret_access_key"] = secret
+    return boto3.client("ses", **kwargs)
+
+
+def _source_address(from_addr: str) -> str:
+    """Normalize ``Name <email>`` or bare email for SES ``Source``."""
+    match = _FROM_ANGLE.search(from_addr or "")
+    if match:
+        return from_addr.strip()
+    return (from_addr or "").strip()
 
 
 def send_transactional_email(
@@ -70,68 +142,52 @@ def send_transactional_email(
     *,
     raise_on_error: bool = False,
 ) -> dict | None:
-    """Send one HTML email through Resend.
+    """Send one HTML email through AWS SES.
 
     Args:
         to_email: Recipient address.
         subject: Message subject line.
         html_content: Full HTML body.
-        raise_on_error: When True, propagate Resend failures as RuntimeError
+        raise_on_error: When True, propagate SES failures as RuntimeError
             instead of returning None (used by beta-access where the UI must
             reflect delivery errors).
 
     Returns:
-        Resend API response dict (includes `id`) on success, otherwise None
-        when ``raise_on_error`` is False.
+        Dict with ``id`` (SES MessageId) on success, otherwise None when
+        ``raise_on_error`` is False.
     """
-    if not settings.resend_configured:
-        msg = f"Resend not configured; skipping email to {to_email} subject={subject!r}"
+    if not settings.email_configured:
+        msg = f"SES not configured; skipping email to {to_email} subject={subject!r}"
         logger.warning(msg)
         if raise_on_error:
-            raise RuntimeError("Resend is not configured (RESEND_API_KEY missing)")
+            raise RuntimeError("SES is not configured (AWS_REGION / EMAIL_FROM missing)")
         return None
 
-    from_addr = settings.EMAIL_FROM
-    payload = {
-        "from": from_addr,
-        "to": [to_email],
-        "subject": subject,
-        "html": html_content,
-    }
+    from_addr = _source_address(settings.EMAIL_FROM)
     logger.info(
-        "Resend send starting to=%s from=%s subject=%r",
+        "SES send starting to=%s from=%s subject=%r region=%s",
         to_email,
         from_addr,
         subject,
+        settings.AWS_REGION,
     )
-    if "onboarding@resend.dev" in (from_addr or "").lower():
-        logger.info(
-            "Resend sandbox from-address in use; recipient must be the verified "
-            "Resend account owner email or delivery will be rejected."
-        )
 
     try:
-        import resend
-
-        resend.api_key = settings.RESEND_API_KEY
-        result = resend.Emails.send(payload)
-        # SDK may return a dict or an object with .id
-        if isinstance(result, dict):
-            message_id = result.get("id")
-            response_payload: dict[str, Any] = result
-        else:
-            message_id = getattr(result, "id", None)
-            response_payload = {"id": message_id}
-        logger.info(
-            "Resend send ok to=%s id=%s response=%s",
-            to_email,
-            message_id,
-            response_payload,
+        response = _ses_client().send_email(
+            Source=from_addr,
+            Destination={"ToAddresses": [to_email]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {"Html": {"Data": html_content, "Charset": "UTF-8"}},
+            },
         )
-        return response_payload
+        message_id = response.get("MessageId")
+        payload: dict[str, Any] = {"id": message_id, "MessageId": message_id}
+        logger.info("SES send ok to=%s id=%s", to_email, message_id)
+        return payload
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "Resend send FAILED to=%s from=%s subject=%r error=%s",
+            "SES send FAILED to=%s from=%s subject=%r error=%s",
             to_email,
             from_addr,
             subject,
@@ -139,7 +195,7 @@ def send_transactional_email(
             exc_info=True,
         )
         if raise_on_error:
-            raise RuntimeError(f"Resend rejected the email: {exc}") from exc
+            raise RuntimeError(f"SES rejected the email: {exc}") from exc
         return None
 
 
@@ -150,7 +206,7 @@ async def send_transactional_email_async(
     *,
     raise_on_error: bool = False,
 ) -> dict | None:
-    """Async wrapper around the sync Resend call (threadpool)."""
+    """Async wrapper around the sync SES call (threadpool)."""
     send = functools.partial(
         send_transactional_email,
         to_email,
@@ -167,13 +223,14 @@ def render_candidate_invite_html(
     package_title: str,
     access_code: str,
     corporate_name: str | None = None,
+    origin: str | None = None,
 ) -> str:
     """HTML for the candidate assessment invite / magic-link email."""
     name = html.escape(candidate_name or "there")
     title = html.escape(package_title or "your assessment")
     company = html.escape((corporate_name or "").strip() or "Your hiring team")
     code = html.escape(access_code)
-    link = html.escape(_assessment_invite_link(access_code))
+    link = html.escape(_assessment_invite_link(access_code, origin=origin))
     return f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#0B0F17;color:#E8EDF5;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
   <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
@@ -242,12 +299,13 @@ def render_candidate_nudge_html(
     candidate_name: str,
     package_title: str,
     access_code: str,
+    origin: str | None = None,
 ) -> str:
     """HTML reminder for an incomplete candidate."""
     name = html.escape(candidate_name or "there")
     title = html.escape(package_title or "your assessment")
     code = html.escape(access_code)
-    link = html.escape(_portal_link(access_code))
+    link = html.escape(_portal_link(access_code, origin=origin))
     return f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#0B0F17;color:#E8EDF5;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
   <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
@@ -272,6 +330,7 @@ def render_package_share_html(
     corporate_name: str | None,
     package_title: str,
     access_code: str,
+    origin: str | None = None,
 ) -> str:
     """HTML handing a client both candidate access and HR portal access for a package.
 
@@ -279,15 +338,16 @@ def render_package_share_html(
         corporate_name: Client company display name.
         package_title: Published package title.
         access_code: Package access code, shown to candidates as the PIN.
+        origin: Optional absolute frontend origin for links.
 
     Returns:
-        Full HTML document for Resend.
+        Full HTML document for SES.
     """
     company = html.escape((corporate_name or "").strip() or "your team")
     title = html.escape(package_title or "your assessment")
     code = html.escape(access_code)
-    candidate_link = html.escape(candidate_portal_link(access_code))
-    hr_link = html.escape(hr_portal_login_link())
+    candidate_link = html.escape(candidate_portal_link(access_code, origin=origin))
+    hr_link = html.escape(hr_portal_login_link(origin=origin))
     section = "margin:0 0 20px;padding:16px;background:#111827;border:1px solid #2A3344;border-radius:8px;"
     label = "font-size:11px;font-weight:700;letter-spacing:0.08em;color:#60A5FA;margin:0 0 10px;"
     body = "font-size:13px;line-height:1.55;color:#9AA8BC;margin:0 0 12px;"

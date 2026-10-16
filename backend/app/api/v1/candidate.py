@@ -15,6 +15,7 @@ from app.schemas.candidate import (
 from app.schemas.response import ResponseSave, ResponseSubmit
 from app.services.candidate_service import CandidateService
 from app.services.package_service import PackageService
+from app.services.email import resolve_frontend_origin
 from app.services.email_service import EmailService
 from app.services.background import score_ai_for_candidate
 from app.services.runner_payload import build_runner_payload
@@ -92,6 +93,7 @@ async def login(
             candidate.full_name,
             candidate.access_code,
             package.title if package else "your assessment",
+            origin=resolve_frontend_origin(request),
         )
     candidate.token = issue_candidate_token(candidate)
     logger.info(

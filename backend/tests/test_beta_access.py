@@ -47,7 +47,7 @@ def test_request_beta_access_sends_email(app, user_id):
             return_value={"id": "msg_abc"},
         ) as send_mail,
     ):
-        settings.resend_configured = True
+        settings.email_configured = True
         settings.admin_notification_email = "muhamadnas44@gmail.com"
         settings.auto_approve_email_set = set()
         res = client.post("/request-beta-access")
@@ -78,7 +78,7 @@ def test_request_beta_access_auto_approves(app, user_id):
         patch("app.api.v1.beta_access.send_transactional_email") as send_mail,
     ):
         settings.auto_approve_email_set = {"hr@acme.test"}
-        settings.resend_configured = False
+        settings.email_configured = False
         res = client.post("/request-beta-access")
 
     assert res.status_code == 200
@@ -116,30 +116,30 @@ def test_request_beta_access_already_provisioned(user_id):
     send_mail.assert_not_called()
 
 
-def test_request_beta_access_requires_resend(app):
+def test_request_beta_access_requires_email(app):
     client = TestClient(app)
     with patch("app.api.v1.beta_access.settings") as settings:
-        settings.resend_configured = False
+        settings.email_configured = False
         settings.auto_approve_email_set = set()
         res = client.post("/request-beta-access")
     assert res.status_code == 503
 
 
-def test_request_beta_access_surfaces_resend_error(app):
+def test_request_beta_access_surfaces_ses_error(app):
     client = TestClient(app)
     with (
         patch("app.api.v1.beta_access.settings") as settings,
         patch(
             "app.api.v1.beta_access.send_transactional_email",
-            side_effect=RuntimeError("Resend rejected the email: sandbox"),
+            side_effect=RuntimeError("SES rejected the email: sandbox"),
         ),
     ):
-        settings.resend_configured = True
+        settings.email_configured = True
         settings.admin_notification_email = "muhamadnas44@gmail.com"
         settings.auto_approve_email_set = set()
         res = client.post("/request-beta-access")
     assert res.status_code == 500
-    assert "Resend rejected" in res.json()["detail"]
+    assert "SES rejected" in res.json()["detail"]
 
 
 def test_auto_approve_emails_parsed_from_csv():
