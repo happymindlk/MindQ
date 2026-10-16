@@ -53,7 +53,7 @@ def test_invite_rejects_other_tenant(app, corp_id, package_id):
     assert res.status_code == 403
 
 
-def test_invite_sends_resend_and_returns_pending(app, corp_id, package_id):
+def test_invite_queues_email_and_returns_accepted(app, corp_id, package_id):
     client = TestClient(app)
     candidate_id = uuid4()
     access = str(uuid4())
@@ -90,7 +90,6 @@ def test_invite_sends_resend_and_returns_pending(app, corp_id, package_id):
     app.dependency_overrides[get_db] = _db
 
     with (
-        patch("app.api.v1.invites.settings") as settings,
         patch("app.api.v1.invites.CandidateService.invite", new=_invite),
         patch(
             "app.api.v1.invites.EmailService.send_candidate_invite_email",
@@ -98,7 +97,6 @@ def test_invite_sends_resend_and_returns_pending(app, corp_id, package_id):
             return_value=True,
         ) as send_mail,
     ):
-        settings.resend_configured = True
         res = client.post(
             "/api/candidates/invite",
             json={
@@ -108,25 +106,9 @@ def test_invite_sends_resend_and_returns_pending(app, corp_id, package_id):
             },
         )
 
-    assert res.status_code == 200
+    assert res.status_code == 202
     body = res.json()
     assert body["status"] == "pending"
     assert body["access_code"] == access
     assert body["candidate_email"] == "pat@example.com"
     send_mail.assert_awaited_once()
-    assert send_mail.await_args.kwargs.get("raise_on_error") is True
-
-
-def test_invite_requires_resend(app, corp_id, package_id):
-    client = TestClient(app)
-    with patch("app.api.v1.invites.settings") as settings:
-        settings.resend_configured = False
-        res = client.post(
-            "/api/candidates/invite",
-            json={
-                "candidate_email": "pat@example.com",
-                "package_id": str(package_id),
-                "corporate_id": str(corp_id),
-            },
-        )
-    assert res.status_code == 503

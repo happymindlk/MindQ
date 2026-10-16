@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from fastapi import BackgroundTasks
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,7 +22,7 @@ from app.services.email import (
     candidate_portal_link,
     hr_portal_login_link,
     render_package_share_html,
-    send_transactional_email_async,
+    send_transactional_email,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 class PackageShareError(Exception):
     """Share request cannot be fulfilled; ``code`` identifies the reason.
 
-    Codes: ``not_published``, ``no_recipient``, ``delivery_failed``.
+    Codes: ``not_published``, ``no_recipient``.
     """
 
     def __init__(self, code: str, message: str) -> None:
@@ -55,7 +56,10 @@ def display_status(package: Package) -> PackageDisplayStatus:
 
 
 async def list_corporate_packages(
-    session: AsyncSession, corporate_id: UUID
+    session: AsyncSession,
+    corporate_id: UUID,
+    *,
+    origin: str | None = None,
 ) -> list[CorporatePackageItem]:
     """List a corporate's packages with invited / completed candidate counts.
 
@@ -65,6 +69,7 @@ async def list_corporate_packages(
     Args:
         session: Async database session.
         corporate_id: Target corporate UUID.
+        origin: Absolute frontend origin for share links.
 
     Returns:
         Packages newest first.
@@ -120,7 +125,7 @@ async def list_corporate_packages(
         )
     ).all()
 
-    hr_link = hr_portal_login_link()
+    hr_link = hr_portal_login_link(origin=origin)
     items: list[CorporatePackageItem] = []
     for package, invited, completed in rows:
         status = display_status(package)
@@ -138,7 +143,9 @@ async def list_corporate_packages(
                 created_at=package.created_at,
                 open_time=package.open_time,
                 close_time=package.close_time,
-                candidate_link=candidate_portal_link(package.access_code) if published else None,
+                candidate_link=(
+                    candidate_portal_link(package.access_code, origin=origin) if published else None
+                ),
                 hr_login_link=hr_link if published else None,
             )
         )
@@ -146,24 +153,32 @@ async def list_corporate_packages(
 
 
 async def share_package(
-    session: AsyncSession, package_id: UUID, recipient_email: str | None
+    session: AsyncSession,
+    package_id: UUID,
+    recipient_email: str | None,
+    *,
+    background_tasks: BackgroundTasks,
+    origin: str | None = None,
 ) -> SharePackageResponse:
-    """Email candidate + HR access for a published package and open its enrollment.
+    """Queue candidate + HR access email for a published package and open enrollment.
 
-    Open enrollment is enabled only after Resend accepts the message, so a failed
-    delivery never widens access to a link nobody received.
+    SES delivery runs in ``background_tasks`` so the HTTP response returns
+    immediately. Open enrollment is enabled when the share is accepted, not
+    gated on SMTP round-trip success.
 
     Args:
         session: Async database session.
         package_id: Target package UUID.
         recipient_email: Normalized override; None falls back to the corporate HR email.
+        background_tasks: FastAPI background task queue for SES.
+        origin: Absolute frontend origin for links in the email and response.
 
     Returns:
-        Delivery acknowledgement plus the links that were sent.
+        Delivery acknowledgement plus the links that were queued.
 
     Raises:
         LookupError: The package does not exist.
-        PackageShareError: Not published, no recipient, or delivery failed.
+        PackageShareError: Not published or no recipient.
     """
     row = (
         await session.execute(
@@ -192,27 +207,25 @@ async def share_package(
         corporate_name=corporate.name,
         package_title=package.title,
         access_code=package.access_code,
+        origin=origin,
     )
-    try:
-        await send_transactional_email_async(
-            recipient,
-            f"Assessment access: {package.title}",
-            html_content,
-            raise_on_error=True,
-        )
-    except RuntimeError as exc:
-        logger.warning("Package share delivery failed package=%s to=%s: %s", package_id, recipient, exc)
-        raise PackageShareError("delivery_failed", str(exc)) from exc
+    subject = f"Assessment access: {package.title}"
+    background_tasks.add_task(
+        send_transactional_email,
+        recipient,
+        subject,
+        html_content,
+    )
 
     if not package.allow_open_enrollment:
         package.allow_open_enrollment = True
         await session.commit()
-    logger.info("Package shared package=%s to=%s", package_id, recipient)
+    logger.info("Package share queued package=%s to=%s", package_id, recipient)
 
     return SharePackageResponse(
         success=True,
         sent_to=recipient,
-        candidate_link=candidate_portal_link(package.access_code),
+        candidate_link=candidate_portal_link(package.access_code, origin=origin),
         access_code=package.access_code,
-        hr_login_link=hr_portal_login_link(),
+        hr_login_link=hr_portal_login_link(origin=origin),
     )

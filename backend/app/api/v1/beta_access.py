@@ -149,7 +149,7 @@ async def request_beta_access(
             "message_id": None,
         }
 
-    if not settings.resend_configured:
+    if not settings.email_configured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Access request email is not configured",

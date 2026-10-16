@@ -172,7 +172,9 @@ async def invite_hr(
             detail="This email belongs to an internal operator and cannot be invited as HR.",
         )
 
-    redirect_to = f"{settings.FRONTEND_URL.rstrip('/')}/client/dashboard"
+    from app.services.email import resolve_frontend_origin
+
+    redirect_to = f"{resolve_frontend_origin()}/client/dashboard"
     try:
         user_id = invite_hr_user_by_email(body.email, redirect_to=redirect_to)
     except SupabaseAdminError as exc:
@@ -225,7 +227,7 @@ async def update_admin_package(
 ):
     """Replace draft package metadata, modules, and custom questions.
 
-    Published packages return HTTP 400 and are not mutated.
+    Published packages return HTTP 409 and are not mutated.
 
     Args:
         package_id: Client package UUID.
@@ -242,8 +244,8 @@ async def update_admin_package(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PackageLockedError as exc:
         raise HTTPException(
-            status_code=400,
-            detail="Published packages are locked and cannot be modified.",
+            status_code=409,
+            detail="Package is published and locked",
         ) from exc
     except ClientPackageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

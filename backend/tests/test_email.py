@@ -1,17 +1,16 @@
 import logging
-import sys
-from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from app.services.email import send_transactional_email
+from app.services.email import resolve_frontend_origin, send_transactional_email
 from app.services.email_service import EmailService
 
 
 @pytest.mark.asyncio
-async def test_nudge_without_resend_returns_false(monkeypatch, caplog):
-    monkeypatch.setattr("app.services.email.settings.RESEND_API_KEY", None)
+async def test_nudge_without_ses_returns_false(monkeypatch, caplog):
+    monkeypatch.setattr("app.services.email.settings.EMAIL_FROM", "")
+    monkeypatch.setattr("app.services.email.settings.AWS_REGION", "")
 
     with caplog.at_level(logging.WARNING, logger="app.email"):
         ok = await EmailService.send_nudge_email(
@@ -23,31 +22,43 @@ async def test_nudge_without_resend_returns_false(monkeypatch, caplog):
 
     assert ok is False
     logged = "\n".join(r.getMessage() for r in caplog.records)
-    assert "Resend not configured" in logged
+    assert "SES not configured" in logged
     assert "jane@example.com" in logged
 
 
 def test_send_transactional_email_success(monkeypatch):
-    monkeypatch.setattr("app.services.email.settings.RESEND_API_KEY", "re_test")
-    monkeypatch.setattr(
-        "app.services.email.settings.EMAIL_FROM",
-        "Assess Pulse <onboarding@resend.dev>",
-    )
+    monkeypatch.setattr("app.services.email.settings.EMAIL_FROM", "Assess Pulse <noreply@example.com>")
+    monkeypatch.setattr("app.services.email.settings.AWS_REGION", "us-east-1")
+    monkeypatch.setattr("app.services.email.settings.AWS_ACCESS_KEY_ID", "AKIATEST")
+    monkeypatch.setattr("app.services.email.settings.AWS_SECRET_ACCESS_KEY", "secret")
 
-    fake_resend = ModuleType("resend")
-    fake_resend.Emails = SimpleNamespace(send=MagicMock(return_value={"id": "msg_123"}))
-    monkeypatch.setitem(sys.modules, "resend", fake_resend)
+    fake_client = MagicMock()
+    fake_client.send_email.return_value = {"MessageId": "msg_123"}
+    monkeypatch.setattr("app.services.email._ses_client", lambda: fake_client)
 
     result = send_transactional_email(
         "jane@example.com",
         "Hello",
         "<p>Hi</p>",
     )
-    assert result == {"id": "msg_123"}
-    fake_resend.Emails.send.assert_called_once()
-    call_payload = fake_resend.Emails.send.call_args[0][0]
-    assert call_payload["to"] == ["jane@example.com"]
-    assert call_payload["from"] == "Assess Pulse <onboarding@resend.dev>"
+    assert result == {"id": "msg_123", "MessageId": "msg_123"}
+    fake_client.send_email.assert_called_once()
+    call_kwargs = fake_client.send_email.call_args.kwargs
+    assert call_kwargs["Destination"]["ToAddresses"] == ["jane@example.com"]
+    assert call_kwargs["Source"] == "Assess Pulse <noreply@example.com>"
+
+
+def test_resolve_frontend_origin_prefers_settings(monkeypatch):
+    monkeypatch.setattr(
+        "app.services.email.settings.FRONTEND_URL", "https://app.example.test"
+    )
+    assert resolve_frontend_origin() == "https://app.example.test"
+
+
+def test_resolve_frontend_origin_falls_back_to_production(monkeypatch):
+    monkeypatch.setattr("app.services.email.settings.FRONTEND_URL", "")
+    monkeypatch.setattr("app.services.email.settings.PORTAL_URL", "")
+    assert resolve_frontend_origin() == "https://mindq.pages.dev"
 
 
 @pytest.mark.asyncio
@@ -70,6 +81,7 @@ async def test_invite_email_includes_guidelines(monkeypatch):
         access_code="AP-TEST-1",
         package_title="Backend Pack",
         corporate_name="Acme Corp",
+        origin="https://mindq.pages.dev",
     )
     assert ok is True
     assert "Backend Pack" in captured["subject"]
@@ -78,7 +90,7 @@ async def test_invite_email_includes_guidelines(monkeypatch):
     assert "Acme Corp" in captured["html"]
     assert "Guidelines" in captured["html"]
     assert "Start assessment" in captured["html"]
-    assert "/assessment?code=AP-TEST-1" in captured["html"]
+    assert "https://mindq.pages.dev/assessment?code=AP-TEST-1" in captured["html"]
 
 
 @pytest.mark.asyncio

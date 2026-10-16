@@ -78,9 +78,14 @@ export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
 
   useEffect(() => () => clearTimeout(copiedTimerRef.current), []);
 
-  const candidateLink = pkg?.candidate_link ?? '';
-  const hrLink = pkg?.hr_login_link ?? '';
+  const frontendOrigin = (
+    import.meta.env.VITE_FRONTEND_URL || window.location.origin
+  ).replace(/\/+$/, '');
   const accessCode = pkg?.access_code ?? '';
+  const candidateLink = accessCode
+    ? `${frontendOrigin}/portal?code=${encodeURIComponent(accessCode)}`
+    : (pkg?.candidate_link ?? '');
+  const hrLink = `${frontendOrigin}/client/login`;
   const candidateInvite = `Assessment: ${pkg?.title ?? ''}\nTest link: ${candidateLink}\nPIN: ${accessCode}`;
 
   const copy = async (key, text) => {

@@ -40,9 +40,12 @@ class Settings(BaseSettings):
     R2_REPORTS_BUCKET_NAME: str = ""
     REPORT_URL_TTL_SECONDS: int = 900
 
-    # Resend transactional email.
-    RESEND_API_KEY: str | None = None
-    EMAIL_FROM: str = "Assess Pulse <onboarding@resend.dev>"
+    # AWS SES transactional email (boto3). Credentials may come from env keys
+    # or the default AWS credential chain (IAM role, shared config, …).
+    AWS_REGION: str = "us-east-1"
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
+    EMAIL_FROM: str = "Assess Pulse <noreply@mindq.pages.dev>"
     # Inbox for gated beta / waitlist access requests (and other admin alerts).
     ADMIN_NOTIFICATION_EMAIL: str = "muhamadnas44@gmail.com"
     # Legacy alias — prefer ADMIN_NOTIFICATION_EMAIL.
@@ -52,10 +55,10 @@ class Settings(BaseSettings):
     # NoDecode: pydantic-settings otherwise JSON-parses list env values first.
     AUTO_APPROVE_EMAILS: Annotated[list[str], NoDecode] = []
     # Public origin of the React app (no trailing slash). Invite emails link to
-    # `{FRONTEND_URL}/assessment?code=…`.
-    FRONTEND_URL: str = "http://localhost:5173"
-    # Candidate-facing portal URL used in notification emails.
-    PORTAL_URL: str = "http://localhost:5173/portal"
+    # `{FRONTEND_URL}/assessment?code=…`. Blank → request Origin → production.
+    FRONTEND_URL: str = ""
+    # Candidate-facing portal URL used in notification emails (legacy; prefer FRONTEND_URL).
+    PORTAL_URL: str = ""
 
     GEMINI_API_KEY: str = ""
     # New Gemini API keys cannot call gemini-2.5-*; Google returns 404 NOT_FOUND.
@@ -134,9 +137,20 @@ class Settings(BaseSettings):
         return (self.BETA_ACCESS_ADMIN_EMAIL or self.ADMIN_NOTIFICATION_EMAIL or "").strip()
 
     @property
-    def resend_configured(self) -> bool:
-        """True when a Resend API key is available for outbound mail."""
-        return bool(self.RESEND_API_KEY)
+    def email_configured(self) -> bool:
+        """True when SES credentials and a from-address are available.
+
+        Explicit access-key credentials are required for the configured check so
+        local/CI without AWS stays offline. Deployments using an IAM role can
+        still set the key env vars from the instance profile export, or set
+        ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` in the service env.
+        """
+        return bool(
+            (self.AWS_REGION or "").strip()
+            and (self.EMAIL_FROM or "").strip()
+            and (self.AWS_ACCESS_KEY_ID or "").strip()
+            and (self.AWS_SECRET_ACCESS_KEY or "").strip()
+        )
 
 
 settings = Settings()
