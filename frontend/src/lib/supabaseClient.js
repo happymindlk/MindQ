@@ -12,6 +12,16 @@ if (!isSupabaseConfigured) {
     'Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY. Set them in frontend/.env.local ' +
       'and RESTART the dev server (Vite only reads env vars at startup).'
   );
+} else if (
+  typeof supabaseUrl === 'string' &&
+  supabaseUrl.includes('djshmrkerssvpcxqkqo') &&
+  !supabaseUrl.includes('djshmrkerssvpvcxqkqo')
+) {
+  // Known Cloudflare Pages typo: missing "v" in the project ref → DNS NXDOMAIN.
+  console.error(
+    '[supabase] VITE_SUPABASE_URL looks like a typo (…svpc… instead of …svpvc…). ' +
+      'Expected https://djshmrkerssvpvcxqkqo.supabase.co — update Cloudflare Pages env and redeploy.'
+  );
 }
 
 // Use harmless placeholders when unconfigured so createClient does not throw at

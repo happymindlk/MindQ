@@ -135,6 +135,21 @@ def _source_address(from_addr: str) -> str:
     return (from_addr or "").strip()
 
 
+def _ses_error_hint(exc: BaseException) -> str:
+    """Human-readable hint for common SES sandbox / identity failures."""
+    text = str(exc).lower()
+    if "not verified" in text or "messagerejected" in text or "email address is not verified" in text:
+        return (
+            "SES sandbox/identity: verify the From address AND every recipient "
+            "(or request production access) in AWS SES → Configuration → Identities."
+        )
+    if "accessdenied" in text or "not authorized" in text:
+        return "IAM: ensure the AWS key can call ses:SendEmail in this region."
+    if "invalidclienttokenid" in text or "signature" in text:
+        return "Credentials: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY look invalid."
+    return ""
+
+
 def send_transactional_email(
     to_email: str,
     subject: str,
@@ -143,6 +158,9 @@ def send_transactional_email(
     raise_on_error: bool = False,
 ) -> dict | None:
     """Send one HTML email through AWS SES.
+
+    Safe for FastAPI ``BackgroundTasks``: all failures are caught and logged with
+    a full stack trace (``logger.exception``) unless ``raise_on_error`` is True.
 
     Args:
         to_email: Recipient address.
@@ -157,10 +175,15 @@ def send_transactional_email(
         ``raise_on_error`` is False.
     """
     if not settings.email_configured:
-        msg = f"SES not configured; skipping email to {to_email} subject={subject!r}"
+        msg = (
+            f"SES not configured; skipping email to {to_email} subject={subject!r}. "
+            "Set AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and EMAIL_FROM."
+        )
         logger.warning(msg)
         if raise_on_error:
-            raise RuntimeError("SES is not configured (AWS_REGION / EMAIL_FROM missing)")
+            raise RuntimeError(
+                "SES is not configured (AWS_REGION / EMAIL_FROM / AWS credentials missing)"
+            )
         return None
 
     from_addr = _source_address(settings.EMAIL_FROM)
@@ -183,19 +206,42 @@ def send_transactional_email(
         )
         message_id = response.get("MessageId")
         payload: dict[str, Any] = {"id": message_id, "MessageId": message_id}
-        logger.info("SES send ok to=%s id=%s", to_email, message_id)
+        logger.info(
+            "SES email sent successfully to=%s MessageId=%s subject=%r",
+            to_email,
+            message_id,
+            subject,
+        )
         return payload
-    except Exception as exc:  # noqa: BLE001
-        logger.error(
-            "SES send FAILED to=%s from=%s subject=%r error=%s",
+    except Exception as exc:  # noqa: BLE001 — BackgroundTasks must never raise silently
+        hint = _ses_error_hint(exc)
+        # logger.exception always includes a full traceback for journalctl / CloudWatch.
+        logger.exception(
+            "SES send FAILED to=%s from=%s subject=%r error=%s%s",
             to_email,
             from_addr,
             subject,
             exc,
-            exc_info=True,
+            f" | hint={hint}" if hint else "",
         )
+        try:
+            from botocore.exceptions import ClientError
+
+            if isinstance(exc, ClientError):
+                err = (exc.response or {}).get("Error") or {}
+                logger.error(
+                    "AWS SES ClientError code=%s message=%s to=%s",
+                    err.get("Code"),
+                    err.get("Message"),
+                    to_email,
+                )
+        except ImportError:
+            pass
         if raise_on_error:
-            raise RuntimeError(f"SES rejected the email: {exc}") from exc
+            detail = f"SES rejected the email: {exc}"
+            if hint:
+                detail = f"{detail} ({hint})"
+            raise RuntimeError(detail) from exc
         return None
 
 
