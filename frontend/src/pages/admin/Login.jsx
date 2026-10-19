@@ -1,9 +1,10 @@
 import React, { useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, ArrowRight, ArrowLeft, Package } from 'lucide-react';
+import { Mail, Lock, ArrowRight, ArrowLeft } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
+import BrandLogo from '../../components/BrandLogo';
 import { useAuth } from '../../context/useAuth';
 import { isSupabaseConfigured } from '../../lib/supabaseClient';
 import OtpCodeInput from '../../features/admin-auth/otp-code-input';
@@ -27,12 +28,7 @@ export default function AdminLogin() {
   return (
     <div className="min-h-screen bg-canvas flex flex-col justify-center items-center p-4">
       <div className="w-full max-w-md">
-        <div className="flex items-center justify-center gap-2 text-primary-text mb-8">
-          <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20">
-            <Package className="w-5 h-5" />
-          </div>
-          <span className="font-semibold text-xl text-foreground">MindQ</span>
-        </div>
+        <BrandLogo collapsed={false} className="h-10 w-auto mx-auto mb-6 object-contain" />
 
         <Card variant="elevated" className="p-8">
           <h1 className="text-xl font-semibold text-foreground mb-1">

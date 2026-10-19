@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, KeyRound, Mail, RotateCw, User, UserRound } from
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
+import BrandLogo from '../../components/BrandLogo';
 import { isSupabaseConfigured } from '../../lib/supabaseClient';
 import { PreviewRunner } from '../../features/assessment-runner/preview-runner';
 import { PREVIEW_ACCESS_CODE } from '../../features/assessment-builder/lib/preview-protocol';
@@ -64,6 +65,7 @@ function CandidateLogin({ initialAccessCode }) {
   return (
     <div className="flex-1 flex flex-col justify-center items-center w-full py-8">
       <div className="w-full max-w-md">
+        <BrandLogo collapsed={false} className="h-10 w-auto mx-auto mb-6 object-contain" />
         <div className="mb-6">
           <h1 className="text-xl font-semibold tracking-tight text-foreground">
             {step === 'details' ? 'Welcome to Your Assessment' : 'Check your inbox'}
