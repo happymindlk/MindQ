@@ -5,12 +5,12 @@ import {
   // Building2, // Corporates nav hidden for stakeholder demo
   Library,
   Layers,
-  Brain,
   Users,
   Menu,
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
+import BrandLogo from './BrandLogo';
 import ToastProvider from './ui/Toast';
 import ThemeToggle from './ThemeToggle';
 import UserMenu from './user-menu';
@@ -43,17 +43,14 @@ function resolveShellTitle(pathname) {
   return match?.name ?? 'Admin';
 }
 
-function BrandLink() {
+function BrandLink({ className = 'h-8 w-auto' }) {
   return (
     <Link
       to="/admin"
       aria-label="MindQ home"
-      className="flex items-center gap-2 min-w-0 rounded-md focus-visible:ring-2 focus-visible:ring-primary"
+      className="flex min-w-0 items-center rounded-md focus-visible:ring-2 focus-visible:ring-primary"
     >
-      <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center shrink-0">
-        <Brain className="w-3.5 h-3.5 text-white" aria-hidden />
-      </div>
-      <span className="font-semibold text-sm text-foreground truncate">MindQ</span>
+      <BrandLogo collapsed={false} className={className} />
     </Link>
   );
 }
@@ -117,7 +114,7 @@ export default function Layout() {
           `}
         >
           <div className="h-12 flex items-center justify-between px-3 border-b border-border">
-            <BrandLink />
+            <BrandLink className="h-8 w-auto" />
 
             <button
               type="button"
@@ -167,7 +164,7 @@ export default function Layout() {
                 <Menu className="w-5 h-5" />
               </button>
               <div className="lg:hidden">
-                <BrandLink />
+                <BrandLink className="h-7 w-auto" />
               </div>
               <p className="text-xs font-medium text-muted truncate hidden sm:block">
                 {shellTitle}

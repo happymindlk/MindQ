@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link } from 'react-router-dom';
-import { Brain } from 'lucide-react';
+import BrandLogo from './BrandLogo';
 import SupportModal from './SupportModal';
 import ToastProvider from './ui/Toast';
 import RouteErrorBoundary from './route-error-boundary';
@@ -22,12 +22,9 @@ export default function PortalLayout() {
             <Link
               to={brandTo}
               aria-label="MindQ home"
-              className="flex items-center gap-2 min-w-0 focus-visible:ring-2 focus-visible:ring-primary rounded-md"
+              className="flex items-center min-w-0 focus-visible:ring-2 focus-visible:ring-primary rounded-md"
             >
-              <div className="w-7 h-7 rounded-md bg-indigo-600 flex items-center justify-center shrink-0">
-                <Brain className="w-3.5 h-3.5 text-white" aria-hidden />
-              </div>
-              <span className="font-semibold text-sm text-foreground truncate">MindQ</span>
+              <BrandLogo collapsed={false} className="h-7 w-auto" />
             </Link>
             <div className="flex items-center gap-2 shrink-0">
               <p className="text-xs font-medium text-muted hidden sm:block">Assessment Portal</p>

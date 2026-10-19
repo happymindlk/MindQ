@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Mail, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail } from 'lucide-react';
+import BrandLogo from '../../components/BrandLogo';
 import { clientApi } from '../../lib/clientApi';
 import { isSupabaseConfigured } from '../../lib/supabaseClient';
 import { useClientSession } from './use-client-session';
@@ -95,14 +96,7 @@ export default function ClientLogin() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-canvas px-4 py-8">
       <div className="w-full max-w-sm">
-        <div className="mb-6 flex items-center gap-2">
-          <span className="flex h-8 w-8 items-center justify-center rounded-md border border-indigo-600/40 bg-indigo-600/10 text-indigo-600 dark:text-indigo-400">
-            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <span className="text-sm font-semibold tracking-tight text-foreground">
-            MindQ <span className="font-normal text-muted">Client Portal</span>
-          </span>
-        </div>
+        <BrandLogo collapsed={false} className="h-10 w-auto mx-auto mb-6 object-contain" />
 
         <div className="rounded-lg border border-border bg-surface p-6 shadow-[0_0_0_1px_rgba(0,0,0,0.4)]">
           <div className="mb-6 flex items-center gap-2 text-xs font-medium text-muted">
