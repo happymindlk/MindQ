@@ -7,9 +7,43 @@ from sqlalchemy.exc import ProgrammingError
 
 from app.auth import HRUserContext, get_current_ops_user
 from app.database import engine, get_db
-from app.main import app
+from app.main import allowed_origins, app, is_origin_allowed
 
 ORIGIN = "https://mindq.pages.dev"
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://qa.app.mindqtalent.com",
+        "https://mindq.pages.dev",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        # Subdomains matched by allow_origin_regex, not the explicit list.
+        "https://preview-123.mindq.pages.dev",
+        "https://feature-x.app.mindqtalent.com",
+    ],
+)
+def test_allowed_origins_cover_qa_pages_and_localhost(origin):
+    assert is_origin_allowed(origin)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [None, "", "https://evil.example", "http://qa.app.mindqtalent.com"],
+)
+def test_disallowed_origins_are_rejected(origin):
+    assert not is_origin_allowed(origin)
+
+
+def test_explicit_allowlist_contains_required_origins():
+    for origin in (
+        "https://qa.app.mindqtalent.com",
+        "https://mindq.pages.dev",
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ):
+        assert origin in allowed_origins
 PATH = "/api/v1/packages/corporates"
 
 

@@ -3,7 +3,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.services.email import resolve_frontend_origin, send_transactional_email
+from app.services.email import (
+    resolve_frontend_origin,
+    send_admin_otp_email,
+    send_transactional_email,
+)
 from app.services.email_service import EmailService
 
 
@@ -122,6 +126,45 @@ async def test_invite_email_includes_guidelines(monkeypatch):
     assert "Guidelines" in captured["html"]
     assert "Start assessment" in captured["html"]
     assert "https://mindq.pages.dev/assessment?code=AP-TEST-1" in captured["html"]
+
+
+@pytest.mark.asyncio
+async def test_admin_otp_falls_back_to_log_in_qa(monkeypatch, caplog):
+    """SES sandbox rejection must not raise (or roll back) outside production."""
+    monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", "qa")
+    monkeypatch.setattr("app.services.email.settings.DEBUG", True)
+
+    async def _rejected(*_args, **_kwargs):
+        raise RuntimeError("SES rejected the email: MessageRejected: not verified")
+
+    monkeypatch.setattr(
+        "app.services.email.send_transactional_email_async", _rejected
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.email"):
+        result = await send_admin_otp_email("ops@mindq.test", "482916")
+
+    assert result is None
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "QA/STAGING OTP FALLBACK" in logged
+    assert "482916" in logged
+    assert "ops@mindq.test" in logged
+
+
+@pytest.mark.asyncio
+async def test_admin_otp_raises_in_production(monkeypatch):
+    monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", "production")
+    monkeypatch.setattr("app.services.email.settings.DEBUG", False)
+
+    async def _rejected(*_args, **_kwargs):
+        raise RuntimeError("SES rejected the email: MessageRejected: not verified")
+
+    monkeypatch.setattr(
+        "app.services.email.send_transactional_email_async", _rejected
+    )
+
+    with pytest.raises(RuntimeError, match="MessageRejected"):
+        await send_admin_otp_email("ops@mindq.test", "482916")
 
 
 @pytest.mark.asyncio
