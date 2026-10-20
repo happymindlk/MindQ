@@ -10,6 +10,7 @@ import functools
 import html
 import logging
 import re
+from email.utils import parseaddr
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -21,8 +22,36 @@ from app.config import settings
 logger = logging.getLogger("app.email")
 
 PRODUCTION_FRONTEND_URL = "https://mindq.pages.dev"
+DEFAULT_EMAIL_FROM = "MindQ <noreply@mindqtalent.com>"
 _LOCALHOST_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
 _FROM_ANGLE = re.compile(r"<\s*([^>\s]+)\s*>")
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def clean_recipient_email(value: object) -> str:
+    """Extract a bare recipient address safe for SES ``ToAddresses``.
+
+    Strips display names, angle brackets, surrounding quotes, and trailing
+    whitespace/punctuation, e.g. ``"Pat <pat@example.com> "`` becomes
+    ``pat@example.com``.
+
+    Args:
+        value: Raw recipient value in any shape.
+
+    Returns:
+        The bare email address, or ``""`` when none can be extracted.
+    """
+    if value is None:
+        return ""
+    raw = str(value).strip()
+    if not raw:
+        return ""
+    _, parsed = parseaddr(raw)
+    candidate = (parsed or raw).strip().strip("<>").strip().strip("\"'").rstrip(";,")
+    match = _EMAIL_RE.search(candidate) or _EMAIL_RE.search(raw)
+    if match:
+        return match.group(0).rstrip(";,.")
+    return candidate if "@" in candidate else ""
 
 
 def _is_localhost_origin(origin: str) -> bool:
@@ -127,12 +156,19 @@ def _ses_client():
     return boto3.client("ses", **kwargs)
 
 
-def _source_address(from_addr: str) -> str:
-    """Normalize ``Name <email>`` or bare email for SES ``Source``."""
-    match = _FROM_ANGLE.search(from_addr or "")
-    if match:
-        return from_addr.strip()
-    return (from_addr or "").strip()
+def _source_address(from_addr: str | None) -> str:
+    """Normalize ``Name <email>`` or bare email for SES ``Source``.
+
+    Falls back to ``MindQ <noreply@mindqtalent.com>`` when unset or unusable.
+    """
+    raw = (from_addr or "").strip()
+    if not raw:
+        return DEFAULT_EMAIL_FROM
+    if not clean_recipient_email(raw):
+        return DEFAULT_EMAIL_FROM
+    if _FROM_ANGLE.search(raw):
+        return raw
+    return clean_recipient_email(raw)
 
 
 def _ses_error_hint(exc: BaseException) -> str:
@@ -174,22 +210,41 @@ def send_transactional_email(
         Dict with ``id`` (SES MessageId) on success, otherwise None when
         ``raise_on_error`` is False.
     """
-    if not settings.email_configured:
+    clean_email = clean_recipient_email(to_email)
+    if not clean_email:
+        logger.error(
+            "SES send aborted: no valid recipient extracted from %r subject=%r",
+            to_email,
+            subject,
+        )
+        if raise_on_error:
+            raise RuntimeError(f"Invalid recipient email: {to_email!r}")
+        return None
+
+    from_addr = _source_address(getattr(settings, "EMAIL_FROM", None))
+
+    # EMAIL_FROM falls back to DEFAULT_EMAIL_FROM, so configuration hinges on
+    # region + credentials rather than a (possibly blank) sender override.
+    ses_ready = bool(
+        (getattr(settings, "AWS_REGION", "") or "").strip()
+        and (getattr(settings, "AWS_ACCESS_KEY_ID", "") or "").strip()
+        and (getattr(settings, "AWS_SECRET_ACCESS_KEY", "") or "").strip()
+    )
+    if not ses_ready:
         msg = (
-            f"SES not configured; skipping email to {to_email} subject={subject!r}. "
-            "Set AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and EMAIL_FROM."
+            f"SES not configured; skipping email to {clean_email} subject={subject!r}. "
+            "Set AWS_REGION, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY."
         )
         logger.warning(msg)
         if raise_on_error:
             raise RuntimeError(
-                "SES is not configured (AWS_REGION / EMAIL_FROM / AWS credentials missing)"
+                "SES is not configured (AWS_REGION / AWS credentials missing)"
             )
         return None
 
-    from_addr = _source_address(settings.EMAIL_FROM)
     logger.info(
         "SES send starting to=%s from=%s subject=%r region=%s",
-        to_email,
+        clean_email,
         from_addr,
         subject,
         settings.AWS_REGION,
@@ -198,7 +253,7 @@ def send_transactional_email(
     try:
         response = _ses_client().send_email(
             Source=from_addr,
-            Destination={"ToAddresses": [to_email]},
+            Destination={"ToAddresses": [clean_email]},
             Message={
                 "Subject": {"Data": subject, "Charset": "UTF-8"},
                 "Body": {"Html": {"Data": html_content, "Charset": "UTF-8"}},
@@ -208,7 +263,7 @@ def send_transactional_email(
         payload: dict[str, Any] = {"id": message_id, "MessageId": message_id}
         logger.info(
             "SES email sent successfully to=%s MessageId=%s subject=%r",
-            to_email,
+            clean_email,
             message_id,
             subject,
         )
@@ -218,7 +273,7 @@ def send_transactional_email(
         # logger.exception always includes a full traceback for journalctl / CloudWatch.
         logger.exception(
             "SES send FAILED to=%s from=%s subject=%r error=%s%s",
-            to_email,
+            clean_email,
             from_addr,
             subject,
             exc,
@@ -233,7 +288,7 @@ def send_transactional_email(
                     "AWS SES ClientError code=%s message=%s to=%s",
                     err.get("Code"),
                     err.get("Message"),
-                    to_email,
+                    clean_email,
                 )
         except ImportError:
             pass

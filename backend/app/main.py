@@ -65,10 +65,9 @@ DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
 
 #: Any https subdomain of our two hosted zones, e.g.
 #: ``https://qa.app.mindqtalent.com``, ``https://feat-x.mindq.pages.dev``.
-ALLOW_ORIGIN_REGEX = (
-    r"^https://.*\.mindqtalent\.com$"
-    r"|^https://.*\.pages\.dev$"
-)
+MINDQTALENT_ORIGIN_REGEX = r"^https://.*\.mindqtalent\.com$"
+PAGES_DEV_ORIGIN_REGEX = r"^https://.*\.pages\.dev$"
+ALLOW_ORIGIN_REGEX = f"{MINDQTALENT_ORIGIN_REGEX}|{PAGES_DEV_ORIGIN_REGEX}"
 
 _allow_origin_pattern = re.compile(ALLOW_ORIGIN_REGEX)
 
@@ -159,6 +158,11 @@ def is_origin_allowed(origin: str | None) -> bool:
     return _allow_origin_pattern.fullmatch(normalized) is not None
 
 
+# Security headers first, CORS last: Starlette runs the last-added middleware
+# outermost, so preflight (OPTIONS) is answered by CORSMiddleware before any
+# inner middleware can reject or reroute it.
+app.add_middleware(SecurityHeadersMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -168,8 +172,6 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Request-Id", "X-Report-Type", "X-Report-Synthesis-Status"],
 )
-
-app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(api_router, prefix="/api/v1")
 # Gated beta waitlist (exact path requested by product): POST /api/request-beta-access

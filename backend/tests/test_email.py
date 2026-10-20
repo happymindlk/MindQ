@@ -4,6 +4,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.services.email import (
+    _source_address,
+    clean_recipient_email,
     resolve_frontend_origin,
     send_admin_otp_email,
     send_transactional_email,
@@ -81,6 +83,51 @@ def test_send_transactional_email_logs_client_error(monkeypatch, caplog):
     assert "SES send FAILED" in logged
     assert "not verified" in logged.lower() or "MessageRejected" in logged
     assert "sandbox" in logged.lower() or "Identities" in logged
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("  pat@example.com  ", "pat@example.com"),
+        ("Pat Lee <pat@example.com>", "pat@example.com"),
+        ('"Pat Lee" <pat@example.com>;', "pat@example.com"),
+        ("<pat@example.com>", "pat@example.com"),
+        ("not-an-email", ""),
+        (None, ""),
+    ],
+)
+def test_clean_recipient_email(raw, expected):
+    assert clean_recipient_email(raw) == expected
+
+
+def test_source_address_falls_back_to_mindq_sender():
+    assert _source_address(None) == "MindQ <noreply@mindqtalent.com>"
+    assert _source_address("") == "MindQ <noreply@mindqtalent.com>"
+    assert _source_address("MindQ <noreply@mindqtalent.com>") == (
+        "MindQ <noreply@mindqtalent.com>"
+    )
+
+
+def test_send_transactional_email_sanitizes_recipient_and_sender(monkeypatch):
+    monkeypatch.setattr("app.services.email.settings.EMAIL_FROM", "")
+    monkeypatch.setattr("app.services.email.settings.AWS_REGION", "us-east-1")
+    monkeypatch.setattr("app.services.email.settings.AWS_ACCESS_KEY_ID", "AKIATEST")
+    monkeypatch.setattr("app.services.email.settings.AWS_SECRET_ACCESS_KEY", "secret")
+
+    fake_client = MagicMock()
+    fake_client.send_email.return_value = {"MessageId": "msg_clean"}
+    monkeypatch.setattr("app.services.email._ses_client", lambda: fake_client)
+
+    result = send_transactional_email(
+        "  Pat Lee <pat@example.com> ",
+        "Hello",
+        "<p>Hi</p>",
+    )
+
+    assert result == {"id": "msg_clean", "MessageId": "msg_clean"}
+    call_kwargs = fake_client.send_email.call_args.kwargs
+    assert call_kwargs["Destination"]["ToAddresses"] == ["pat@example.com"]
+    assert call_kwargs["Source"] == "MindQ <noreply@mindqtalent.com>"
 
 
 def test_resolve_frontend_origin_prefers_settings(monkeypatch):
@@ -165,6 +212,32 @@ async def test_admin_otp_raises_in_production(monkeypatch):
 
     with pytest.raises(RuntimeError, match="MessageRejected"):
         await send_admin_otp_email("ops@mindq.test", "482916")
+
+
+@pytest.mark.asyncio
+async def test_candidate_invite_logs_dispatch_even_when_ses_fails(monkeypatch, caplog):
+    async def fake_send(to_email, subject, html_content, raise_on_error=False):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.email_service.send_transactional_email_async",
+        fake_send,
+    )
+    with caplog.at_level(logging.INFO, logger="app.email_service"):
+        ok = await EmailService.send_candidate_invite_email(
+            email="Pat <pat@example.com>",
+            name="Pat",
+            access_code="AP-TEST-9",
+            package_title="Backend Pack",
+            origin="https://qa.app.mindqtalent.com",
+        )
+
+    assert ok is False
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "[INVITE DISPATCHED] Candidate=pat@example.com" in logged
+    assert "Code=AP-TEST-9" in logged
+    assert "Link=https://qa.app.mindqtalent.com/assessment?code=AP-TEST-9" in logged
+    assert "[INVITE FAILED]" in logged
 
 
 @pytest.mark.asyncio

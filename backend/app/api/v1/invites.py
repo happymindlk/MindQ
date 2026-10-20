@@ -1,4 +1,6 @@
 """HR candidate invitation: persist a pending candidate and queue SES mail."""
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,11 +11,71 @@ from app.models.corporate import Corporate
 from app.models.package import Package
 from app.schemas.candidate import CandidateInviteRequest, CandidateInviteResponse
 from app.services.candidate_service import CandidateService
-from app.services.email import resolve_frontend_origin
+from app.services.email import (
+    _assessment_invite_link,
+    clean_recipient_email,
+    resolve_frontend_origin,
+)
 from app.services.email_service import EmailService
 from app.security import enforce_user_rate_limit, invite_limiter
 
+logger = logging.getLogger("app.invites")
+
 router = APIRouter()
+
+
+async def _dispatch_candidate_invite(
+    *,
+    candidate_email: str,
+    candidate_name: str,
+    access_code: str,
+    package_title: str,
+    corporate_name: str | None,
+    origin: str,
+) -> None:
+    """BackgroundTasks worker for one candidate invite; never raises silently.
+
+    Args:
+        candidate_email: Raw candidate address (sanitized before dispatch).
+        candidate_name: Candidate display name for the email body.
+        access_code: Candidate/package access code.
+        package_title: Assessment package title.
+        corporate_name: Hiring company shown in the email, if known.
+        origin: Absolute frontend origin for the assessment link.
+    """
+    clean_email = clean_recipient_email(candidate_email)
+    link = _assessment_invite_link(access_code, origin=origin)
+    logger.info(
+        "[INVITE QUEUED] Candidate=%s Code=%s Link=%s",
+        clean_email or candidate_email,
+        access_code,
+        link,
+    )
+    try:
+        sent = await EmailService.send_candidate_invite_email(
+            clean_email or candidate_email,
+            candidate_name,
+            access_code,
+            package_title,
+            corporate_name,
+            origin=origin,
+        )
+    except Exception:  # noqa: BLE001 - background task: log, never propagate
+        logger.exception(
+            "[INVITE FAILED] Candidate=%s Code=%s Link=%s",
+            clean_email or candidate_email,
+            access_code,
+            link,
+        )
+        return
+    if not sent:
+        logger.error(
+            "[INVITE FAILED] Candidate=%s Code=%s Link=%s "
+            "(SES returned no MessageId; see app.email logs)",
+            clean_email or candidate_email,
+            access_code,
+            link,
+        )
 
 
 @router.post(
@@ -67,13 +129,23 @@ async def invite_candidate(
     ).scalar_one_or_none()
 
     origin = resolve_frontend_origin(request)
-    background_tasks.add_task(
-        EmailService.send_candidate_invite_email,
-        candidate.email,
-        candidate.full_name,
+    clean_email = clean_recipient_email(candidate.email)
+    link = _assessment_invite_link(candidate.access_code, origin=origin)
+    # Logged synchronously (before the 202 returns) so testers always have a
+    # usable link/code even if SES sandbox drops the background delivery.
+    logger.info(
+        "[INVITE DISPATCHED] Candidate=%s Code=%s Link=%s",
+        clean_email or candidate.email,
         candidate.access_code,
-        package.title if package else "your assessment",
-        corporate.name if corporate else None,
+        link,
+    )
+    background_tasks.add_task(
+        _dispatch_candidate_invite,
+        candidate_email=candidate.email,
+        candidate_name=candidate.full_name,
+        access_code=candidate.access_code,
+        package_title=package.title if package else "your assessment",
+        corporate_name=corporate.name if corporate else None,
         origin=origin,
     )
 

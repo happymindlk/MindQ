@@ -210,6 +210,13 @@ async def share_package(
         origin=origin,
     )
     subject = f"Assessment access: {package.title}"
+    candidate_link = candidate_portal_link(package.access_code, origin=origin)
+    logger.info(
+        "[INVITE DISPATCHED] Candidate=%s Code=%s Link=%s",
+        recipient,
+        package.access_code,
+        candidate_link,
+    )
     background_tasks.add_task(
         send_transactional_email,
         recipient,
