@@ -44,7 +44,10 @@ class EmailService:
             access_code=access_code,
             origin=origin,
         )
-        result = await send_transactional_email_async(email, subject, html_body)
+        clean_email = clean_recipient_email(email)
+        result = await send_transactional_email_async(
+            clean_email or email, subject, html_body
+        )
         return result is not None
 
     @staticmethod
@@ -154,5 +157,8 @@ class EmailService:
             package_title=package_title,
             candidate_email=candidate_email,
         )
-        result = await send_transactional_email_async(hr_email, subject, html_body)
+        clean_hr_email = clean_recipient_email(hr_email)
+        result = await send_transactional_email_async(
+            clean_hr_email or hr_email, subject, html_body
+        )
         return result is not None

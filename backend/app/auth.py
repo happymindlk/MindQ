@@ -2,8 +2,9 @@
 
 Two independent token types:
 - Candidate tokens: signed by THIS service with SECRET_KEY after the candidate
-  presents an access code plus a Supabase email-OTP token proving inbox
-  ownership. The Supabase token is a one-shot proof, never a candidate session.
+  verifies a one-time email code issued by THIS service (SES-delivered OTP
+  challenge in ``candidate_login_challenges``). The challenge temp token is a
+  one-shot proof, never a candidate session.
 - HR tokens: access tokens minted by Supabase Auth, verified with
   SUPABASE_JWT_SECRET. The tenant (`corporate_id`) is read from app_metadata.
 - Client-portal tokens: minted by THIS service after a Supabase OTP exchange,

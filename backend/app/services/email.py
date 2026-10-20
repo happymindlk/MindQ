@@ -544,12 +544,15 @@ def render_universal_otp_html(portal_name: str, otp: str) -> str:
     code = html.escape(otp)
     body = f"""
       <p style="{_BODY_STYLE}margin:0 0 20px;">
-        To access the <strong style="color:#1F2937;">{portal}</strong>, please use the code below for account verification. The code will only work for 5 minutes.
+        To access the <strong style="color:#1F2937;">{portal}</strong>, please use the verification code below. The code will expire in 5 minutes.
       </p>
       <div style="margin:0 0 24px;padding:20px 16px;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:8px;text-align:center;">
-        <span style="font-size:36px;font-weight:700;letter-spacing:8px;color:#1F2937;">{code}</span>
+        <span style="font-family:ui-monospace,'Cascadia Mono',Consolas,monospace;font-size:36px;font-weight:700;letter-spacing:8px;color:#1F2937;">{code}</span>
       </div>
-      <p style="font-size:13px;line-height:1.5;color:#4B5563;margin:0;">If you did not request this code, you can ignore this email.</p>"""
+      <p style="font-size:13px;line-height:1.5;color:#4B5563;margin:0 0 24px;">If you did not request this code, you can ignore this email.</p>
+      <p style="{_MUTED_STYLE}margin:0;padding-top:16px;border-top:1px solid #E5E7EB;">
+        Need help? Contact us at <a href="mailto:support@mindqtalent.com" style="color:#0078D4;">support@mindqtalent.com</a>
+      </p>"""
     return _light_email_shell(body)
 
 

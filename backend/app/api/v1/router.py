@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 from .candidate import router as candidate_router
+from .candidate_auth import router as candidate_auth_router
 from .candidate_reports import router as candidate_reports_router
 from .reports import router as reports_router
 from .notifications import router as notifications_router
@@ -19,6 +20,9 @@ api_router = APIRouter()
 # supabase-js + RLS. Automated package generation + save run through FastAPI so Gemini
 # keys stay server-side and tenancy is enforced via the HR JWT corporate_id.
 api_router.include_router(candidate_router, prefix="/candidate", tags=["candidate"])
+api_router.include_router(
+    candidate_auth_router, prefix="/candidates/auth", tags=["candidate-auth"]
+)
 api_router.include_router(
     candidate_reports_router, prefix="/candidates", tags=["candidate-reports"]
 )

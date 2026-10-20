@@ -17,7 +17,7 @@ export interface CandidateSession {
   accessCode: string;
 }
 
-interface CandidateLoginResponse {
+interface CandidateVerifyResponse {
   token: string;
   id: string;
   first_name?: string | null;
@@ -37,13 +37,17 @@ export function normalizeEmail(email: string): string {
 /**
  * Ask the backend to email a one-time code for this access code + email.
  *
- * @param identity - Candidate identity; only access code and email are sent.
- * @returns The temp token that must accompany the code at login.
+ * @param identity - Candidate identity; the names are validated by the
+ * backend but only the access code and email bind the challenge.
+ * @returns The temp token that must accompany the code at verify.
  */
 export async function sendCandidateOtp(identity: CandidateIdentity): Promise<string> {
-  const res = (await api.candidate.requestCandidateOtp({
+  const firstName = identity.firstName.trim();
+  const res = (await api.candidate.sendCandidateOtp({
     access_code: identity.accessCode.trim(),
     email: normalizeEmail(identity.email),
+    first_name: firstName,
+    full_name: `${firstName} ${identity.lastName.trim()}`,
   })) as CandidateOtpChallengeResponse;
   if (!res?.temp_token) throw new Error('Verification did not return a session. Request a new code.');
   return res.temp_token;
@@ -66,20 +70,20 @@ export async function verifyCandidateOtp(
   // Backend contract requires both first_name and full_name; derive the
   // latter from the two fields the candidate actually typed.
   const fullName = `${identity.firstName.trim()} ${identity.lastName.trim()}`;
-  const res = (await api.candidate.login({
+  const res = (await api.candidate.verifyCandidateOtp({
     access_code: identity.accessCode.trim(),
     first_name: identity.firstName.trim(),
     full_name: fullName,
     email,
     temp_token: tempToken,
     otp_code: code,
-  })) as CandidateLoginResponse;
+  })) as CandidateVerifyResponse;
   return {
     token: res.token,
     id: res.id,
-    firstName: res.first_name || identity.firstName.trim(),
+    firstName: res.first_name ?? '',
     fullName: res.full_name,
-    accessCode: res.access_code || identity.accessCode.trim(),
+    accessCode: res.access_code ?? '',
   };
 }
 

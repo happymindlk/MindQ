@@ -182,6 +182,44 @@ async def test_invite_email_includes_guidelines(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_email_service_senders_sanitize_recipients(monkeypatch):
+    captured = {}
+
+    async def fake_send(to_email, subject, html_content, raise_on_error=False):
+        captured["to"] = to_email
+        return {"id": "msg_clean"}
+
+    monkeypatch.setattr(
+        "app.services.email_service.send_transactional_email_async", fake_send
+    )
+
+    assert await EmailService.send_candidate_invite_email(
+        email=" Pat Lee <pat@example.com> ",
+        name="Pat",
+        access_code="AP-TEST-1",
+        package_title="Backend Pack",
+    )
+    assert captured["to"] == "pat@example.com"
+
+    assert await EmailService.send_nudge_email(
+        email=" Jane <jane@example.com>; ",
+        name="Jane",
+        access_code="AP-TEST-1",
+        package_title="Backend Pack",
+    )
+    assert captured["to"] == "jane@example.com"
+
+    assert await EmailService.send_hr_completion_email(
+        hr_email=" HR <hr@example.com> ",
+        hr_name="Harriet",
+        candidate_name="Pat",
+        package_title="Backend Pack",
+        candidate_email="pat@example.com",
+    )
+    assert captured["to"] == "hr@example.com"
+
+
+@pytest.mark.asyncio
 async def test_admin_otp_falls_back_to_log_in_qa(monkeypatch, caplog):
     """SES sandbox rejection must not raise (or roll back) outside production."""
     monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", "qa")
@@ -301,9 +339,16 @@ def test_universal_otp_is_prominent_escaped_and_time_boxed():
     html_content = render_universal_otp_html("Candidate Portal", "482916")
     assert "Candidate Portal" in html_content
     assert "482916" in html_content
-    assert "only work for 5 minutes" in html_content
+    assert (
+        "To access the <strong style=\"color:#1F2937;\">Candidate Portal</strong>, "
+        "please use the verification code below. "
+        "The code will expire in 5 minutes." in html_content
+    )
     assert "font-size:36px" in html_content
     assert "letter-spacing:8px" in html_content
+    assert "ui-monospace" in html_content
+    assert "mailto:support@mindqtalent.com" in html_content
+    assert "support@mindqtalent.com" in html_content
 
     malicious = render_universal_otp_html("<script>alert(1)</script>", "<b>1</b>")
     assert "<script>" not in malicious
