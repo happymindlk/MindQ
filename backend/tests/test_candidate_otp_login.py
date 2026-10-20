@@ -1,45 +1,28 @@
-"""Candidate login requires a Supabase email-OTP token for the submitted email."""
+"""Candidate login requires a verified custom OTP challenge for the email."""
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
-import jwt
 import pytest
 
-from app.config import settings
 from app.database import get_db
 from app.main import app
-from app.security import login_limiter
+from app.security import candidate_otp_limiter, candidate_otp_verify_limiter, login_limiter
+from app.services.candidate_otp import CandidateOtpError
 
 LOGIN_URL = "/api/v1/candidate/login"
+REQUEST_URL = "/api/v1/candidate/otp/request"
 PAYLOAD = {
     "first_name": "Ada",
     "full_name": "Ada Lovelace",
     "email": "ada@example.com",
     "access_code": "HM-ABCDEF-1",
+    "temp_token": "t" * 24,
+    "otp_code": "123456",
 }
-
-
-def _supabase_token(
-    email: str | None = "ada@example.com",
-    *,
-    secret: str | None = None,
-    expires_in: timedelta = timedelta(minutes=5),
-) -> str:
-    now = datetime.now(timezone.utc)
-    claims: dict[str, object] = {
-        "sub": str(uuid4()),
-        "aud": "authenticated",
-        "role": "authenticated",
-        "iat": now,
-        "exp": now + expires_in,
-    }
-    if email is not None:
-        claims["email"] = email
-    return jwt.encode(claims, secret or settings.SUPABASE_JWT_SECRET, algorithm="HS256")
 
 
 async def _no_db() -> AsyncIterator[None]:
@@ -48,11 +31,12 @@ async def _no_db() -> AsyncIterator[None]:
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
-    login_limiter.reset()
-    monkeypatch.setattr(login_limiter, "max_requests", 100)
-    monkeypatch.setattr("app.api.v1.candidate.settings.CANDIDATE_OTP_REQUIRED", True)
+    for limiter in (login_limiter, candidate_otp_limiter, candidate_otp_verify_limiter):
+        limiter.reset()
+        monkeypatch.setattr(limiter, "max_requests", 100)
     app.dependency_overrides[get_db] = _no_db
     calls: list[object] = []
+    verify_calls: list[dict] = []
 
     async def fake_login(_db, data):
         calls.append(data)
@@ -70,67 +54,101 @@ def _isolate(monkeypatch):
         )
         return candidate, False
 
+    async def fake_verify(_db, **kwargs):
+        verify_calls.append(kwargs)
+        if kwargs["otp_code"] == "000000":
+            raise CandidateOtpError(401, "Invalid or expired verification code")
+        if kwargs["otp_code"] == "999999":
+            raise CandidateOtpError(429, "Too many invalid codes. This sign-in is locked for 15 minutes.")
+        if kwargs["temp_token"].startswith("bad-token"):
+            raise CandidateOtpError(401, "Invalid or expired verification session")
+
     monkeypatch.setattr("app.api.v1.candidate.CandidateService.login", fake_login)
-    yield calls
+    monkeypatch.setattr("app.api.v1.candidate.verify_candidate_challenge", fake_verify)
+    yield {"login": calls, "verify": verify_calls}
     app.dependency_overrides.pop(get_db, None)
-    login_limiter.reset()
+    for limiter in (login_limiter, candidate_otp_limiter, candidate_otp_verify_limiter):
+        limiter.reset()
 
 
 @pytest.mark.asyncio
-async def test_missing_otp_token_is_rejected_before_login(async_client, _isolate):
+async def test_missing_temp_token_is_rejected_before_login(async_client, _isolate):
+    payload = {k: v for k, v in PAYLOAD.items() if k != "temp_token"}
+    res = await async_client.post(LOGIN_URL, json=payload)
+    assert res.status_code == 422
+    assert _isolate["login"] == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_temp_token_is_rejected(async_client, _isolate):
+    res = await async_client.post(LOGIN_URL, json={**PAYLOAD, "temp_token": "bad-token-000000000000"})
+    assert res.status_code == 401
+    assert "session" in res.json()["detail"].lower()
+    assert _isolate["login"] == []
+
+
+@pytest.mark.asyncio
+async def test_wrong_code_is_rejected(async_client, _isolate):
+    res = await async_client.post(LOGIN_URL, json={**PAYLOAD, "otp_code": "000000"})
+    assert res.status_code == 401
+    assert _isolate["login"] == []
+
+
+@pytest.mark.asyncio
+async def test_locked_challenge_returns_429(async_client, _isolate):
+    res = await async_client.post(LOGIN_URL, json={**PAYLOAD, "otp_code": "999999"})
+    assert res.status_code == 429
+    assert _isolate["login"] == []
+
+
+@pytest.mark.asyncio
+async def test_verified_code_issues_candidate_token(async_client, _isolate):
     res = await async_client.post(LOGIN_URL, json=PAYLOAD)
-    assert res.status_code == 401
-    assert _isolate == []
-
-
-@pytest.mark.asyncio
-async def test_forged_otp_token_is_rejected(async_client, _isolate):
-    token = _supabase_token(secret="z" * 48)
-    res = await async_client.post(LOGIN_URL, json=PAYLOAD, headers={"Authorization": f"Bearer {token}"})
-    assert res.status_code == 401
-    assert _isolate == []
-
-
-@pytest.mark.asyncio
-async def test_expired_otp_token_is_rejected(async_client, _isolate):
-    token = _supabase_token(expires_in=timedelta(minutes=-1))
-    res = await async_client.post(LOGIN_URL, json=PAYLOAD, headers={"Authorization": f"Bearer {token}"})
-    assert res.status_code == 401
-    assert "expired" in res.json()["detail"].lower()
-
-
-@pytest.mark.asyncio
-async def test_otp_for_a_different_email_is_forbidden(async_client, _isolate):
-    token = _supabase_token(email="mallory@example.com")
-    res = await async_client.post(LOGIN_URL, json=PAYLOAD, headers={"Authorization": f"Bearer {token}"})
-    assert res.status_code == 403
-    assert _isolate == []
-
-
-@pytest.mark.asyncio
-async def test_otp_token_without_email_claim_is_forbidden(async_client, _isolate):
-    token = _supabase_token(email=None)
-    res = await async_client.post(LOGIN_URL, json=PAYLOAD, headers={"Authorization": f"Bearer {token}"})
-    assert res.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_verified_otp_issues_candidate_token_case_insensitively(async_client, _isolate):
-    token = _supabase_token(email="ADA@Example.com")
-    res = await async_client.post(LOGIN_URL, json=PAYLOAD, headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 200
     body = res.json()
     assert body["token"]
     assert body["first_name"] == "Ada"
     assert body["full_name"] == "Ada Lovelace"
-    assert len(_isolate) == 1
+    assert len(_isolate["login"]) == 1
+    assert _isolate["verify"][0]["otp_code"] == "123456"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("field", ["first_name", "full_name"])
 async def test_blank_names_are_rejected(async_client, _isolate, field):
-    token = _supabase_token()
     payload = {**PAYLOAD, field: "   "}
-    res = await async_client.post(LOGIN_URL, json=payload, headers={"Authorization": f"Bearer {token}"})
+    res = await async_client.post(LOGIN_URL, json=payload)
     assert res.status_code == 422
-    assert _isolate == []
+    assert _isolate["login"] == []
+
+
+@pytest.mark.asyncio
+async def test_request_code_returns_temp_token(async_client, monkeypatch):
+    captured = {}
+
+    from app.schemas.candidate import CandidateOtpChallengeResponse
+
+    async def fake_request(_db, access_code, email):
+        captured["access_code"] = access_code
+        captured["email"] = email
+        return CandidateOtpChallengeResponse(status="otp_required", temp_token="t" * 24)
+
+    monkeypatch.setattr("app.api.v1.candidate.request_candidate_otp", fake_request)
+    res = await async_client.post(
+        REQUEST_URL, json={"access_code": "HM-ABCDEF-1", "email": "ada@example.com"}
+    )
+    assert res.status_code == 200
+    assert res.json() == {"status": "otp_required", "temp_token": "t" * 24}
+    assert captured == {"access_code": "HM-ABCDEF-1", "email": "ada@example.com"}
+
+
+@pytest.mark.asyncio
+async def test_request_code_maps_otp_errors(async_client, monkeypatch):
+    async def fake_request(_db, *_args):
+        raise CandidateOtpError(429, "Too many verification codes were requested. Try again later.")
+
+    monkeypatch.setattr("app.api.v1.candidate.request_candidate_otp", fake_request)
+    res = await async_client.post(
+        REQUEST_URL, json={"access_code": "HM-ABCDEF-1", "email": "ada@example.com"}
+    )
+    assert res.status_code == 429

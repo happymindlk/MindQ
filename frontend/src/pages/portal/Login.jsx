@@ -5,7 +5,6 @@ import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
 import BrandLogo from '../../components/BrandLogo';
-import { isSupabaseConfigured } from '../../lib/supabaseClient';
 import { PreviewRunner } from '../../features/assessment-runner/preview-runner';
 import { PREVIEW_ACCESS_CODE } from '../../features/assessment-builder/lib/preview-protocol';
 import {
@@ -80,12 +79,6 @@ function CandidateLogin({ initialAccessCode }) {
         <Card variant="elevated" padding="p-4 sm:p-6">
           <StepIndicator step={step} />
 
-          {!isSupabaseConfigured && (
-            <p className="mb-4 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-              Email verification is not configured. Contact support.
-            </p>
-          )}
-
           {step === 'details' ? (
             <form onSubmit={submitDetails} className="space-y-4" noValidate>
               <Input
@@ -145,7 +138,7 @@ function CandidateLogin({ initialAccessCode }) {
                 type="submit"
                 className="w-full"
                 isLoading={loading}
-                disabled={!login.canSend || !isSupabaseConfigured}
+                disabled={!login.canSend}
               >
                 Send verification code
                 {!loading && <ArrowRight className="w-4 h-4" aria-hidden="true" />}

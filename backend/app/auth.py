@@ -125,31 +125,6 @@ def decode_hr_token(token: str) -> dict:
     return jwt.decode(token, key, algorithms=[alg], **decode_kwargs)
 
 
-def verify_candidate_email_otp(authorization: str | None, expected_email: str) -> None:
-    """Require a Supabase OTP access token proving control of ``expected_email``.
-
-    Candidates verify their inbox with Supabase email OTP; the resulting access
-    token is only a proof of email ownership and is never accepted as a
-    candidate session.
-
-    Args:
-        authorization: ``Bearer <Supabase access token>`` header.
-        expected_email: Email submitted in the candidate login payload.
-
-    Raises:
-        HTTPException: 401 when the token is missing, invalid, or expired;
-            403 when the verified email differs from ``expected_email``.
-    """
-    token = _bearer(authorization)
-    try:
-        payload = decode_hr_token(token)
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Email verification expired. Request a new code.")
-    verified = str(payload.get("email") or "").strip().lower()
-    if not verified or verified != expected_email.strip().lower():
-        raise HTTPException(status_code=403, detail="Verified email does not match the email entered")
-
-
 async def get_current_supabase_user(
     authorization: str | None = Header(None),
 ) -> SupabaseUserContext:

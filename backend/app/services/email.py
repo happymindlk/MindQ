@@ -143,6 +143,49 @@ def hr_portal_login_link(*, origin: str | None = None) -> str:
     return f"{base}/client/login"
 
 
+# ---------------------------------------------------------------------------
+# Light-theme email shell (white card on a light-gray wrapper, MindQ logo)
+# ---------------------------------------------------------------------------
+
+_HEADING_STYLE = "font-size:22px;margin:0 0 12px;color:#1F2937;"
+_BODY_STYLE = "font-size:14px;line-height:1.55;color:#4B5563;"
+_MUTED_STYLE = "font-size:12px;color:#6B7280;"
+_BUTTON_STYLE = (
+    "display:inline-block;padding:12px 20px;background:#0078D4;color:#FFFFFF;"
+    "text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;"
+)
+_CODE_BOX_STYLE = (
+    "margin:0 0 24px;padding:14px 16px;background:#F3F4F6;"
+    "border:1px solid #E5E7EB;border-radius:8px;"
+    "font-family:ui-monospace,Consolas,monospace;font-size:18px;"
+    "color:#1F2937;letter-spacing:0.06em;"
+)
+
+
+def _light_email_shell(body_html: str, *, origin: str | None = None) -> str:
+    """Wrap ``body_html`` in the shared light-theme MindQ email shell.
+
+    Args:
+        body_html: Inner card content (already escaped by the caller).
+        origin: Optional frontend origin for the logo URL; defaults to
+            ``frontend_origin()``.
+
+    Returns:
+        Full HTML document with a light-gray wrapper, white card, and logo.
+    """
+    base = (origin or frontend_origin()).rstrip("/")
+    logo_url = html.escape(f"{base}/branding/logo-light.png")
+    return f"""<!DOCTYPE html>
+<html><body style="margin:0;padding:0;background:#F9FAFB;color:#1F2937;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
+  <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
+    <div style="background:#FFFFFF;border:1px solid #E5E7EB;border-radius:12px;padding:32px 28px;">
+      <img src="{logo_url}" alt="MindQ" style="height:32px;margin-bottom:24px;" />
+      {body_html}
+    </div>
+  </div>
+</body></html>"""
+
+
 def _ses_client():
     """Build a boto3 SES client from settings / the default credential chain."""
     import boto3
@@ -332,34 +375,30 @@ def render_candidate_invite_html(
     company = html.escape((corporate_name or "").strip() or "Your hiring team")
     code = html.escape(access_code)
     link = html.escape(_assessment_invite_link(access_code, origin=origin))
-    return f"""<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#0B0F17;color:#E8EDF5;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
-  <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
-    <div style="font-size:14px;font-weight:700;color:#A78BFA;letter-spacing:0.04em;margin-bottom:20px;">ASSESS PULSE</div>
-    <h1 style="font-size:22px;margin:0 0 12px;color:#E8EDF5;">You're invited to complete an assessment</h1>
-    <p style="font-size:14px;line-height:1.55;color:#9AA8BC;margin:0 0 20px;">
-      <strong style="color:#E8EDF5;">{company}</strong> has invited
-      <strong style="color:#E8EDF5;">{name}</strong> to complete
-      <strong style="color:#E8EDF5;">{title}</strong>.
-    </p>
-    <p style="font-size:14px;line-height:1.55;color:#9AA8BC;margin:0 0 8px;">Your access code:</p>
-    <div style="margin:0 0 24px;padding:14px 16px;background:#111827;border:1px solid #2A3344;border-radius:8px;font-family:ui-monospace,Consolas,monospace;font-size:18px;color:#A78BFA;letter-spacing:0.06em;">
-      {code}
-    </div>
-    <a href="{link}" style="display:inline-block;padding:12px 20px;background:#6B4CE8;color:#F5F3FF;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;">
-      Start assessment
-    </a>
-    <div style="margin-top:28px;padding-top:16px;border-top:1px solid #2A3344;">
-      <p style="font-size:13px;line-height:1.5;color:#9AA8BC;margin:0 0 8px;"><strong style="color:#E8EDF5;">Guidelines</strong></p>
-      <ul style="margin:0;padding-left:18px;color:#9AA8BC;font-size:13px;line-height:1.55;">
-        <li>Find a quiet place with a stable internet connection.</li>
-        <li>Your answers autosave — you can leave and return with the same code.</li>
-        <li>Complete each section in one sitting when possible.</li>
-      </ul>
-    </div>
-    <p style="font-size:12px;color:#64748b;margin-top:28px;">If the button doesn't work, paste this link into your browser:<br>{link}</p>
-  </div>
-</body></html>"""
+    body = f"""
+      <h1 style="{_HEADING_STYLE}">You're invited to complete an assessment</h1>
+      <p style="{_BODY_STYLE}margin:0 0 20px;">
+        <strong style="color:#1F2937;">{company}</strong> has invited
+        <strong style="color:#1F2937;">{name}</strong> to complete
+        <strong style="color:#1F2937;">{title}</strong>.
+      </p>
+      <p style="{_BODY_STYLE}margin:0 0 8px;">Your access code:</p>
+      <div style="{_CODE_BOX_STYLE}">
+        {code}
+      </div>
+      <a href="{link}" style="{_BUTTON_STYLE}">
+        Start assessment
+      </a>
+      <div style="margin-top:28px;padding-top:16px;border-top:1px solid #E5E7EB;">
+        <p style="font-size:13px;line-height:1.5;color:#4B5563;margin:0 0 8px;"><strong style="color:#1F2937;">Guidelines</strong></p>
+        <ul style="margin:0;padding-left:18px;color:#4B5563;font-size:13px;line-height:1.55;">
+          <li>Find a quiet place with a stable internet connection.</li>
+          <li>Your answers autosave — you can leave and return with the same code.</li>
+          <li>Complete each section in one sitting when possible.</li>
+        </ul>
+      </div>
+      <p style="{_MUTED_STYLE}margin-top:28px;">If the button doesn't work, paste this link into your browser:<br>{link}</p>"""
+    return _light_email_shell(body, origin=origin)
 
 
 def render_hr_completion_html(
@@ -374,25 +413,21 @@ def render_hr_completion_html(
     cand = html.escape(candidate_name)
     title = html.escape(package_title or "assessment package")
     email = html.escape(candidate_email)
-    return f"""<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#0B0F17;color:#E8EDF5;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
-  <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
-    <div style="font-size:14px;font-weight:700;color:#A78BFA;letter-spacing:0.04em;margin-bottom:20px;">ASSESS PULSE</div>
-    <h1 style="font-size:22px;margin:0 0 12px;color:#E8EDF5;">Candidate completed assessment</h1>
-    <p style="font-size:14px;line-height:1.55;color:#9AA8BC;margin:0 0 16px;">
-      Hello <strong style="color:#E8EDF5;">{greeting}</strong>,
-      <strong style="color:#E8EDF5;">{cand}</strong> ({email}) has finished
-      <strong style="color:#E8EDF5;">{title}</strong>.
-    </p>
-    <p style="font-size:14px;line-height:1.55;color:#9AA8BC;margin:0 0 20px;">
-      Their report is ready to download from the HR Tracker. JD fit scoring may still be finishing in the background.
-    </p>
-    <div style="margin:0 0 8px;padding:14px 16px;background:#111827;border:1px solid #2A3344;border-radius:8px;font-size:13px;color:#9AA8BC;">
-      Open <strong style="color:#E8EDF5;">Assess Pulse → HR Tracker</strong> and download the report for this candidate.
-    </div>
-    <p style="font-size:12px;color:#64748b;margin-top:28px;">This is an automated notification from Assess Pulse.</p>
-  </div>
-</body></html>"""
+    body = f"""
+      <h1 style="{_HEADING_STYLE}">Candidate completed assessment</h1>
+      <p style="{_BODY_STYLE}margin:0 0 16px;">
+        Hello <strong style="color:#1F2937;">{greeting}</strong>,
+        <strong style="color:#1F2937;">{cand}</strong> ({email}) has finished
+        <strong style="color:#1F2937;">{title}</strong>.
+      </p>
+      <p style="{_BODY_STYLE}margin:0 0 20px;">
+        Their report is ready to download from the HR Tracker. JD fit scoring may still be finishing in the background.
+      </p>
+      <div style="margin:0 0 8px;padding:14px 16px;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;color:#4B5563;">
+        Open <strong style="color:#1F2937;">MindQ → HR Tracker</strong> and download the report for this candidate.
+      </div>
+      <p style="{_MUTED_STYLE}margin-top:28px;">This is an automated notification from MindQ.</p>"""
+    return _light_email_shell(body)
 
 
 def render_candidate_nudge_html(
@@ -407,23 +442,19 @@ def render_candidate_nudge_html(
     title = html.escape(package_title or "your assessment")
     code = html.escape(access_code)
     link = html.escape(_portal_link(access_code, origin=origin))
-    return f"""<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#0B0F17;color:#E8EDF5;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
-  <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
-    <div style="font-size:14px;font-weight:700;color:#A78BFA;letter-spacing:0.04em;margin-bottom:20px;">ASSESS PULSE</div>
-    <h1 style="font-size:22px;margin:0 0 12px;color:#E8EDF5;">Friendly reminder</h1>
-    <p style="font-size:14px;line-height:1.55;color:#9AA8BC;margin:0 0 16px;">
-      Hello <strong style="color:#E8EDF5;">{name}</strong>, please finish your
-      <strong style="color:#E8EDF5;">{title}</strong> assessment when you can.
-    </p>
-    <div style="margin:0 0 24px;padding:14px 16px;background:#111827;border:1px solid #2A3344;border-radius:8px;font-family:ui-monospace,Consolas,monospace;font-size:18px;color:#A78BFA;">
-      {code}
-    </div>
-    <a href="{link}" style="display:inline-block;padding:12px 18px;background:#6B4CE8;color:#F5F3FF;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;">
-      Continue assessment
-    </a>
-  </div>
-</body></html>"""
+    body = f"""
+      <h1 style="{_HEADING_STYLE}">Friendly reminder</h1>
+      <p style="{_BODY_STYLE}margin:0 0 16px;">
+        Hello <strong style="color:#1F2937;">{name}</strong>, please finish your
+        <strong style="color:#1F2937;">{title}</strong> assessment when you can.
+      </p>
+      <div style="{_CODE_BOX_STYLE}">
+        {code}
+      </div>
+      <a href="{link}" style="{_BUTTON_STYLE}">
+        Continue assessment
+      </a>"""
+    return _light_email_shell(body, origin=origin)
 
 
 def render_package_share_html(
@@ -449,45 +480,41 @@ def render_package_share_html(
     code = html.escape(access_code)
     candidate_link = html.escape(candidate_portal_link(access_code, origin=origin))
     hr_link = html.escape(hr_portal_login_link(origin=origin))
-    section = "margin:0 0 20px;padding:16px;background:#111827;border:1px solid #2A3344;border-radius:8px;"
-    label = "font-size:11px;font-weight:700;letter-spacing:0.08em;color:#60A5FA;margin:0 0 10px;"
-    body = "font-size:13px;line-height:1.55;color:#9AA8BC;margin:0 0 12px;"
+    section = "margin:0 0 20px;padding:16px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;"
+    label = "font-size:11px;font-weight:700;letter-spacing:0.08em;color:#0078D4;margin:0 0 10px;"
+    section_body = "font-size:13px;line-height:1.55;color:#4B5563;margin:0 0 12px;"
     mono = "font-family:ui-monospace,Consolas,monospace;"
     button = (
-        "display:inline-block;padding:10px 16px;background:#2563EB;color:#FFFFFF;"
+        "display:inline-block;padding:10px 16px;background:#0078D4;color:#FFFFFF;"
         "text-decoration:none;border-radius:8px;font-weight:700;font-size:13px;"
     )
-    return f"""<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#0B0F17;color:#E8EDF5;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
-  <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
-    <div style="font-size:14px;font-weight:700;color:#60A5FA;letter-spacing:0.04em;margin-bottom:20px;">ASSESS PULSE</div>
-    <h1 style="font-size:22px;margin:0 0 12px;color:#E8EDF5;">{title} is ready to share</h1>
-    <p style="font-size:14px;line-height:1.55;color:#9AA8BC;margin:0 0 24px;">
-      Hello <strong style="color:#E8EDF5;">{company}</strong>, your assessment is live.
-      Forward the candidate details below to applicants, and use the HR portal to track results.
-    </p>
-
-    <div style="{section}">
-      <p style="{label}">CANDIDATE ACCESS</p>
-      <p style="{body}">Candidates open this link and enter the PIN with their name and email.</p>
-      <p style="font-size:12px;color:#9AA8BC;margin:0 0 4px;">Test link</p>
-      <p style="{mono}font-size:13px;color:#E8EDF5;margin:0 0 12px;word-break:break-all;">
-        <a href="{candidate_link}" style="color:#93C5FD;">{candidate_link}</a>
+    body_html = f"""
+      <h1 style="{_HEADING_STYLE}">{title} is ready to share</h1>
+      <p style="{_BODY_STYLE}margin:0 0 24px;">
+        Hello <strong style="color:#1F2937;">{company}</strong>, your assessment is live.
+        Forward the candidate details below to applicants, and use the HR portal to track results.
       </p>
-      <p style="font-size:12px;color:#9AA8BC;margin:0 0 4px;">PIN</p>
-      <p style="{mono}font-size:18px;color:#93C5FD;letter-spacing:0.06em;margin:0;">{code}</p>
-    </div>
 
-    <div style="{section}">
-      <p style="{label}">HR PORTAL ACCESS</p>
-      <p style="{body}">Sign in to follow candidate progress and download reports.</p>
-      <a href="{hr_link}" style="{button}">Open HR portal</a>
-      <p style="{mono}font-size:12px;color:#64748b;margin:12px 0 0;word-break:break-all;">{hr_link}</p>
-    </div>
+      <div style="{section}">
+        <p style="{label}">CANDIDATE ACCESS</p>
+        <p style="{section_body}">Candidates open this link and enter the PIN with their name and email.</p>
+        <p style="font-size:12px;color:#4B5563;margin:0 0 4px;">Test link</p>
+        <p style="{mono}font-size:13px;color:#1F2937;margin:0 0 12px;word-break:break-all;">
+          <a href="{candidate_link}" style="color:#0078D4;">{candidate_link}</a>
+        </p>
+        <p style="font-size:12px;color:#4B5563;margin:0 0 4px;">PIN</p>
+        <p style="{mono}font-size:18px;color:#1F2937;letter-spacing:0.06em;margin:0;">{code}</p>
+      </div>
 
-    <p style="font-size:12px;color:#64748b;margin-top:28px;">This message was sent by Assess Pulse on behalf of your account team.</p>
-  </div>
-</body></html>"""
+      <div style="{section}">
+        <p style="{label}">HR PORTAL ACCESS</p>
+        <p style="{section_body}">Sign in to follow candidate progress and download reports.</p>
+        <a href="{hr_link}" style="{button}">Open HR portal</a>
+        <p style="{mono}font-size:12px;color:#6B7280;margin:12px 0 0;word-break:break-all;">{hr_link}</p>
+      </div>
+
+      <p style="{_MUTED_STYLE}margin-top:28px;">This message was sent by MindQ on behalf of your account team.</p>"""
+    return _light_email_shell(body_html, origin=origin)
 
 
 def admin_otp_message(otp: str) -> str:
@@ -502,23 +529,40 @@ def admin_otp_message(otp: str) -> str:
     return f"Your MindQ Admin Verification Code is: {otp}. Valid for 5 minutes."
 
 
+def render_universal_otp_html(portal_name: str, otp: str) -> str:
+    """Microsoft-style verification-code email shared by every portal.
+
+    Args:
+        portal_name: Display name of the portal the code unlocks
+            (e.g. ``"Admin Portal"``, ``"Candidate Portal"``).
+        otp: Six-digit verification code.
+
+    Returns:
+        Light-theme HTML document with the code prominent in a gray box.
+    """
+    portal = html.escape(portal_name)
+    code = html.escape(otp)
+    body = f"""
+      <p style="{_BODY_STYLE}margin:0 0 20px;">
+        To access the <strong style="color:#1F2937;">{portal}</strong>, please use the code below for account verification. The code will only work for 5 minutes.
+      </p>
+      <div style="margin:0 0 24px;padding:20px 16px;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:8px;text-align:center;">
+        <span style="font-size:36px;font-weight:700;letter-spacing:8px;color:#1F2937;">{code}</span>
+      </div>
+      <p style="font-size:13px;line-height:1.5;color:#4B5563;margin:0;">If you did not request this code, you can ignore this email.</p>"""
+    return _light_email_shell(body)
+
+
 def render_admin_otp_html(otp: str) -> str:
-    """HTML wrapper for the admin sign-in code. The code is escaped.
+    """HTML wrapper for the admin sign-in code (universal OTP template).
 
     Args:
         otp: Six-digit verification code.
 
     Returns:
-        HTML document whose visible sentence is ``admin_otp_message``.
+        HTML document from ``render_universal_otp_html`` for the Admin Portal.
     """
-    message = html.escape(admin_otp_message(otp))
-    return f"""<!DOCTYPE html>
-<html><body style="margin:0;padding:0;background:#0B0F17;color:#E8EDF5;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
-  <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
-    <p style="font-size:16px;line-height:1.5;margin:0 0 16px;">{message}</p>
-    <p style="font-size:13px;line-height:1.5;color:#9AA8BC;margin:0;">If you did not try to sign in, you can ignore this email.</p>
-  </div>
-</body></html>"""
+    return render_universal_otp_html("Admin Portal", otp)
 
 
 def _otp_log_fallback_enabled() -> bool:
@@ -532,13 +576,16 @@ def _otp_log_fallback_enabled() -> bool:
     return environment != "production" or bool(getattr(settings, "DEBUG", False))
 
 
-def _log_admin_otp_fallback(to_email: str, otp: str, exc: BaseException) -> None:
+def _log_otp_fallback(
+    to_email: str, otp: str, exc: BaseException, *, portal_name: str
+) -> None:
     """Log a prominent banner carrying the OTP after an SES failure (QA only).
 
     Args:
-        to_email: Admin inbox the code was meant for.
+        to_email: Inbox the code was meant for.
         otp: Six-digit verification code.
         exc: SES / mailer failure that triggered the fallback.
+        portal_name: Portal the code unlocks (for the action line).
     """
     banner = "\n".join(
         [
@@ -548,9 +595,10 @@ def _log_admin_otp_fallback(to_email: str, otp: str, exc: BaseException) -> None
             "  (ENVIRONMENT != 'production' or DEBUG - never enable in prod)",
             "=" * 70,
             f"  Recipient : {to_email}",
+            f"  Portal    : {portal_name}",
             f"  OTP CODE  : {otp}",
             f"  Error     : {type(exc).__name__}: {exc}",
-            "  Action    : enter the OTP code above on the admin login screen.",
+            f"  Action    : enter the OTP code above on the {portal_name} login screen.",
             "=" * 70,
             "",
         ]
@@ -558,8 +606,15 @@ def _log_admin_otp_fallback(to_email: str, otp: str, exc: BaseException) -> None
     logger.warning(banner)
 
 
-async def send_admin_otp_email(to_email: str, otp: str) -> None:
-    """Deliver an admin sign-in code through the configured transactional mailer.
+def _log_admin_otp_fallback(to_email: str, otp: str, exc: BaseException) -> None:
+    """Log the QA fallback banner for an admin OTP (see ``_log_otp_fallback``)."""
+    _log_otp_fallback(to_email, otp, exc, portal_name="Admin Portal")
+
+
+async def _send_portal_otp_email(
+    to_email: str, otp: str, *, portal_name: str, subject: str
+) -> None:
+    """Deliver a portal OTP through SES with the QA log fallback.
 
     Production: delivery failures raise so the caller can discard the
     challenge instead of issuing a temp token nobody can complete.
@@ -567,11 +622,13 @@ async def send_admin_otp_email(to_email: str, otp: str) -> None:
     QA/staging (non-production): SES failures (e.g. sandbox ``MessageRejected``
     for an unverified recipient) are caught, the code is logged in a prominent
     banner for testers, and the function returns successfully so the
-    ``admin_login_challenges`` transaction is committed, not rolled back.
+    login-challenge transaction is committed, not rolled back.
 
     Args:
-        to_email: Admin inbox that just passed the password check.
+        to_email: Inbox that requested sign-in.
         otp: Six-digit verification code.
+        portal_name: Portal display name used in the template and fallback.
+        subject: Message subject line.
 
     Raises:
         RuntimeError: In production, when the mailer is not configured or
@@ -580,8 +637,8 @@ async def send_admin_otp_email(to_email: str, otp: str) -> None:
     try:
         result = await send_transactional_email_async(
             to_email,
-            "Your MindQ Admin Verification Code",
-            render_admin_otp_html(otp),
+            subject,
+            render_universal_otp_html(portal_name, otp),
             raise_on_error=True,
         )
         if not result:
@@ -589,11 +646,48 @@ async def send_admin_otp_email(to_email: str, otp: str) -> None:
     except Exception as exc:  # noqa: BLE001 - re-raised in production below
         if _otp_log_fallback_enabled():
             logger.exception(
-                "Admin OTP SES delivery failed; using QA log fallback to=%s",
+                "%s OTP SES delivery failed; using QA log fallback to=%s",
+                portal_name,
                 to_email,
             )
-            _log_admin_otp_fallback(to_email, otp, exc)
+            _log_otp_fallback(to_email, otp, exc, portal_name=portal_name)
             return
         if isinstance(exc, RuntimeError):
             raise
         raise RuntimeError(f"Verification email was not sent: {exc}") from exc
+
+
+async def send_admin_otp_email(to_email: str, otp: str) -> None:
+    """Deliver an admin sign-in code (see ``_send_portal_otp_email``).
+
+    Args:
+        to_email: Admin inbox that just passed the password check.
+        otp: Six-digit verification code.
+
+    Raises:
+        RuntimeError: In production, when delivery fails.
+    """
+    await _send_portal_otp_email(
+        to_email,
+        otp,
+        portal_name="Admin Portal",
+        subject="Your MindQ Admin Verification Code",
+    )
+
+
+async def send_candidate_otp_email(to_email: str, otp: str) -> None:
+    """Deliver a candidate sign-in code (see ``_send_portal_otp_email``).
+
+    Args:
+        to_email: Candidate inbox that requested a code.
+        otp: Six-digit verification code.
+
+    Raises:
+        RuntimeError: In production, when delivery fails.
+    """
+    await _send_portal_otp_email(
+        to_email,
+        otp,
+        portal_name="Candidate Portal",
+        subject="Your MindQ Candidate Verification Code",
+    )

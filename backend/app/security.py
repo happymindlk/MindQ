@@ -59,9 +59,6 @@ def assert_production_ready(settings: Settings) -> None:
             "(not the local supabase default) when DEBUG=false"
         )
 
-    if not settings.CANDIDATE_OTP_REQUIRED:
-        errors.append("CANDIDATE_OTP_REQUIRED must be true when DEBUG=false")
-
     origins = settings.cors_origins_list
     if not origins:
         errors.append("CORS_ORIGINS must list at least one allowed origin when DEBUG=false")
@@ -145,6 +142,10 @@ admin_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
 # OTP guesses. The 3-strike lock is stored on the challenge row; this only
 # slows a single IP that is cycling stolen temp tokens.
 admin_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
+# Candidate OTP request/verify mirror the admin budgets; per-email send caps
+# and the 3-strike lock live on the challenge row.
+candidate_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
+candidate_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
 # Invites are legitimately bulk (a hiring round), so the budget is higher than nudges.
 invite_limiter = RateLimiter(max_requests=200, window_seconds=60 * 60)
 

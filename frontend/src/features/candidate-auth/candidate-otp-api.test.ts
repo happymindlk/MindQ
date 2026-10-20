@@ -1,16 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { auth, login } = vi.hoisted(() => ({
-  auth: {
-    signInWithOtp: vi.fn(),
-    verifyOtp: vi.fn(),
-    signOut: vi.fn(),
-  },
+const { requestCandidateOtp, login } = vi.hoisted(() => ({
+  requestCandidateOtp: vi.fn(),
   login: vi.fn(),
 }));
 
-vi.mock('../../lib/supabase-otp-client', () => ({ supabaseOtp: { auth } }));
-vi.mock('../../api/client', () => ({ api: { candidate: { login } } }));
+vi.mock('../../api/client', () => ({ api: { candidate: { requestCandidateOtp, login } } }));
 
 import { persistCandidateSession, sendCandidateOtp, verifyCandidateOtp } from './candidate-otp-api';
 
@@ -23,30 +18,34 @@ const identity = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  auth.signOut.mockResolvedValue({ error: null });
 });
 
 describe('sendCandidateOtp', () => {
-  it('normalizes the email and allows first-time candidates', async () => {
-    auth.signInWithOtp.mockResolvedValue({ error: null });
-    await sendCandidateOtp(' Ada@Example.com ');
-    expect(auth.signInWithOtp).toHaveBeenCalledWith({
+  it('requests a backend code with trimmed access code and normalized email', async () => {
+    requestCandidateOtp.mockResolvedValue({ status: 'otp_required', temp_token: 'temp-token-value' });
+    await expect(sendCandidateOtp(identity)).resolves.toBe('temp-token-value');
+    expect(requestCandidateOtp).toHaveBeenCalledWith({
+      access_code: 'HM-ABCDEF-1',
       email: 'ada@example.com',
-      options: { shouldCreateUser: true },
     });
   });
 
-  it('surfaces Supabase rate-limit errors verbatim', async () => {
-    auth.signInWithOtp.mockResolvedValue({
-      error: { message: 'For security purposes, you can only request this after 42 seconds.' },
-    });
-    await expect(sendCandidateOtp('ada@example.com')).rejects.toThrow('after 42 seconds');
+  it('surfaces backend rate-limit errors verbatim', async () => {
+    requestCandidateOtp.mockRejectedValue(
+      new Error('A verification code was just sent. Wait a minute before requesting another.'),
+    );
+    await expect(sendCandidateOtp(identity)).rejects.toThrow('Wait a minute');
+  });
+
+  it('fails fast when the challenge response has no temp token', async () => {
+    requestCandidateOtp.mockResolvedValue({ status: 'otp_required' });
+    await expect(sendCandidateOtp(identity)).rejects.toThrow(/did not return a session/);
+    expect(login).not.toHaveBeenCalled();
   });
 });
 
 describe('verifyCandidateOtp', () => {
-  it('exchanges the Supabase token for a candidate session with trimmed identity', async () => {
-    auth.verifyOtp.mockResolvedValue({ data: { session: { access_token: 'sb-token' } }, error: null });
+  it('completes login with the temp token and derived full name, without any Supabase token', async () => {
     login.mockResolvedValue({
       token: 'cand-jwt',
       id: 'c1',
@@ -55,13 +54,16 @@ describe('verifyCandidateOtp', () => {
       access_code: 'HM-ABCDEF-1',
     });
 
-    const session = await verifyCandidateOtp(identity, '123456');
+    const session = await verifyCandidateOtp(identity, '123456', 'temp-token-value');
 
-    expect(auth.verifyOtp).toHaveBeenCalledWith({ email: 'ada@example.com', token: '123456', type: 'email' });
-    expect(login).toHaveBeenCalledWith(
-      { access_code: 'HM-ABCDEF-1', first_name: 'Ada', full_name: 'Ada Lovelace', email: 'ada@example.com' },
-      'sb-token',
-    );
+    expect(login).toHaveBeenCalledWith({
+      access_code: 'HM-ABCDEF-1',
+      first_name: 'Ada',
+      full_name: 'Ada Lovelace',
+      email: 'ada@example.com',
+      temp_token: 'temp-token-value',
+      otp_code: '123456',
+    });
     expect(session).toEqual({
       token: 'cand-jwt',
       id: 'c1',
@@ -69,32 +71,18 @@ describe('verifyCandidateOtp', () => {
       fullName: 'Ada Lovelace',
       accessCode: 'HM-ABCDEF-1',
     });
-    expect(auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
   });
 
-  it('rejects an invalid code without calling the backend', async () => {
-    auth.verifyOtp.mockResolvedValue({ data: { session: null }, error: { message: 'Token has expired or is invalid' } });
-    await expect(verifyCandidateOtp(identity, '000000')).rejects.toThrow('expired or is invalid');
-    expect(login).not.toHaveBeenCalled();
-  });
-
-  it('fails fast when verification returns no session', async () => {
-    auth.verifyOtp.mockResolvedValue({ data: { session: null }, error: null });
-    await expect(verifyCandidateOtp(identity, '123456')).rejects.toThrow(/did not return a session/);
-    expect(login).not.toHaveBeenCalled();
-  });
-
-  it('discards the Supabase session even when the backend rejects the access code', async () => {
-    auth.verifyOtp.mockResolvedValue({ data: { session: { access_token: 'sb-token' } }, error: null });
-    login.mockRejectedValue(new Error('Invalid access code'));
-    await expect(verifyCandidateOtp(identity, '123456')).rejects.toThrow('Invalid access code');
-    expect(auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
+  it('propagates backend rejection of an invalid code', async () => {
+    login.mockRejectedValue(new Error('Invalid or expired verification code'));
+    await expect(verifyCandidateOtp(identity, '000000', 'temp-token-value')).rejects.toThrow(
+      'Invalid or expired verification code',
+    );
   });
 
   it('falls back to the entered first name and access code when the backend omits them', async () => {
-    auth.verifyOtp.mockResolvedValue({ data: { session: { access_token: 'sb-token' } }, error: null });
     login.mockResolvedValue({ token: 't', id: 'c1', first_name: null, full_name: 'Ada Lovelace' });
-    const session = await verifyCandidateOtp(identity, '123456');
+    const session = await verifyCandidateOtp(identity, '123456', 'temp-token-value');
     expect(session.firstName).toBe('Ada');
     expect(session.accessCode).toBe('HM-ABCDEF-1');
   });

@@ -248,7 +248,12 @@ def _package(**window):
 
 def _login():
     return CandidateLogin(
-        first_name="Ada", full_name="Ada Lovelace", email="ada@example.com", access_code="HM-WIN01-A"
+        first_name="Ada",
+        full_name="Ada Lovelace",
+        email="ada@example.com",
+        access_code="HM-WIN01-A",
+        temp_token="t" * 24,
+        otp_code="123456",
     )
 
 

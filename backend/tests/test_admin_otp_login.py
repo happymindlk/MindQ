@@ -78,7 +78,9 @@ def test_email_body_is_the_admin_verification_sentence():
         "Your MindQ Admin Verification Code is: 123456. Valid for 5 minutes."
     )
     html = render_admin_otp_html("123456")
-    assert "Your MindQ Admin Verification Code is: 123456. Valid for 5 minutes." in html
+    assert "Admin Portal" in html
+    assert "123456" in html
+    assert "only work for 5 minutes" in html
     assert "<script>" not in render_admin_otp_html("<script>")
 
 

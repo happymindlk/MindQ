@@ -11,8 +11,8 @@ import {
 export type CandidateLoginStep = 'details' | 'code';
 
 export const OTP_MIN_LENGTH = 6;
-export const OTP_MAX_LENGTH = 8;
-/** Matches Supabase's per-email resend window so the button never invites a 429. */
+export const OTP_MAX_LENGTH = 6;
+/** Matches the backend per-email resend cooldown so the button never invites a 429. */
 export const RESEND_COOLDOWN_SECONDS = 60;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -48,6 +48,7 @@ export function useCandidateOtpLogin(
     email: '',
   });
   const [code, setCodeState] = useState('');
+  const [tempToken, setTempToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
@@ -75,7 +76,8 @@ export function useCandidateOtpLogin(
     setLoading(true);
     setError(null);
     try {
-      await sendCandidateOtp(identity.email);
+      const token = await sendCandidateOtp(identity);
+      setTempToken(token);
       setCodeState('');
       setStep('code');
       setCooldown(RESEND_COOLDOWN_SECONDS);
@@ -92,22 +94,23 @@ export function useCandidateOtpLogin(
   }, [cooldown, loading, sendCode]);
 
   const verifyCode = useCallback(async () => {
-    if (code.length < OTP_MIN_LENGTH || loading) return;
+    if (code.length < OTP_MIN_LENGTH || !tempToken || loading) return;
     setLoading(true);
     setError(null);
     try {
-      const session = await verifyCandidateOtp(identity, code);
+      const session = await verifyCandidateOtp(identity, code, tempToken);
       persistCandidateSession(session);
       onAuthenticated(session);
     } catch (err) {
       setError(message(err, 'Invalid or expired code'));
       setLoading(false);
     }
-  }, [code, identity, loading, onAuthenticated]);
+  }, [code, identity, tempToken, loading, onAuthenticated]);
 
   const editDetails = useCallback(() => {
     setStep('details');
     setCodeState('');
+    setTempToken('');
     setError(null);
   }, []);
 
@@ -115,6 +118,7 @@ export function useCandidateOtpLogin(
     step,
     identity,
     code,
+    tempToken,
     loading,
     error,
     cooldown,
