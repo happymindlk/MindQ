@@ -142,6 +142,15 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
 4. Deploy the frontend to Cloudflare Pages with root directory `frontend/`
    (build `npm run build`, output `dist`). Set env:
    - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+     **MindQ project (active):** `https://djshmrkerssvpvcxqkqo.supabase.co`
+     (note the `svpvc` segment — a typo like `svpc` yields `ERR_NAME_NOT_RESOLVED`).
+     Copy the exact URL + anon key from Supabase → Project Settings → API, then
+     **redeploy** Pages so Vite bakes the new values into the bundle.
+   - Backend host must use the same `SUPABASE_URL` / service-role key for that project.
+   - SES (backend): set `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+     `EMAIL_FROM`. While the account is in SES Sandbox, verify the From identity
+     and every recipient (e.g. `ADMIN_NOTIFICATION_EMAIL`) under SES → Identities.
+     Failures surface in API logs as `SES send FAILED` with a full traceback.
    - `VITE_API_URL` = `https://api-qa.mindqtalent.com` (the Lightsail FastAPI
      behind Cloudflare Tunnel). `frontend/.env.production` ships this default;
      a value set in the Pages dashboard overrides it. HTTP values are ignored in

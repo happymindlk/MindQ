@@ -1,6 +1,7 @@
 import React from 'react';
 import { Outlet, Link, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
+import BrandLogo from './BrandLogo';
 import ToastProvider from './ui/Toast';
 import RouteErrorBoundary from './route-error-boundary';
 import ThemeToggle from './ThemeToggle';
@@ -32,8 +33,9 @@ export default function ClientLayout() {
               <span className="block truncate text-sm font-semibold text-foreground">
                 {corporate?.name ?? 'Client Portal'}
               </span>
-              <span className="block text-[11px] uppercase tracking-wider text-muted">
-                MindQ Client Portal
+              <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
+                <span className="uppercase tracking-wider">Powered by</span>
+                <BrandLogo collapsed={false} className="h-4 w-auto inline-block" />
               </span>
             </span>
           </Link>

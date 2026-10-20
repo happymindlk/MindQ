@@ -82,7 +82,7 @@ class ClientPackageError(Exception):
 class PackageLockedError(ClientPackageError):
     """Raised when a published package is mutated."""
 
-    def __init__(self, message: str = "Published packages are locked and cannot be modified."):
+    def __init__(self, message: str = "Package is published and locked"):
         super().__init__(message)
 
 
@@ -924,9 +924,7 @@ class ClientPackageService:
         if not package:
             raise LookupError("Package not found")
         if package.status == "published":
-            raise PackageLockedError(
-                "Published packages are locked and cannot be modified."
-            )
+            raise PackageLockedError("Package is published and locked")
 
         corporate_id = body.corporate_id or package.corporate_id
         if body.custom_questions is None:
@@ -1042,7 +1040,7 @@ class ClientPackageService:
             if not package:
                 raise LookupError("Package not found")
             if package.status == "published":
-                raise PackageLockedError("Published packages are locked")
+                raise PackageLockedError("Package is published and locked")
 
         unique_module_ids: list[UUID] = []
         seen: set[UUID] = set()
