@@ -19,8 +19,10 @@ export function isPackageSaveAllowed({ status, isLocked } = {}) {
 /**
  * Create a timer + AbortController pair for debounced draft saves.
  * Debounce cleanup should only call `clearScheduled` so an in-flight save can
- * finish while the user keeps typing. Call `cancelAll` on publish success and
- * on unmount so leftover timers/fetches cannot fire a PUT after the editor is gone.
+ * finish while the user keeps typing. Publish must call `flushDraftForPublish`
+ * so a pending debounce cannot start a second save and abort the flush.
+ * Call `cancelAll` on publish success and on unmount so leftover timers or
+ * fetches cannot fire a PUT after the editor is gone.
  *
  * @returns {{
  *   schedule: (fn: () => void, delayMs: number) => void,
@@ -72,6 +74,24 @@ export function createDraftSaveController() {
       abortInFlight();
     },
   };
+}
+
+/**
+ * Save the latest draft once before publish.
+ *
+ * `beginRequest` aborts whatever save is already in flight. If the 900ms
+ * debounce is still armed when publish starts, that timer can call persist
+ * again mid-flush, abort the flush, and leave publish with a stale package id.
+ * Clearing the timer first keeps this flush as the only request.
+ *
+ * @template T
+ * @param {{ clearScheduled: () => void }} controller
+ * @param {() => Promise<T>} persist
+ * @returns {Promise<T>}
+ */
+export function flushDraftForPublish(controller, persist) {
+  controller.clearScheduled();
+  return persist();
 }
 
 /**

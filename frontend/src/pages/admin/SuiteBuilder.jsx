@@ -26,6 +26,7 @@ import {
 } from '../../features/suite-builder/role-brief-template';
 import {
   createDraftSaveController,
+  flushDraftForPublish,
   isAbortError,
   isPackageSaveAllowed,
 } from '../../features/suite-builder/package-draft-autosave';
@@ -663,9 +664,11 @@ export default function SuiteBuilder() {
     }
     try {
       setIsPublishing(true);
-      // Flush the latest draft once, then kill any leftover debounce / in-flight PUT
-      // before publish so a race cannot fire after status flips to published.
-      const saved = await persist();
+      // Clear the 900ms debounce before this flush. A timer that fires during
+      // persist() starts another save, beginRequest aborts this one, and the
+      // cancelAll() below then drops the replacement — the locked suite would
+      // miss the latest edits and saveState would stay on "saving".
+      const saved = await flushDraftForPublish(draftSave.current, persist);
       const id = saved?.id || packageId;
       if (!id) {
         setPublishError('Save a draft first');

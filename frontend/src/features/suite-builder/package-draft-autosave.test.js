@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createDraftSaveController,
+  flushDraftForPublish,
   isAbortError,
   isPackageSaveAllowed,
 } from './package-draft-autosave';
@@ -63,6 +64,39 @@ describe('createDraftSaveController', () => {
     const second = ctrl.beginRequest();
     expect(first.aborted).toBe(true);
     expect(second.aborted).toBe(false);
+  });
+
+  it('disarms the debounce before a publish flush so the timer cannot abort it', async () => {
+    vi.useFakeTimers();
+    const ctrl = createDraftSaveController();
+    /** @type {AbortSignal[]} */
+    const signals = [];
+
+    const persist = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          const signal = ctrl.beginRequest();
+          signals.push(signal);
+          const timeoutId = window.setTimeout(() => {
+            resolve(signal.aborted ? null : { id: 'pkg-1' });
+          }, 1000);
+          signal.addEventListener('abort', () => {
+            window.clearTimeout(timeoutId);
+            resolve(null);
+          });
+        }),
+    );
+
+    ctrl.schedule(() => {
+      persist().catch(() => {});
+    }, 900);
+
+    const flushPromise = flushDraftForPublish(ctrl, persist);
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await expect(flushPromise).resolves.toEqual({ id: 'pkg-1' });
+    expect(persist).toHaveBeenCalledTimes(1);
+    expect(signals[0].aborted).toBe(false);
   });
 });
 
