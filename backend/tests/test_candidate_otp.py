@@ -36,6 +36,29 @@ def _challenge(code: str = "123456"):
     return row, now
 
 
+def test_challenge_model_matches_migration_schema():
+    from app.models.candidate_login_challenge import CandidateLoginChallenge
+
+    table = CandidateLoginChallenge.__table__
+    assert table.name == "candidate_login_challenges"
+    # Column set of supabase/migrations/20261020120000_candidate_login_otp.sql.
+    # The live database must be altered to this shape (see that migration);
+    # an older live schema with attempts/temp_token columns is incompatible.
+    assert set(table.columns.keys()) == {
+        "id",
+        "email",
+        "access_code",
+        "otp_hash",
+        "expires_at",
+        "attempt_count",
+        "locked_until",
+        "consumed_at",
+        "created_at",
+    }
+    assert table.c.attempt_count.nullable is False
+    assert table.c.locked_until.nullable is True
+
+
 def test_code_is_stored_only_as_hmac():
     row, _now = _challenge()
     assert row.otp_hash != "123456"
