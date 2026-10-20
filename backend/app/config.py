@@ -1,3 +1,4 @@
+import json
 from typing import Annotated
 
 from pydantic import field_validator
@@ -9,6 +10,10 @@ class Settings(BaseSettings):
     # Default True so local/CI boots with example secrets. Production MUST set DEBUG=false
     # (assert_production_ready refuses weak secrets / localhost CORS when False).
     DEBUG: bool = True
+    # Deployment environment: "development" | "staging" | "qa" | "production".
+    # Non-production enables QA fallbacks (e.g. logging a failed-SES admin OTP
+    # to the server log). Production MUST set ENVIRONMENT=production + DEBUG=false.
+    ENVIRONMENT: str = "development"
 
     # Postgres (async driver). Defaults to the local Supabase stack.
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres"
@@ -45,7 +50,7 @@ class Settings(BaseSettings):
     AWS_REGION: str = "us-east-1"
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
-    EMAIL_FROM: str = "Assess Pulse <noreply@mindq.pages.dev>"
+    EMAIL_FROM: str = "MindQ <noreply@mindqtalent.com>"
     # Inbox for gated beta / waitlist access requests (and other admin alerts).
     ADMIN_NOTIFICATION_EMAIL: str = "muhamadnas44@gmail.com"
     # Legacy alias — prefer ADMIN_NOTIFICATION_EMAIL.
@@ -80,7 +85,11 @@ class Settings(BaseSettings):
     # Incomplete candidates older than this many hours are nudged by the job.
     NUDGE_AFTER_HOURS: int = 24
 
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
+    # Accepts a comma-separated string or a JSON / Python list in env / code.
+    # NoDecode: pydantic-settings otherwise JSON-parses list env values first.
+    CORS_ORIGINS: Annotated[str | list[str], NoDecode] = (
+        "http://localhost:3000,http://localhost:5173"
+    )
     # Number of trusted reverse proxies in front of the API (Cloudflare, Render, …).
     # 0 = ignore X-Forwarded-For entirely; any client can forge that header.
     TRUSTED_PROXY_HOPS: int = 0
@@ -89,6 +98,26 @@ class Settings(BaseSettings):
     CLIENT_IP_HEADER: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value: object) -> str | list[str]:
+        """Accept comma-separated strings, JSON lists, or real lists."""
+        if value is None or value == "":
+            return ""
+        if isinstance(value, (list, tuple, set)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("["):
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    return text
+                if isinstance(parsed, list):
+                    return [str(item).strip() for item in parsed if str(item).strip()]
+            return text
+        return [str(value).strip()]
 
     @field_validator("AUTO_APPROVE_EMAILS", mode="before")
     @classmethod
@@ -108,8 +137,35 @@ class Settings(BaseSettings):
         return set(self.AUTO_APPROVE_EMAILS)
 
     @property
+    def is_production(self) -> bool:
+        """True only for an explicitly production deployment."""
+        return (self.ENVIRONMENT or "").strip().lower() == "production"
+
+    @property
     def cors_origins_list(self) -> list[str]:
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        """Configured CORS origins, whether stored as a list or a CSV string."""
+        raw = self.CORS_ORIGINS
+        if isinstance(raw, (list, tuple, set)):
+            return [str(origin).strip().rstrip("/") for origin in raw if str(origin).strip()]
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                return []
+            if text.startswith("["):
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, list):
+                    return [
+                        str(origin).strip().rstrip("/")
+                        for origin in parsed
+                        if str(origin).strip()
+                    ]
+            return [
+                origin.strip().rstrip("/") for origin in text.split(",") if origin.strip()
+            ]
+        return [str(raw).strip().rstrip("/")] if str(raw).strip() else []
 
     @property
     def r2_configured(self) -> bool:

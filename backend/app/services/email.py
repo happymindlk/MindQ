@@ -466,24 +466,79 @@ def render_admin_otp_html(otp: str) -> str:
 </body></html>"""
 
 
+def _otp_log_fallback_enabled() -> bool:
+    """True when a failed SES OTP may be logged for QA/staging testing.
+
+    Non-production means ``ENVIRONMENT != 'production'`` or ``DEBUG`` is on.
+    In production (``ENVIRONMENT=production`` and ``DEBUG=false``) the code
+    is never written to logs and delivery failures keep raising.
+    """
+    environment = (getattr(settings, "ENVIRONMENT", "") or "").strip().lower()
+    return environment != "production" or bool(getattr(settings, "DEBUG", False))
+
+
+def _log_admin_otp_fallback(to_email: str, otp: str, exc: BaseException) -> None:
+    """Log a prominent banner carrying the OTP after an SES failure (QA only).
+
+    Args:
+        to_email: Admin inbox the code was meant for.
+        otp: Six-digit verification code.
+        exc: SES / mailer failure that triggered the fallback.
+    """
+    banner = "\n".join(
+        [
+            "",
+            "=" * 70,
+            "  !!!  SES DELIVERY FAILED - QA/STAGING OTP FALLBACK  !!!",
+            "  (ENVIRONMENT != 'production' or DEBUG - never enable in prod)",
+            "=" * 70,
+            f"  Recipient : {to_email}",
+            f"  OTP CODE  : {otp}",
+            f"  Error     : {type(exc).__name__}: {exc}",
+            "  Action    : enter the OTP code above on the admin login screen.",
+            "=" * 70,
+            "",
+        ]
+    )
+    logger.warning(banner)
+
+
 async def send_admin_otp_email(to_email: str, otp: str) -> None:
     """Deliver an admin sign-in code through the configured transactional mailer.
 
-    The code is not written to logs. Delivery failures raise so the caller can
-    discard the challenge instead of issuing a temp token nobody can complete.
+    Production: delivery failures raise so the caller can discard the
+    challenge instead of issuing a temp token nobody can complete.
+
+    QA/staging (non-production): SES failures (e.g. sandbox ``MessageRejected``
+    for an unverified recipient) are caught, the code is logged in a prominent
+    banner for testers, and the function returns successfully so the
+    ``admin_login_challenges`` transaction is committed, not rolled back.
 
     Args:
         to_email: Admin inbox that just passed the password check.
         otp: Six-digit verification code.
 
     Raises:
-        RuntimeError: The mailer is not configured or rejected the message.
+        RuntimeError: In production, when the mailer is not configured or
+            rejected the message.
     """
-    result = await send_transactional_email_async(
-        to_email,
-        "Your MindQ Admin Verification Code",
-        render_admin_otp_html(otp),
-        raise_on_error=True,
-    )
-    if not result:
-        raise RuntimeError("Verification email was not sent")
+    try:
+        result = await send_transactional_email_async(
+            to_email,
+            "Your MindQ Admin Verification Code",
+            render_admin_otp_html(otp),
+            raise_on_error=True,
+        )
+        if not result:
+            raise RuntimeError("Verification email was not sent")
+    except Exception as exc:  # noqa: BLE001 - re-raised in production below
+        if _otp_log_fallback_enabled():
+            logger.exception(
+                "Admin OTP SES delivery failed; using QA log fallback to=%s",
+                to_email,
+            )
+            _log_admin_otp_fallback(to_email, otp, exc)
+            return
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(f"Verification email was not sent: {exc}") from exc

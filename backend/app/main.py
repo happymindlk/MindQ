@@ -1,16 +1,20 @@
+import contextlib
+import json
+import logging
+import re
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DBAPIError
-from app.api.v1.router import api_router
+
 from app.api.v1.beta_access import router as beta_access_router
 from app.api.v1.invites import router as invites_router
-from app.database import engine
+from app.api.v1.router import api_router
 from app.config import settings
-from app.security import SecurityHeadersMiddleware, assert_production_ready
+from app.database import engine
 from app.observability import configure_logging
-import contextlib
-import logging
+from app.security import SecurityHeadersMiddleware, assert_production_ready
 
 configure_logging(debug=settings.DEBUG)
 logger = logging.getLogger("app.main")
@@ -45,19 +49,120 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 
-# Build allowed origins combining settings + staging domain
-allowed_origins = list(settings.cors_origins_list) if hasattr(settings, "cors_origins_list") else []
-for domain in [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
+# ---------------------------------------------------------------------------
+# CORS / origin resolution (single source of truth for middleware + errors)
+# ---------------------------------------------------------------------------
+
+#: Origins that must always work, regardless of deployment env.
+DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
+    "https://qa.app.mindqtalent.com",
     "https://mindq.pages.dev",
-]:
-    if domain not in allowed_origins:
-        allowed_origins.append(domain)
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+)
+
+#: Any https subdomain of our two hosted zones, e.g.
+#: ``https://qa.app.mindqtalent.com``, ``https://feat-x.mindq.pages.dev``.
+ALLOW_ORIGIN_REGEX = (
+    r"^https://.*\.mindqtalent\.com$"
+    r"|^https://.*\.pages\.dev$"
+)
+
+_allow_origin_pattern = re.compile(ALLOW_ORIGIN_REGEX)
+
+
+def _normalize_origin(value: object) -> str:
+    """Normalize one origin entry (strip whitespace / trailing slash)."""
+    return str(value).strip().rstrip("/")
+
+
+def _coerce_origins(value: object) -> list[str]:
+    """Coerce a list, CSV string, or JSON-list string into origin strings.
+
+    Args:
+        value: Raw ``CORS_ORIGINS`` / ``FRONTEND_URL`` value in any shape.
+
+    Returns:
+        Normalized, non-empty origins (not yet deduplicated).
+    """
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        origins: list[str] = []
+        for item in value:
+            origin = _normalize_origin(item)
+            if origin:
+                origins.append(origin)
+        return origins
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                return _coerce_origins(parsed)
+        return [
+            origin
+            for part in text.split(",")
+            if (origin := _normalize_origin(part))
+        ]
+    origin = _normalize_origin(value)
+    return [origin] if origin else []
+
+
+def _build_allowed_origins() -> list[str]:
+    """Unified allowlist: settings (list or CSV) + FRONTEND_URL + defaults."""
+    candidates: list[str] = []
+    # `cors_origins_list` already normalizes list/CSV; reading the raw value
+    # too keeps this correct if settings are monkeypatched with either shape.
+    candidates.extend(_coerce_origins(getattr(settings, "CORS_ORIGINS", None)))
+    if hasattr(settings, "cors_origins_list"):
+        candidates.extend(_coerce_origins(settings.cors_origins_list))
+    candidates.extend(_coerce_origins(getattr(settings, "FRONTEND_URL", None)))
+    candidates.extend(DEFAULT_ALLOWED_ORIGINS)
+
+    seen: set[str] = set()
+    origins: list[str] = []
+    for origin in candidates:
+        if origin not in seen:
+            seen.add(origin)
+            origins.append(origin)
+    return origins
+
+
+allowed_origins: list[str] = _build_allowed_origins()
+
+
+def is_origin_allowed(origin: str | None) -> bool:
+    """Unified origin check used by CORSMiddleware config and error handlers.
+
+    Args:
+        origin: Raw ``Origin`` header value, if present.
+
+    Returns:
+        True for an exact allowlist match or a ``mindqtalent.com`` /
+        ``pages.dev`` https-subdomain regex match.
+    """
+    if not origin:
+        return False
+    normalized = _normalize_origin(origin)
+    # Rebuild from live settings so env / test overrides are honoured, not
+    # only the import-time snapshot used to configure CORSMiddleware.
+    if normalized in allowed_origins or normalized in _build_allowed_origins():
+        return True
+    return _allow_origin_pattern.fullmatch(normalized) is not None
+
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=ALLOW_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,10 +188,10 @@ def _cors_error_headers(request: Request) -> dict[str, str]:
         CORS headers when the origin is allowed, otherwise an empty dict.
     """
     origin = request.headers.get("origin")
-    if not origin or origin not in allowed_origins:
+    if not origin or not is_origin_allowed(origin):
         return {}
     return {
-        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Origin": _normalize_origin(origin),
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
