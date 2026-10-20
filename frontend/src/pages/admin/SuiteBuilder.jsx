@@ -24,6 +24,11 @@ import {
   hasRoleBriefTemplate,
   insertRoleBriefTemplate,
 } from '../../features/suite-builder/role-brief-template';
+import {
+  createDraftSaveController,
+  isAbortError,
+  isPackageSaveAllowed,
+} from '../../features/suite-builder/package-draft-autosave';
 
 function moduleMinutes(mod) {
   const seconds = Number(mod.duration_seconds) || Number(mod.time_limit_minutes) * 60 || 0;
@@ -255,6 +260,9 @@ export default function SuiteBuilder() {
   const [syncTargetId, setSyncTargetId] = useState('');
   const [syncModal, setSyncModal] = useState(null);
   const skipSave = useRef(true);
+  const draftSave = useRef(createDraftSaveController());
+  /** Once true, the editor is leaving after publish — block any residual saves. */
+  const publishLeaving = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -405,7 +413,14 @@ export default function SuiteBuilder() {
 
   const selectedIds = useMemo(() => new Set(cartIds), [cartIds]);
 
-  const locked = status === 'published';
+  const locked = !isPackageSaveAllowed({ status });
+
+  useEffect(() => {
+    const controller = draftSave.current;
+    return () => {
+      controller.cancelAll();
+    };
+  }, []);
 
   const cartQuestionsFor = useCallback(
     (mod) => {
@@ -488,8 +503,17 @@ export default function SuiteBuilder() {
   );
 
   const persist = useCallback(async () => {
-    if (!corporateId || !title.trim() || locked || scheduleError) return null;
+    if (
+      publishLeaving.current ||
+      !isPackageSaveAllowed({ status, isLocked: locked }) ||
+      !corporateId ||
+      !title.trim() ||
+      scheduleError
+    ) {
+      return null;
+    }
     setSaveState('saving');
+    const signal = draftSave.current.beginRequest();
     const schedulePayload = {
       open_time: fromSriLankaInputValue(openTime),
       close_time: fromSriLankaInputValue(closeTime),
@@ -516,17 +540,21 @@ export default function SuiteBuilder() {
     try {
       let saved;
       if (packageId) {
-        saved = await adminApi.updateAdminPackage(packageId, {
-          title: title.trim(),
-          description,
-          ...schedulePayload,
-          target_role: targetRole.trim() || null,
-          passing_threshold: Number.isFinite(thresholdValue) ? thresholdValue : null,
-          corporate_id: corporateId,
-          module_ids: cartIds,
-          custom_questions: customPayload,
-          module_question_overrides: overridesPayload,
-        });
+        saved = await adminApi.updateAdminPackage(
+          packageId,
+          {
+            title: title.trim(),
+            description,
+            ...schedulePayload,
+            target_role: targetRole.trim() || null,
+            passing_threshold: Number.isFinite(thresholdValue) ? thresholdValue : null,
+            corporate_id: corporateId,
+            module_ids: cartIds,
+            custom_questions: customPayload,
+            module_question_overrides: overridesPayload,
+          },
+          { signal },
+        );
       } else {
         saved = await adminApi.saveDraftPackage(
           {
@@ -541,8 +569,10 @@ export default function SuiteBuilder() {
             module_question_overrides: overridesPayload,
           },
           null,
+          { signal },
         );
       }
+      if (publishLeaving.current) return null;
       if (saved.id !== packageId) setPackageId(saved.id);
       setSaveState('saved');
       if (!loadPackageId && saved.id) {
@@ -551,6 +581,7 @@ export default function SuiteBuilder() {
       }
       return saved;
     } catch (err) {
+      if (isAbortError(err) || publishLeaving.current) return null;
       console.error(err);
       setSaveState('error');
       throw err;
@@ -567,7 +598,7 @@ export default function SuiteBuilder() {
     cartIds,
     customQuestions,
     moduleOverrides,
-    moduleById,
+    status,
     locked,
     packageId,
     loadPackageId,
@@ -577,14 +608,21 @@ export default function SuiteBuilder() {
   useEffect(() => {
     if (skipSave.current) {
       skipSave.current = false;
-      return;
+      return undefined;
     }
-    const timer = window.setTimeout(() => {
+    if (publishLeaving.current || !isPackageSaveAllowed({ status, isLocked: locked })) {
+      return undefined;
+    }
+    const controller = draftSave.current;
+    controller.schedule(() => {
       persist().catch(() => {});
     }, 900);
     setSaveState((prev) => (prev === 'idle' ? 'idle' : 'saving'));
-    return () => window.clearTimeout(timer);
-  }, [persist]);
+    return () => {
+      // Only clear the debounce timer here — abort in-flight on publish/unmount.
+      controller.clearScheduled();
+    };
+  }, [persist, status, locked]);
 
   const onComposerAdd = useCallback(
     (moduleId, nextIds) => {
@@ -619,26 +657,42 @@ export default function SuiteBuilder() {
       setPublishError(scheduleError);
       return;
     }
+    if (!cart.length && !customQuestions.some((q) => String(q.prompt || '').trim())) {
+      setPublishError('Add a module or custom question');
+      return;
+    }
     try {
+      setIsPublishing(true);
+      // Flush the latest draft once, then kill any leftover debounce / in-flight PUT
+      // before publish so a race cannot fire after status flips to published.
       const saved = await persist();
       const id = saved?.id || packageId;
       if (!id) {
         setPublishError('Save a draft first');
         return;
       }
-      if (!cart.length && !customQuestions.some((q) => q.prompt.trim())) {
-        setPublishError('Add a module or custom question');
-        return;
-      }
-      setIsPublishing(true);
+      draftSave.current.cancelAll();
+      skipSave.current = true;
       const published = await adminApi.publishDraftPackage(id);
+      publishLeaving.current = true;
+      draftSave.current.cancelAll();
+      skipSave.current = true;
       setStatus('published');
-      setShare({
-        access_code: published.access_code,
-        review_path: published.review_path,
-        candidate_path: published.candidate_path,
+      toast({
+        title: 'Suite published',
+        description: published.access_code
+          ? `Access code ${published.access_code}. Share links are on the company page.`
+          : 'Share links are on the company page.',
+        variant: 'success',
       });
+      const destCorporateId = corporateId || saved?.corporate_id;
+      if (destCorporateId) {
+        navigate(`/admin/corporates/${destCorporateId}`, { replace: true });
+      } else {
+        navigate('/admin/corporates', { replace: true });
+      }
     } catch (err) {
+      publishLeaving.current = false;
       setPublishError(err.message || 'Publish failed');
     } finally {
       setIsPublishing(false);

@@ -48,6 +48,37 @@ def test_send_transactional_email_success(monkeypatch):
     assert call_kwargs["Source"] == "Assess Pulse <noreply@example.com>"
 
 
+def test_send_transactional_email_logs_client_error(monkeypatch, caplog):
+    monkeypatch.setattr("app.services.email.settings.EMAIL_FROM", "Assess Pulse <noreply@example.com>")
+    monkeypatch.setattr("app.services.email.settings.AWS_REGION", "us-east-1")
+    monkeypatch.setattr("app.services.email.settings.AWS_ACCESS_KEY_ID", "AKIATEST")
+    monkeypatch.setattr("app.services.email.settings.AWS_SECRET_ACCESS_KEY", "secret")
+
+    from botocore.exceptions import ClientError
+
+    err = ClientError(
+        {
+            "Error": {
+                "Code": "MessageRejected",
+                "Message": "Email address is not verified.",
+            }
+        },
+        "SendEmail",
+    )
+    fake_client = MagicMock()
+    fake_client.send_email.side_effect = err
+    monkeypatch.setattr("app.services.email._ses_client", lambda: fake_client)
+
+    with caplog.at_level(logging.ERROR, logger="app.email"):
+        result = send_transactional_email("muhamadnas44@gmail.com", "Hello", "<p>Hi</p>")
+
+    assert result is None
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "SES send FAILED" in logged
+    assert "not verified" in logged.lower() or "MessageRejected" in logged
+    assert "sandbox" in logged.lower() or "Identities" in logged
+
+
 def test_resolve_frontend_origin_prefers_settings(monkeypatch):
     monkeypatch.setattr(
         "app.services.email.settings.FRONTEND_URL", "https://app.example.test"

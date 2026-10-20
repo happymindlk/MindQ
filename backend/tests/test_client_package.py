@@ -117,7 +117,7 @@ def test_slugify_company_name_strips_and_hyphenates():
 
 def test_published_lock_message():
     err = PackageLockedError()
-    assert str(err) == "Published packages are locked and cannot be modified."
+    assert str(err) == "Package is published and locked"
 
 
 def test_admin_package_update_accepts_questions_and_target_role_aliases():
