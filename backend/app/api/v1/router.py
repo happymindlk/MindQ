@@ -38,3 +38,24 @@ api_router.include_router(client_router, prefix="/client", tags=["client"])
 api_router.include_router(chat_router, prefix="/chat", tags=["chat"])
 api_router.include_router(support_router, prefix="/support", tags=["support"])
 api_router.include_router(track_router, prefix="/track", tags=["track"])
+
+# #region agent log
+try:
+    import json as _json
+    import time as _time
+    from pathlib import Path as _Path
+
+    _routes = sorted(
+        f"{sorted(route.methods or [])} {route.path}"
+        for route in candidate_auth_router.routes
+        if "candidate" in route.path or "otp" in route.path or "login" in route.path
+    ) + sorted(
+        f"{sorted(route.methods or [])} {route.path}"
+        for route in candidate_router.routes
+        if "otp" in route.path or "login" in route.path
+    )
+    with open(_Path(__file__).resolve().parents[4] / "debug-605235.log", "a", encoding="utf-8") as _fh:
+        _fh.write(_json.dumps({"sessionId": "605235", "runId": "pre-fix", "hypothesisId": "C", "location": "router.py:route-dump", "message": "candidate routes registered", "data": {"routes": _routes}, "timestamp": int(_time.time() * 1000)}) + "\n")
+except Exception:
+    pass
+# #endregion
