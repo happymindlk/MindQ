@@ -62,13 +62,33 @@ class CandidateInviteResponse(BaseModel):
     status: str = "pending"
 
 
+class CandidateOtpRequest(BaseModel):
+    """Ask for a one-time code for the submitted access code + email."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    access_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=36)]
+    email: EmailStr
+
+
+class CandidateOtpChallengeResponse(BaseModel):
+    """Proof that a code was sent. ``temp_token`` cannot call candidate APIs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: str = "otp_required"
+    temp_token: Annotated[str, StringConstraints(min_length=20, max_length=4096)]
+
+
 class CandidateLogin(BaseModel):
-    """Candidate sign-in payload. Email ownership is proven separately via OTP."""
+    """Candidate sign-in payload, verified by a candidate OTP challenge."""
 
     first_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
     full_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
     email: EmailStr
     access_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=36)]
+    temp_token: Annotated[str, StringConstraints(strip_whitespace=True, min_length=20, max_length=4096)]
+    otp_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=6, max_length=6, pattern=r"^\d{6}$")]
 
 
 class CandidateResponse(CandidateBase):

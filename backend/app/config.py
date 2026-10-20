@@ -21,9 +21,8 @@ class Settings(BaseSettings):
     # Secret used to SIGN candidate access tokens (distinct from Supabase's JWT secret).
     SECRET_KEY: str = "dev-secret-key-change-in-production"
     CANDIDATE_TOKEN_TTL_MINUTES: int = 240
-    # Candidate login requires a Supabase email-OTP access token. Only disable for
-    # local scripts without Supabase; assert_production_ready refuses False in prod.
-    CANDIDATE_OTP_REQUIRED: bool = True
+    # Candidate login always requires the custom email-OTP challenge
+    # (candidate_login_challenges); there is no disable flag.
     # HR client-portal session tokens (also signed with SECRET_KEY, separate audience).
     CLIENT_TOKEN_TTL_MINUTES: int = 480
 

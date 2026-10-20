@@ -56,16 +56,16 @@ def test_assert_production_ready_accepts_strong_production_config():
     assert_production_ready(settings)
 
 
-def test_assert_production_ready_rejects_disabled_candidate_otp():
+def test_candidate_otp_has_no_disable_flag():
+    # Candidate OTP is always on; the old Supabase-proof kill switch is gone.
     settings = Settings(
         DEBUG=False,
         SECRET_KEY="x" * 40,
         SUPABASE_JWT_SECRET="y" * 40,
         CORS_ORIGINS="https://app.example.com",
-        CANDIDATE_OTP_REQUIRED=False,
     )
-    with pytest.raises(RuntimeError, match="CANDIDATE_OTP_REQUIRED"):
-        assert_production_ready(settings)
+    assert not hasattr(settings, "CANDIDATE_OTP_REQUIRED")
+    assert_production_ready(settings)
 
 
 def test_rate_limiter_trips_after_budget():
@@ -118,14 +118,15 @@ async def test_login_rate_limit_returns_429(async_client, monkeypatch):
     login_limiter.reset()
     monkeypatch.setattr(login_limiter, "max_requests", 2)
     monkeypatch.setattr(login_limiter, "window_seconds", 60)
-    monkeypatch.setattr("app.api.v1.candidate.settings.CANDIDATE_OTP_REQUIRED", False)
 
-    async def fake_login(_db, _data):
-        raise ValueError("Invalid access code")
+    from app.services.candidate_otp import CandidateOtpError
+
+    async def fake_verify(_db, **_kwargs):
+        raise CandidateOtpError(400, "Invalid access code")
 
     monkeypatch.setattr(
-        "app.api.v1.candidate.CandidateService.login",
-        fake_login,
+        "app.api.v1.candidate.verify_candidate_challenge",
+        fake_verify,
     )
 
     payload = {
@@ -133,6 +134,8 @@ async def test_login_rate_limit_returns_429(async_client, monkeypatch):
         "full_name": "Rate Limit",
         "email": "rate@example.com",
         "access_code": "HM-N0PE-Z",
+        "temp_token": "x" * 24,
+        "otp_code": "123456",
     }
     for _ in range(2):
         res = await async_client.post("/api/v1/candidate/login", json=payload)

@@ -6,8 +6,14 @@ import pytest
 from app.services.email import (
     _source_address,
     clean_recipient_email,
+    render_candidate_invite_html,
+    render_candidate_nudge_html,
+    render_hr_completion_html,
+    render_package_share_html,
+    render_universal_otp_html,
     resolve_frontend_origin,
     send_admin_otp_email,
+    send_candidate_otp_email,
     send_transactional_email,
 )
 from app.services.email_service import EmailService
@@ -238,6 +244,121 @@ async def test_candidate_invite_logs_dispatch_even_when_ses_fails(monkeypatch, c
     assert "Code=AP-TEST-9" in logged
     assert "Link=https://qa.app.mindqtalent.com/assessment?code=AP-TEST-9" in logged
     assert "[INVITE FAILED]" in logged
+
+
+DARK_MARKERS = ("#0B0F17", "#111827", "ASSESS PULSE", "#6B4CE8")
+
+
+def _all_templates() -> dict[str, str]:
+    return {
+        "invite": render_candidate_invite_html(
+            candidate_name="Pat",
+            package_title="Backend Pack",
+            access_code="HM-1",
+            corporate_name="Acme",
+            origin="https://qa.example.test",
+        ),
+        "nudge": render_candidate_nudge_html(
+            candidate_name="Pat",
+            package_title="Backend Pack",
+            access_code="HM-1",
+            origin="https://qa.example.test",
+        ),
+        "hr_completion": render_hr_completion_html(
+            hr_name="Acme",
+            candidate_name="Pat Lee",
+            package_title="Backend Pack",
+            candidate_email="pat@example.com",
+        ),
+        "package_share": render_package_share_html(
+            corporate_name="Acme",
+            package_title="Backend Pack",
+            access_code="HM-1",
+            origin="https://qa.example.test",
+        ),
+        "admin_otp": render_universal_otp_html("Admin Portal", "123456"),
+        "candidate_otp": render_universal_otp_html("Candidate Portal", "654321"),
+    }
+
+
+def test_all_email_templates_use_the_light_theme():
+    for name, html_content in _all_templates().items():
+        assert "#FFFFFF" in html_content, name
+        assert "#F9FAFB" in html_content, name
+        assert "/branding/logo-light.png" in html_content, name
+        assert 'alt="MindQ"' in html_content, name
+        for marker in DARK_MARKERS:
+            assert marker not in html_content, (name, marker)
+
+
+def test_template_buttons_use_corporate_blue():
+    templates = _all_templates()
+    assert "#0078D4" in templates["invite"]
+    assert "#0078D4" in templates["package_share"]
+
+
+def test_universal_otp_is_prominent_escaped_and_time_boxed():
+    html_content = render_universal_otp_html("Candidate Portal", "482916")
+    assert "Candidate Portal" in html_content
+    assert "482916" in html_content
+    assert "only work for 5 minutes" in html_content
+    assert "font-size:36px" in html_content
+    assert "letter-spacing:8px" in html_content
+
+    malicious = render_universal_otp_html("<script>alert(1)</script>", "<b>1</b>")
+    assert "<script>" not in malicious
+    assert "&lt;script&gt;" in malicious
+    assert "<b>1</b>" not in malicious
+
+
+@pytest.mark.asyncio
+async def test_candidate_otp_sender_uses_universal_template(monkeypatch):
+    captured = {}
+
+    async def fake_send(to_email, subject, html_content, raise_on_error=False):
+        captured.update(to=to_email, subject=subject, html=html_content)
+        return {"id": "msg_otp"}
+
+    monkeypatch.setattr("app.services.email.send_transactional_email_async", fake_send)
+    await send_candidate_otp_email("ada@example.com", "482916")
+    assert captured["to"] == "ada@example.com"
+    assert captured["subject"] == "Your MindQ Candidate Verification Code"
+    assert "Candidate Portal" in captured["html"]
+    assert "482916" in captured["html"]
+
+
+@pytest.mark.asyncio
+async def test_candidate_otp_falls_back_to_log_in_qa(monkeypatch, caplog):
+    monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", "qa")
+    monkeypatch.setattr("app.services.email.settings.DEBUG", True)
+
+    async def _rejected(*_args, **_kwargs):
+        raise RuntimeError("SES rejected the email: MessageRejected: not verified")
+
+    monkeypatch.setattr("app.services.email.send_transactional_email_async", _rejected)
+
+    with caplog.at_level(logging.WARNING, logger="app.email"):
+        result = await send_candidate_otp_email("ada@example.com", "482916")
+
+    assert result is None
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "QA/STAGING OTP FALLBACK" in logged
+    assert "482916" in logged
+    assert "Candidate Portal" in logged
+
+
+@pytest.mark.asyncio
+async def test_candidate_otp_raises_in_production(monkeypatch):
+    monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", "production")
+    monkeypatch.setattr("app.services.email.settings.DEBUG", False)
+
+    async def _rejected(*_args, **_kwargs):
+        raise RuntimeError("SES rejected the email: MessageRejected: not verified")
+
+    monkeypatch.setattr("app.services.email.send_transactional_email_async", _rejected)
+
+    with pytest.raises(RuntimeError, match="MessageRejected"):
+        await send_candidate_otp_email("ada@example.com", "482916")
 
 
 @pytest.mark.asyncio

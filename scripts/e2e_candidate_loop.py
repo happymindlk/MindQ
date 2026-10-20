@@ -2,8 +2,11 @@
 """API-level E2E: package → candidate login → autosave → submit → score → report.
 
 Requires local Supabase Postgres + running FastAPI (port 8000) with DATABASE_URL
-pointing at it and CANDIDATE_OTP_REQUIRED=false (this script cannot read OTP emails).
-Optional GEMINI_API_KEY for JD fit (otherwise status=skipped/failed).
+pointing at it. Candidate login uses the custom email OTP: set
+E2E_CANDIDATE_OTP to the emailed code (or read it from the backend's
+QA/staging log-fallback banner when SES is unconfigured); when unset the
+script prompts for it. Optional GEMINI_API_KEY for JD fit (otherwise
+status=skipped/failed).
 
 Usage (from repo root, with backend venv activated):
   python scripts/e2e_candidate_loop.py
@@ -100,13 +103,26 @@ async def main() -> int:
         health = await client.get("/health")
         health.raise_for_status()
 
+        candidate_email = f"e2e-{uuid.uuid4().hex[:8]}@example.com"
+        otp_request = await client.post(
+            "/api/v1/candidate/otp/request",
+            json={"access_code": access_code, "email": candidate_email},
+        )
+        otp_request.raise_for_status()
+        temp_token = otp_request.json()["temp_token"]
+        otp_code = os.getenv("E2E_CANDIDATE_OTP") or input(
+            "Enter the 6-digit code emailed to the candidate: "
+        ).strip()
+
         login = await client.post(
             "/api/v1/candidate/login",
             json={
                 "first_name": "E2E",
                 "full_name": "E2E Candidate",
-                "email": f"e2e-{uuid.uuid4().hex[:8]}@example.com",
+                "email": candidate_email,
                 "access_code": access_code,
+                "temp_token": temp_token,
+                "otp_code": otp_code,
             },
         )
         login.raise_for_status()

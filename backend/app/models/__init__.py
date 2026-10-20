@@ -1,4 +1,5 @@
 from .admin_login_challenge import AdminLoginChallenge
+from .candidate_login_challenge import CandidateLoginChallenge
 from .corporate import Corporate
 from .hr_user import HRUser
 from .package import Package
@@ -15,6 +16,7 @@ from .template_question import TemplateQuestion
 
 __all__ = [
     "AdminLoginChallenge",
+    "CandidateLoginChallenge",
     "Corporate",
     "HRUser",
     "Package",

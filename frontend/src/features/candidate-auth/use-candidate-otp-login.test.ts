@@ -59,11 +59,12 @@ describe('useCandidateOtpLogin', () => {
   });
 
   it('moves to the code step and starts the resend cooldown after sending', async () => {
-    sendCandidateOtp.mockResolvedValue(undefined);
+    sendCandidateOtp.mockResolvedValue('temp-token-value');
     const { result } = renderHook(() => useCandidateOtpLogin('HM-1', vi.fn()));
     fill(result);
     await act(() => result.current.sendCode());
-    expect(sendCandidateOtp).toHaveBeenCalledWith('ada@example.com');
+    expect(sendCandidateOtp).toHaveBeenCalledWith(complete);
+    expect(result.current.tempToken).toBe('temp-token-value');
     expect(result.current.step).toBe('code');
     expect(result.current.cooldown).toBe(RESEND_COOLDOWN_SECONDS);
   });
@@ -80,7 +81,7 @@ describe('useCandidateOtpLogin', () => {
 
   it('blocks resend during the cooldown and allows it once the timer elapses', async () => {
     vi.useFakeTimers();
-    sendCandidateOtp.mockResolvedValue(undefined);
+    sendCandidateOtp.mockResolvedValue('temp-token-value');
     const { result } = renderHook(() => useCandidateOtpLogin('HM-1', vi.fn()));
     fill(result);
     await act(() => result.current.sendCode());
@@ -94,18 +95,20 @@ describe('useCandidateOtpLogin', () => {
       });
     }
     expect(result.current.cooldown).toBe(0);
+    sendCandidateOtp.mockResolvedValue('temp-token-v2');
     await act(() => result.current.resendCode());
     expect(sendCandidateOtp).toHaveBeenCalledTimes(2);
+    expect(result.current.tempToken).toBe('temp-token-v2');
   });
 
-  it('strips non-digits from the code and caps its length', () => {
+  it('strips non-digits from the code and caps its length at six digits', () => {
     const { result } = renderHook(() => useCandidateOtpLogin('HM-1', vi.fn()));
     act(() => result.current.setCode('12-34 56789x'));
-    expect(result.current.code).toBe('12345678');
+    expect(result.current.code).toBe('123456');
   });
 
   it('persists the session and notifies the caller on a valid code', async () => {
-    sendCandidateOtp.mockResolvedValue(undefined);
+    sendCandidateOtp.mockResolvedValue('temp-token-value');
     const session = { token: 't', id: 'c1', firstName: 'Ada', fullName: 'Ada Lovelace', accessCode: 'HM-1' };
     verifyCandidateOtp.mockResolvedValue(session);
     const onAuthenticated = vi.fn();
@@ -115,13 +118,13 @@ describe('useCandidateOtpLogin', () => {
     act(() => result.current.setCode('123456'));
     await act(() => result.current.verifyCode());
 
-    expect(verifyCandidateOtp).toHaveBeenCalledWith(complete, '123456');
+    expect(verifyCandidateOtp).toHaveBeenCalledWith(complete, '123456', 'temp-token-value');
     expect(persistCandidateSession).toHaveBeenCalledWith(session);
     expect(onAuthenticated).toHaveBeenCalledWith(session);
   });
 
   it('keeps the candidate on the code step with an error when verification fails', async () => {
-    sendCandidateOtp.mockResolvedValue(undefined);
+    sendCandidateOtp.mockResolvedValue('temp-token-value');
     verifyCandidateOtp.mockRejectedValue(new Error('Token has expired or is invalid'));
     const onAuthenticated = vi.fn();
     const { result } = renderHook(() => useCandidateOtpLogin('HM-1', onAuthenticated));
@@ -144,8 +147,8 @@ describe('useCandidateOtpLogin', () => {
     expect(verifyCandidateOtp).not.toHaveBeenCalled();
   });
 
-  it('returns to the details step and clears the code when editing details', async () => {
-    sendCandidateOtp.mockResolvedValue(undefined);
+  it('returns to the details step and clears the code and temp token when editing details', async () => {
+    sendCandidateOtp.mockResolvedValue('temp-token-value');
     const { result } = renderHook(() => useCandidateOtpLogin('HM-1', vi.fn()));
     fill(result);
     await act(() => result.current.sendCode());
@@ -153,6 +156,7 @@ describe('useCandidateOtpLogin', () => {
     act(() => result.current.editDetails());
     expect(result.current.step).toBe('details');
     expect(result.current.code).toBe('');
+    expect(result.current.tempToken).toBe('');
     expect(result.current.identity.firstName).toBe('Ada');
     expect(result.current.identity.lastName).toBe('Lovelace');
   });

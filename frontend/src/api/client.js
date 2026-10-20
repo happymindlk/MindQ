@@ -43,16 +43,24 @@ const handleResponse = async (response) => {
 export const api = {
   candidate: {
     /**
-     * @param {{ access_code: string, first_name: string, full_name: string, email: string }} credentials
-     * @param {string} emailVerificationToken Supabase OTP access token for `credentials.email`.
+     * @param {{ access_code: string, email: string }} target
+     * @returns {Promise<{ status: string, temp_token: string }>}
      */
-    login: async (credentials, emailVerificationToken) => {
+    requestCandidateOtp: async (target) => {
+      const res = await fetch(`${API_BASE}/candidate/otp/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(target),
+      });
+      return handleResponse(res);
+    },
+    /**
+     * @param {{ access_code: string, first_name: string, full_name: string, email: string, temp_token: string, otp_code: string }} credentials
+     */
+    login: async (credentials) => {
       const res = await fetch(`${API_BASE}/candidate/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${emailVerificationToken}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(credentials),
       });
       return handleResponse(res);
