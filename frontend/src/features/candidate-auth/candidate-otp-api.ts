@@ -5,7 +5,7 @@ import { supabaseOtp } from '../../lib/supabase-otp-client';
 export interface CandidateIdentity {
   accessCode: string;
   firstName: string;
-  fullName: string;
+  lastName: string;
   email: string;
 }
 
@@ -54,12 +54,15 @@ export async function verifyCandidateOtp(identity: CandidateIdentity, code: stri
   const verificationToken = data.session?.access_token;
   if (!verificationToken) throw new Error('Verification did not return a session. Request a new code.');
 
+  // Backend contract requires both first_name and full_name; derive the
+  // latter from the two fields the candidate actually typed.
+  const fullName = `${identity.firstName.trim()} ${identity.lastName.trim()}`;
   try {
     const res = (await api.candidate.login(
       {
         access_code: identity.accessCode.trim(),
         first_name: identity.firstName.trim(),
-        full_name: identity.fullName.trim(),
+        full_name: fullName,
         email,
       },
       verificationToken,

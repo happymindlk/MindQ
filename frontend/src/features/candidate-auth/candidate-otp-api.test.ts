@@ -17,7 +17,7 @@ import { persistCandidateSession, sendCandidateOtp, verifyCandidateOtp } from '.
 const identity = {
   accessCode: ' HM-ABCDEF-1 ',
   firstName: ' Ada ',
-  fullName: ' Ada Lovelace ',
+  lastName: ' Lovelace ',
   email: ' Ada@Example.com ',
 };
 

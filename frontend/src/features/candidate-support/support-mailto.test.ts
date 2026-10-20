@@ -25,8 +25,8 @@ describe('buildSupportMailto', () => {
     expect(body).toContain('Full Name: Ada Lovelace');
     expect(body).toContain('Package Code: HM-ABCDEF-1');
     expect(body).toContain('Device/Browser: Mozilla/5.0 (iPhone)');
-    expect(body).toContain('Applied Role: (please fill in)');
-    expect(body).toMatch(/attach screenshots/i);
+    expect(body).not.toContain('Applied Role');
+    expect(body).not.toMatch(/screenshots/i);
   });
 
   it('uses placeholders before sign-in when nothing is known', () => {

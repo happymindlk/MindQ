@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, KeyRound, Mail, RotateCw, User, UserRound } from 'lucide-react';
+import { ArrowLeft, ArrowRight, KeyRound, Mail, RotateCw, UserRound } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
@@ -72,7 +72,7 @@ function CandidateLogin({ initialAccessCode }) {
           </h1>
           <p className="text-sm text-muted mt-2 leading-relaxed">
             {step === 'details'
-              ? 'Before you begin, please enter your details below to access your assessment. Please enter your full name as it appears on your application and enter the email address you used when applying.'
+              ? 'Before you begin, please enter your details to access your assessment. Provide your first and last name as they appear on your application, along with your email address.'
               : 'Enter the code we emailed you to continue to your assessment.'}
           </p>
         </div>
@@ -111,13 +111,13 @@ function CandidateLogin({ initialAccessCode }) {
                 required
               />
               <Input
-                label="Full Name"
-                icon={User}
-                placeholder="Name as HR should see it on reports"
-                value={identity.fullName}
-                onChange={(e) => login.updateField('fullName', e.target.value)}
-                autoComplete="name"
-                maxLength={255}
+                label="Last Name"
+                icon={UserRound}
+                placeholder="Last name on your application"
+                value={identity.lastName}
+                onChange={(e) => login.updateField('lastName', e.target.value)}
+                autoComplete="family-name"
+                maxLength={100}
                 disabled={loading}
                 required
               />

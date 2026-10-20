@@ -16,12 +16,12 @@ vi.mock('./candidate-otp-api', () => ({
 
 import { RESEND_COOLDOWN_SECONDS, isIdentityComplete, useCandidateOtpLogin } from './use-candidate-otp-login';
 
-const complete = { accessCode: 'HM-1', firstName: 'Ada', fullName: 'Ada Lovelace', email: 'ada@example.com' };
+const complete = { accessCode: 'HM-1', firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.com' };
 
 function fill(result: { current: ReturnType<typeof useCandidateOtpLogin> }) {
   act(() => {
     result.current.updateField('firstName', complete.firstName);
-    result.current.updateField('fullName', complete.fullName);
+    result.current.updateField('lastName', complete.lastName);
     result.current.updateField('email', complete.email);
   });
 }
@@ -38,7 +38,7 @@ describe('isIdentityComplete', () => {
   it.each([
     ['access code', { ...complete, accessCode: '  ' }],
     ['first name', { ...complete, firstName: '   ' }],
-    ['full name', { ...complete, fullName: '' }],
+    ['last name', { ...complete, lastName: '' }],
     ['valid email', { ...complete, email: 'ada@' }],
   ])('requires a %s', (_label, identity) => {
     expect(isIdentityComplete(identity)).toBe(false);
@@ -154,5 +154,6 @@ describe('useCandidateOtpLogin', () => {
     expect(result.current.step).toBe('details');
     expect(result.current.code).toBe('');
     expect(result.current.identity.firstName).toBe('Ada');
+    expect(result.current.identity.lastName).toBe('Lovelace');
   });
 });

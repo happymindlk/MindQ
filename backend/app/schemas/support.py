@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field
 class SupportSubmitRequest(BaseModel):
     details: str = Field(min_length=1, max_length=4000)
     candidate_id: Optional[UUID] = None
+    # No dedicated column: folded into `details` on submit so pre-login
+    # reports (no candidate_id yet) remain triageable by package.
+    package_code: Optional[str] = Field(default=None, max_length=36)
     path: Optional[str] = None
     user_agent: Optional[str] = None
 
