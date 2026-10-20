@@ -43,14 +43,17 @@ def clean_recipient_email(value: object) -> str:
     """
     if value is None:
         return ""
-    raw = str(value).strip()
+    # Trailing ;,. defeats parseaddr ("Name <a@b.com>;") and must be removed
+    # before extraction so the whole address is kept, not a later substring.
+    raw = str(value).strip().rstrip(";,.")
     if not raw:
         return ""
     _, parsed = parseaddr(raw)
-    candidate = (parsed or raw).strip().strip("<>").strip().strip("\"'").rstrip(";,")
-    match = _EMAIL_RE.search(candidate) or _EMAIL_RE.search(raw)
-    if match:
-        return match.group(0).rstrip(";,.")
+    candidate = (parsed or raw).strip().strip("<>").strip().strip("\"'").rstrip(";,.")
+    # fullmatch: search() would keep a suffix when the local part contains RFC
+    # atext this class omits (o'reilly@example.com -> reilly@example.com).
+    if _EMAIL_RE.fullmatch(candidate):
+        return candidate
     return candidate if "@" in candidate else ""
 
 
