@@ -104,7 +104,7 @@ async def _get(origin: str | None = ORIGIN):
 
 
 @pytest.mark.asyncio
-async def test_dropped_prepared_statement_returns_503_with_cors(override_deps):
+async def test_dropped_prepared_statement_returns_503_with_cors(override_deps, caplog):
     override_deps(
         ProgrammingError(
             "SELECT 1",
@@ -112,10 +112,21 @@ async def test_dropped_prepared_statement_returns_503_with_cors(override_deps):
             _PreparedStatementDropped('prepared statement "__asyncpg_stmt_3e__" does not exist'),
         )
     )
-    res = await _get()
+    with caplog.at_level("ERROR", logger="app.main"):
+        res = await _get()
     assert res.status_code == 503
     assert res.headers["access-control-allow-origin"] == ORIGIN
     assert "retry" in res.json()["detail"].lower()
+    # The underlying driver message must reach the logs so schema/pooler
+    # failures name the exact PostgreSQL object instead of only the 503.
+    db_records = [r for r in caplog.records if r.name == "app.main"]
+    assert db_records
+    assert any(
+        'prepared statement "__asyncpg_stmt_3e__" does not exist' in r.getMessage()
+        or 'prepared statement "__asyncpg_stmt_3e__" does not exist'
+        in getattr(r, "driver_error_message", "")
+        for r in db_records
+    )
 
 
 @pytest.mark.asyncio

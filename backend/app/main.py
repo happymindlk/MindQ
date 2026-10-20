@@ -211,15 +211,25 @@ async def database_error_handler(request: Request, exc: DBAPIError):
         JSON 503 response; CORS headers are applied by ``CORSMiddleware``.
     """
     request_id = getattr(request.state, "request_id", None)
+    orig = exc.orig
+    # Surface the raw PostgreSQL/driver message (table/column name, SQLSTATE)
+    # so schema mismatches are diagnosable from uvicorn.log instead of only
+    # seeing the generic 503. Statement parameters are deliberately excluded.
     logger.exception(
-        "database_error",
+        "database_error: %s",
+        orig,
         extra={
             "event": "database_error",
             "request_id": request_id,
             "path": request.url.path,
             "method": request.method,
             "connection_invalidated": exc.connection_invalidated,
-            "driver_error": type(exc.orig).__name__ if exc.orig else None,
+            "driver_error": type(orig).__name__ if orig else None,
+            "driver_error_message": str(orig) if orig else None,
+            "pg_sqlstate": getattr(orig, "sqlstate", None),
+            "pg_detail": getattr(orig, "detail", None),
+            "pg_hint": getattr(orig, "hint", None),
+            "statement": exc.statement,
         },
     )
     return JSONResponse(
