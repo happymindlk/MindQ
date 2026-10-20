@@ -28,6 +28,7 @@ class JsonFormatter(logging.Formatter):
             "method",
             "driver_error",
             "driver_error_message",
+            "sqlalchemy_error",
             "pg_sqlstate",
             "pg_detail",
             "pg_hint",

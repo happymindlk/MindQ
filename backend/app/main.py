@@ -6,7 +6,7 @@ import re
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from app.api.v1.beta_access import router as beta_access_router
 from app.api.v1.invites import router as invites_router
@@ -200,36 +200,47 @@ def _cors_error_headers(request: Request) -> dict[str, str]:
 
 
 @app.exception_handler(DBAPIError)
-async def database_error_handler(request: Request, exc: DBAPIError):
+@app.exception_handler(SQLAlchemyError)
+async def database_error_handler(request: Request, exc: SQLAlchemyError):
     """Map driver / pooler failures to a retryable 503 instead of a 500.
+
+    Registered for both ``DBAPIError`` (the usual driver wrap) and its
+    ``SQLAlchemyError`` base so non-DBAPI SQLAlchemy failures (pool,
+    interface) also surface as 503 with the raw error in the logs rather
+    than falling through to the generic 500 handler. FastAPI's MRO lookup
+    still prefers this handler for ``DBAPIError`` subclasses such as
+    ``ProgrammingError`` (e.g. an undefined column from a stale schema).
 
     Args:
         request: Incoming request.
-        exc: SQLAlchemy-wrapped DBAPI error.
+        exc: SQLAlchemy error, usually wrapping a DBAPI/driver error.
 
     Returns:
         JSON 503 response; CORS headers are applied by ``CORSMiddleware``.
     """
     request_id = getattr(request.state, "request_id", None)
-    orig = exc.orig
-    # Surface the raw PostgreSQL/driver message (table/column name, SQLSTATE)
-    # so schema mismatches are diagnosable from uvicorn.log instead of only
-    # seeing the generic 503. Statement parameters are deliberately excluded.
-    logger.exception(
-        "database_error: %s",
-        orig,
+    orig = getattr(exc, "orig", None)
+    # The type names and raw driver text go in the message itself, not only
+    # `extra`: the DEBUG text formatter ignores `extra`, so schema mismatches
+    # must be diagnosable from a plain uvicorn.log line. Statement parameters
+    # are deliberately excluded.
+    logger.error(
+        f"[DB ERROR] {type(exc).__name__}: {exc} "
+        f"| driver={type(orig).__name__ if orig else None}: {orig}",
+        exc_info=exc,
         extra={
             "event": "database_error",
             "request_id": request_id,
             "path": request.url.path,
             "method": request.method,
-            "connection_invalidated": exc.connection_invalidated,
+            "connection_invalidated": getattr(exc, "connection_invalidated", None),
             "driver_error": type(orig).__name__ if orig else None,
             "driver_error_message": str(orig) if orig else None,
+            "sqlalchemy_error": str(exc),
             "pg_sqlstate": getattr(orig, "sqlstate", None),
             "pg_detail": getattr(orig, "detail", None),
             "pg_hint": getattr(orig, "hint", None),
-            "statement": exc.statement,
+            "statement": getattr(exc, "statement", None),
         },
     )
     return JSONResponse(

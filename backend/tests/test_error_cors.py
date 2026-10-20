@@ -121,12 +121,15 @@ async def test_dropped_prepared_statement_returns_503_with_cors(override_deps, c
     # failures name the exact PostgreSQL object instead of only the 503.
     db_records = [r for r in caplog.records if r.name == "app.main"]
     assert db_records
+    assert any(r.getMessage().startswith("[DB ERROR]") for r in db_records)
+    assert any("ProgrammingError" in r.getMessage() for r in db_records)
     assert any(
         'prepared statement "__asyncpg_stmt_3e__" does not exist' in r.getMessage()
         or 'prepared statement "__asyncpg_stmt_3e__" does not exist'
         in getattr(r, "driver_error_message", "")
         for r in db_records
     )
+    assert any(getattr(r, "sqlalchemy_error", "") for r in db_records)
 
 
 @pytest.mark.asyncio

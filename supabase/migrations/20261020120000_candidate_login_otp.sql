@@ -43,7 +43,16 @@ begin
     end if;
 end $$;
 
+-- Every column the ORM model (backend/app/models/candidate_login_challenge.py)
+-- expects, added explicitly so a legacy-shaped live table is upgraded in
+-- place. Live QA was missing attempt_count (and, in earlier reports,
+-- locked_until) while id/email/access_code/otp_hash already existed;
+-- ADD COLUMN IF NOT EXISTS makes each line a no-op when already present.
 alter table public.candidate_login_challenges
+    add column if not exists id uuid default gen_random_uuid(),
+    add column if not exists email text,
+    add column if not exists access_code text,
+    add column if not exists otp_hash text not null default '',
     add column if not exists attempt_count integer not null default 0,
     add column if not exists locked_until timestamptz,
     add column if not exists consumed_at timestamptz,
@@ -53,7 +62,10 @@ alter table public.candidate_login_challenges
     drop column if exists max_attempts,
     drop column if exists temp_token,
     drop column if exists first_name,
-    drop column if exists full_name;
+    drop column if exists full_name,
+    drop column if exists failed_attempts,
+    drop column if exists ip_address,
+    drop column if exists user_agent;
 
 -- Normalize legacy varchar columns to the text + check shape above.
 alter table public.candidate_login_challenges
