@@ -152,6 +152,28 @@ async def test_admin_otp_falls_back_to_log_in_qa(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
+async def test_admin_otp_raises_for_debug_false_default_environment(monkeypatch, caplog):
+    """Existing production deploys set DEBUG=false and leave ENVIRONMENT unset."""
+    monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", "development")
+    monkeypatch.setattr("app.services.email.settings.DEBUG", False)
+
+    async def _rejected(*_args, **_kwargs):
+        raise RuntimeError("SES rejected the email: MessageRejected: not verified")
+
+    monkeypatch.setattr(
+        "app.services.email.send_transactional_email_async", _rejected
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="app.email"):
+        with pytest.raises(RuntimeError, match="MessageRejected"):
+            await send_admin_otp_email("ops@mindq.test", "482916")
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "482916" not in logged
+    assert "QA/STAGING OTP FALLBACK" not in logged
+
+
+@pytest.mark.asyncio
 async def test_admin_otp_raises_in_production(monkeypatch):
     monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", "production")
     monkeypatch.setattr("app.services.email.settings.DEBUG", False)

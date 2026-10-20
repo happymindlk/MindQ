@@ -1,3 +1,6 @@
+# Dependencies. frontend/ ignores its own tree; a root install must not be committed.
+node_modules/
+
 # OS
 .DS_Store
 Thumbs.db

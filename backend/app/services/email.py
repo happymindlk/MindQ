@@ -466,15 +466,29 @@ def render_admin_otp_html(otp: str) -> str:
 </body></html>"""
 
 
-def _otp_log_fallback_enabled() -> bool:
-    """True when a failed SES OTP may be logged for QA/staging testing.
+# Opt-in labels only. "development" is the Settings default, so it must not
+# count: existing deploys set DEBUG=false and never set ENVIRONMENT.
+_OTP_LOG_FALLBACK_ENVIRONMENTS = frozenset({"qa", "staging", "test"})
 
-    Non-production means ``ENVIRONMENT != 'production'`` or ``DEBUG`` is on.
-    In production (``ENVIRONMENT=production`` and ``DEBUG=false``) the code
-    is never written to logs and delivery failures keep raising.
+
+def _otp_log_fallback_enabled() -> bool:
+    """True only for local debug or an explicit QA/staging environment.
+
+    Fail closed. ``DEBUG=false`` is the production contract, and
+    ``assert_production_ready`` does not require ``ENVIRONMENT``. The default
+    ``development`` value therefore must not swallow SES failures or write a
+    live admin OTP to logs. ``settings.is_production`` disables the fallback
+    even when DEBUG is on.
+
+    Returns:
+        Whether a failed admin OTP email may be logged and swallowed.
     """
-    environment = (getattr(settings, "ENVIRONMENT", "") or "").strip().lower()
-    return environment != "production" or bool(getattr(settings, "DEBUG", False))
+    if settings.is_production:
+        return False
+    environment = (settings.ENVIRONMENT or "").strip().lower()
+    if environment in _OTP_LOG_FALLBACK_ENVIRONMENTS:
+        return True
+    return bool(settings.DEBUG)
 
 
 def _log_admin_otp_fallback(to_email: str, otp: str, exc: BaseException) -> None:
@@ -490,7 +504,7 @@ def _log_admin_otp_fallback(to_email: str, otp: str, exc: BaseException) -> None
             "",
             "=" * 70,
             "  !!!  SES DELIVERY FAILED - QA/STAGING OTP FALLBACK  !!!",
-            "  (ENVIRONMENT != 'production' or DEBUG - never enable in prod)",
+            "  (DEBUG or ENVIRONMENT=qa|staging|test - never in production)",
             "=" * 70,
             f"  Recipient : {to_email}",
             f"  OTP CODE  : {otp}",
@@ -506,11 +520,14 @@ def _log_admin_otp_fallback(to_email: str, otp: str, exc: BaseException) -> None
 async def send_admin_otp_email(to_email: str, otp: str) -> None:
     """Deliver an admin sign-in code through the configured transactional mailer.
 
-    Production: delivery failures raise so the caller can discard the
-    challenge instead of issuing a temp token nobody can complete.
+    ``ENVIRONMENT=production``, and ``DEBUG=false`` unless ``ENVIRONMENT`` is
+    explicitly qa, staging, or test: delivery failures raise so the caller
+    can discard the challenge instead of issuing a temp token nobody can
+    complete. The default ``ENVIRONMENT=development`` does not enable logging.
 
-    QA/staging (non-production): SES failures (e.g. sandbox ``MessageRejected``
-    for an unverified recipient) are caught, the code is logged in a prominent
+    Explicit QA/staging (``ENVIRONMENT`` of qa, staging, or test) and local
+    ``DEBUG=true``: SES failures (e.g. sandbox ``MessageRejected`` for an
+    unverified recipient) are caught, the code is logged in a prominent
     banner for testers, and the function returns successfully so the
     ``admin_login_challenges`` transaction is committed, not rolled back.
 

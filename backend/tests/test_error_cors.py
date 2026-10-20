@@ -7,7 +7,7 @@ from sqlalchemy.exc import ProgrammingError
 
 from app.auth import HRUserContext, get_current_ops_user
 from app.database import engine, get_db
-from app.main import allowed_origins, app, is_origin_allowed
+from app.main import _build_allowed_origins, allowed_origins, app, is_origin_allowed
 
 ORIGIN = "https://mindq.pages.dev"
 
@@ -30,10 +30,42 @@ def test_allowed_origins_cover_qa_pages_and_localhost(origin):
 
 @pytest.mark.parametrize(
     "origin",
-    [None, "", "https://evil.example", "http://qa.app.mindqtalent.com"],
+    [
+        None,
+        "",
+        "https://evil.example",
+        "http://qa.app.mindqtalent.com",
+        # Shared Cloudflare Pages projects are not our zone.
+        "https://evil.pages.dev",
+        "https://attacker.pages.dev",
+        "https://notmindq.pages.dev",
+    ],
 )
 def test_disallowed_origins_are_rejected(origin):
     assert not is_origin_allowed(origin)
+
+
+def test_production_allowlist_is_env_scoped(monkeypatch):
+    """DEBUG=false must not credential the dev QA/localhost defaults."""
+    monkeypatch.setattr("app.main.settings.DEBUG", False)
+    monkeypatch.setattr("app.main.settings.CORS_ORIGINS", "https://app.example.com")
+    monkeypatch.setattr("app.main.settings.FRONTEND_URL", "")
+    origins = _build_allowed_origins()
+    assert "https://app.example.com" in origins
+    for origin in (
+        "https://qa.app.mindqtalent.com",
+        "https://mindq.pages.dev",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ):
+        assert origin not in origins
+    # Zone regex still covers our Pages project and mindqtalent hosts.
+    assert is_origin_allowed("https://preview-123.mindq.pages.dev")
+    assert is_origin_allowed("https://mindq.pages.dev")
+    assert not is_origin_allowed("https://evil.pages.dev")
+    assert not is_origin_allowed("http://localhost:5173")
 
 
 def test_explicit_allowlist_contains_required_origins():

@@ -53,7 +53,8 @@ app = FastAPI(
 # CORS / origin resolution (single source of truth for middleware + errors)
 # ---------------------------------------------------------------------------
 
-#: Origins that must always work, regardless of deployment env.
+#: Dev/QA origins merged only while DEBUG is on. DEBUG=false keeps the
+#: allowlist env-scoped (CORS_ORIGINS + FRONTEND_URL) plus the zone regex.
 DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
     "https://qa.app.mindqtalent.com",
     "https://mindq.pages.dev",
@@ -63,11 +64,12 @@ DEFAULT_ALLOWED_ORIGINS: tuple[str, ...] = (
     "http://127.0.0.1:3000",
 )
 
-#: Any https subdomain of our two hosted zones, e.g.
+#: Hosts we control. Cloudflare Pages is shared, so this is ``*.mindq.pages.dev``
+#: (and the apex project), not every ``*.pages.dev`` site. Examples:
 #: ``https://qa.app.mindqtalent.com``, ``https://feat-x.mindq.pages.dev``.
 ALLOW_ORIGIN_REGEX = (
     r"^https://.*\.mindqtalent\.com$"
-    r"|^https://.*\.pages\.dev$"
+    r"|^https://([a-z0-9-]+\.)*mindq\.pages\.dev$"
 )
 
 _allow_origin_pattern = re.compile(ALLOW_ORIGIN_REGEX)
@@ -117,7 +119,11 @@ def _coerce_origins(value: object) -> list[str]:
 
 
 def _build_allowed_origins() -> list[str]:
-    """Unified allowlist: settings (list or CSV) + FRONTEND_URL + defaults."""
+    """Unified allowlist: settings (list or CSV) + FRONTEND_URL.
+
+    Dev defaults (QA host, Pages apex, localhost) are merged only when
+    ``DEBUG`` is true so a production boot stays env-scoped.
+    """
     candidates: list[str] = []
     # `cors_origins_list` already normalizes list/CSV; reading the raw value
     # too keeps this correct if settings are monkeypatched with either shape.
@@ -125,7 +131,11 @@ def _build_allowed_origins() -> list[str]:
     if hasattr(settings, "cors_origins_list"):
         candidates.extend(_coerce_origins(settings.cors_origins_list))
     candidates.extend(_coerce_origins(getattr(settings, "FRONTEND_URL", None)))
-    candidates.extend(DEFAULT_ALLOWED_ORIGINS)
+    # DEBUG=false is the production contract. Always merging QA and localhost
+    # would credential those origins on every deploy and bypass the check that
+    # rejects localhost-only / wildcard CORS_ORIGINS.
+    if settings.DEBUG:
+        candidates.extend(DEFAULT_ALLOWED_ORIGINS)
 
     seen: set[str] = set()
     origins: list[str] = []
@@ -147,14 +157,14 @@ def is_origin_allowed(origin: str | None) -> bool:
 
     Returns:
         True for an exact allowlist match or a ``mindqtalent.com`` /
-        ``pages.dev`` https-subdomain regex match.
+        ``mindq.pages.dev`` https-host regex match.
     """
     if not origin:
         return False
     normalized = _normalize_origin(origin)
-    # Rebuild from live settings so env / test overrides are honoured, not
-    # only the import-time snapshot used to configure CORSMiddleware.
-    if normalized in allowed_origins or normalized in _build_allowed_origins():
+    # Live settings, not the import-time snapshot. A DEBUG=false process must
+    # be able to drop the dev defaults that snapshot was built with.
+    if normalized in _build_allowed_origins():
         return True
     return _allow_origin_pattern.fullmatch(normalized) is not None
 

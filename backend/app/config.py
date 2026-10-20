@@ -11,8 +11,10 @@ class Settings(BaseSettings):
     # (assert_production_ready refuses weak secrets / localhost CORS when False).
     DEBUG: bool = True
     # Deployment environment: "development" | "staging" | "qa" | "production".
-    # Non-production enables QA fallbacks (e.g. logging a failed-SES admin OTP
-    # to the server log). Production MUST set ENVIRONMENT=production + DEBUG=false.
+    # Defaults to development and is not required at boot. A failed-SES admin
+    # OTP is logged only for DEBUG=true or an explicit qa/staging/test value.
+    # DEBUG=false (the production contract) must not log codes. Production
+    # deploys should also set ENVIRONMENT=production.
     ENVIRONMENT: str = "development"
 
     # Postgres (async driver). Defaults to the local Supabase stack.
