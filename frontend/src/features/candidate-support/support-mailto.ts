@@ -17,7 +17,7 @@ function field(value: string | null): string {
 
 /**
  * Build a `mailto:` link pre-filled with everything the candidate already has,
- * leaving explicit placeholders for what only they know (role, description).
+ * leaving an explicit placeholder only for the issue description.
  *
  * @param context - Known candidate/session details.
  * @returns RFC 6068 mailto URL with encoded subject and body.
@@ -27,14 +27,11 @@ export function buildSupportMailto(context: SupportContext): string {
   const body = [
     `Full Name: ${field(context.fullName)}`,
     `Package Code: ${field(context.packageCode)}`,
-    `Applied Role: ${PLACEHOLDER}`,
     `Device/Browser: ${context.userAgent || PLACEHOLDER}`,
     `Page: ${context.pagePath || PLACEHOLDER}`,
     '',
     'What happened:',
     PLACEHOLDER,
-    '',
-    'Screenshots: please attach screenshots of the issue to this email.',
   ].join('\r\n');
   return `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
@@ -43,7 +40,11 @@ export function buildSupportMailto(context: SupportContext): string {
 export function readSupportContext(): SupportContext {
   return {
     fullName: localStorage.getItem('candidateName'),
-    packageCode: localStorage.getItem('candidateAccessCode'),
+    // Pre-login candidates have no persisted session yet, but arrived via an
+    // invite link carrying the package code in the URL.
+    packageCode:
+      localStorage.getItem('candidateAccessCode') ||
+      new URLSearchParams(window.location.search).get('code'),
     userAgent: navigator.userAgent,
     pagePath: window.location.pathname,
   };

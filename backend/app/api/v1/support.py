@@ -37,10 +37,15 @@ async def submit_support_ticket(
         else:
             candidate_id = None
 
+    details = body.details.strip()
+    package_code = (body.package_code or "").strip()
+    if package_code:
+        details = f"[Package: {package_code}] {details}"
+
     ticket = SupportTicket(
         corporate_id=corporate_id,
         candidate_id=candidate_id,
-        details=body.details.strip(),
+        details=details,
         path=body.path,
         user_agent=body.user_agent,
     )

@@ -25,7 +25,7 @@ export function isIdentityComplete(identity: CandidateIdentity): boolean {
   return (
     identity.accessCode.trim().length > 0 &&
     identity.firstName.trim().length > 0 &&
-    identity.fullName.trim().length > 0 &&
+    identity.lastName.trim().length > 0 &&
     EMAIL_PATTERN.test(normalizeEmail(identity.email))
   );
 }
@@ -44,7 +44,7 @@ export function useCandidateOtpLogin(
   const [identity, setIdentity] = useState<CandidateIdentity>({
     accessCode: initialAccessCode,
     firstName: '',
-    fullName: '',
+    lastName: '',
     email: '',
   });
   const [code, setCodeState] = useState('');
