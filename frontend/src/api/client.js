@@ -43,11 +43,11 @@ const handleResponse = async (response) => {
 export const api = {
   candidate: {
     /**
-     * @param {{ access_code: string, email: string }} target
+     * @param {{ access_code: string, email: string, first_name: string, full_name: string }} target
      * @returns {Promise<{ status: string, temp_token: string }>}
      */
-    requestCandidateOtp: async (target) => {
-      const res = await fetch(`${API_BASE}/candidate/otp/request`, {
+    sendCandidateOtp: async (target) => {
+      const res = await fetch(`${API_BASE}/candidates/auth/otp/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(target),
@@ -57,8 +57,8 @@ export const api = {
     /**
      * @param {{ access_code: string, first_name: string, full_name: string, email: string, temp_token: string, otp_code: string }} credentials
      */
-    login: async (credentials) => {
-      const res = await fetch(`${API_BASE}/candidate/login`, {
+    verifyCandidateOtp: async (credentials) => {
+      const res = await fetch(`${API_BASE}/candidates/auth/otp/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(credentials),

@@ -80,7 +80,7 @@ def test_email_body_is_the_admin_verification_sentence():
     html = render_admin_otp_html("123456")
     assert "Admin Portal" in html
     assert "123456" in html
-    assert "only work for 5 minutes" in html
+    assert "The code will expire in 5 minutes." in html
     assert "<script>" not in render_admin_otp_html("<script>")
 
 

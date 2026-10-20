@@ -125,7 +125,7 @@ async def test_login_rate_limit_returns_429(async_client, monkeypatch):
         raise CandidateOtpError(400, "Invalid access code")
 
     monkeypatch.setattr(
-        "app.api.v1.candidate.verify_candidate_challenge",
+        "app.api.v1.candidate_auth.verify_candidate_challenge",
         fake_verify,
     )
 
@@ -138,9 +138,11 @@ async def test_login_rate_limit_returns_429(async_client, monkeypatch):
         "otp_code": "123456",
     }
     for _ in range(2):
-        res = await async_client.post("/api/v1/candidate/login", json=payload)
+        res = await async_client.post(
+            "/api/v1/candidates/auth/otp/verify", json=payload
+        )
         assert res.status_code == 400
-    res = await async_client.post("/api/v1/candidate/login", json=payload)
+    res = await async_client.post("/api/v1/candidates/auth/otp/verify", json=payload)
     assert res.status_code == 429
     login_limiter.reset()
     monkeypatch.setattr(login_limiter, "max_requests", 10)

@@ -13,8 +13,14 @@ from app.main import app
 from app.security import candidate_otp_limiter, candidate_otp_verify_limiter, login_limiter
 from app.services.candidate_otp import CandidateOtpError
 
-LOGIN_URL = "/api/v1/candidate/login"
-REQUEST_URL = "/api/v1/candidate/otp/request"
+LOGIN_URL = "/api/v1/candidates/auth/otp/verify"
+REQUEST_URL = "/api/v1/candidates/auth/otp/send"
+SEND_PAYLOAD = {
+    "first_name": "Ada",
+    "full_name": "Ada Lovelace",
+    "email": "ada@example.com",
+    "access_code": "HM-ABCDEF-1",
+}
 PAYLOAD = {
     "first_name": "Ada",
     "full_name": "Ada Lovelace",
@@ -63,8 +69,8 @@ def _isolate(monkeypatch):
         if kwargs["temp_token"].startswith("bad-token"):
             raise CandidateOtpError(401, "Invalid or expired verification session")
 
-    monkeypatch.setattr("app.api.v1.candidate.CandidateService.login", fake_login)
-    monkeypatch.setattr("app.api.v1.candidate.verify_candidate_challenge", fake_verify)
+    monkeypatch.setattr("app.api.v1.candidate_auth.CandidateService.login", fake_login)
+    monkeypatch.setattr("app.api.v1.candidate_auth.verify_candidate_challenge", fake_verify)
     yield {"login": calls, "verify": verify_calls}
     app.dependency_overrides.pop(get_db, None)
     for limiter in (login_limiter, candidate_otp_limiter, candidate_otp_verify_limiter):
@@ -133,10 +139,8 @@ async def test_request_code_returns_temp_token(async_client, monkeypatch):
         captured["email"] = email
         return CandidateOtpChallengeResponse(status="otp_required", temp_token="t" * 24)
 
-    monkeypatch.setattr("app.api.v1.candidate.request_candidate_otp", fake_request)
-    res = await async_client.post(
-        REQUEST_URL, json={"access_code": "HM-ABCDEF-1", "email": "ada@example.com"}
-    )
+    monkeypatch.setattr("app.api.v1.candidate_auth.request_candidate_otp", fake_request)
+    res = await async_client.post(REQUEST_URL, json=SEND_PAYLOAD)
     assert res.status_code == 200
     assert res.json() == {"status": "otp_required", "temp_token": "t" * 24}
     assert captured == {"access_code": "HM-ABCDEF-1", "email": "ada@example.com"}
@@ -147,8 +151,16 @@ async def test_request_code_maps_otp_errors(async_client, monkeypatch):
     async def fake_request(_db, *_args):
         raise CandidateOtpError(429, "Too many verification codes were requested. Try again later.")
 
-    monkeypatch.setattr("app.api.v1.candidate.request_candidate_otp", fake_request)
-    res = await async_client.post(
-        REQUEST_URL, json={"access_code": "HM-ABCDEF-1", "email": "ada@example.com"}
-    )
+    monkeypatch.setattr("app.api.v1.candidate_auth.request_candidate_otp", fake_request)
+    res = await async_client.post(REQUEST_URL, json=SEND_PAYLOAD)
     assert res.status_code == 429
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url",
+    ["/api/v1/candidate/login", "/api/v1/candidate/otp/request"],
+)
+async def test_legacy_candidate_auth_routes_are_gone(async_client, url):
+    res = await async_client.post(url, json={})
+    assert res.status_code == 404

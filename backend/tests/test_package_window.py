@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from app.api.v1.candidate import _raise_integrity
 from app.exceptions import PackageClosedError, PackageNotOpenError
-from app.schemas.candidate import CandidateLogin
+from app.schemas.candidate import CandidateAuthOtpVerifyRequest
 from app.schemas.client_package import (
     AdminPackageUpdateRequest,
     DraftPackageRequest,
@@ -247,7 +247,7 @@ def _package(**window):
 
 
 def _login():
-    return CandidateLogin(
+    return CandidateAuthOtpVerifyRequest(
         first_name="Ada",
         full_name="Ada Lovelace",
         email="ada@example.com",

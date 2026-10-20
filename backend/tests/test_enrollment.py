@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.schemas.candidate import CandidateLogin, strip_answer_keys
+from app.schemas.candidate import CandidateAuthOtpVerifyRequest, strip_answer_keys
 from app.services.candidate_service import CandidateService
 
 
@@ -58,7 +58,7 @@ async def test_package_code_rejects_uninvited_when_enrollment_closed():
         allow_open_enrollment=False,
     )
     session = _FakeSession(package=package, candidate=None)
-    login = CandidateLogin(
+    login = CandidateAuthOtpVerifyRequest(
         first_name="Ada",
         full_name="Ada Lovelace",
         email="ada@example.com",
@@ -81,7 +81,7 @@ async def test_package_code_open_enrollment_creates_candidate():
         allow_open_enrollment=True,
     )
     session = _FakeSession(package=package, candidate=None)
-    login = CandidateLogin(
+    login = CandidateAuthOtpVerifyRequest(
         first_name="Ada",
         full_name="Ada Lovelace",
         email="ada@example.com",

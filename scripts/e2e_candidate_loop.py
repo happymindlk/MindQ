@@ -105,8 +105,13 @@ async def main() -> int:
 
         candidate_email = f"e2e-{uuid.uuid4().hex[:8]}@example.com"
         otp_request = await client.post(
-            "/api/v1/candidate/otp/request",
-            json={"access_code": access_code, "email": candidate_email},
+            "/api/v1/candidates/auth/otp/send",
+            json={
+                "access_code": access_code,
+                "email": candidate_email,
+                "first_name": "E2E",
+                "full_name": "E2E Candidate",
+            },
         )
         otp_request.raise_for_status()
         temp_token = otp_request.json()["temp_token"]
@@ -115,7 +120,7 @@ async def main() -> int:
         ).strip()
 
         login = await client.post(
-            "/api/v1/candidate/login",
+            "/api/v1/candidates/auth/otp/verify",
             json={
                 "first_name": "E2E",
                 "full_name": "E2E Candidate",

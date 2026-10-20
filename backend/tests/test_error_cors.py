@@ -129,6 +129,19 @@ async def test_unhandled_error_returns_500_with_cors(override_deps):
 
 
 @pytest.mark.asyncio
+async def test_unhandled_error_from_qa_origin_returns_500_with_cors(override_deps):
+    override_deps(RuntimeError("boom"))
+    res = await _get(origin="https://qa.app.mindqtalent.com")
+    assert res.status_code == 500
+    assert (
+        res.headers["access-control-allow-origin"]
+        == "https://qa.app.mindqtalent.com"
+    )
+    assert res.headers["access-control-allow-credentials"] == "true"
+    assert res.json()["detail"] == "Internal server error"
+
+
+@pytest.mark.asyncio
 async def test_unhandled_error_does_not_reflect_unknown_origin(override_deps):
     override_deps(RuntimeError("boom"))
     res = await _get(origin="https://evil.example")

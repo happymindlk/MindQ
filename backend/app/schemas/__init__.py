@@ -7,7 +7,8 @@ from .package import (
     AssessmentResponse,
 )
 from .candidate import (
-    CandidateLogin,
+    CandidateAuthOtpSendRequest,
+    CandidateAuthOtpVerifyRequest,
     CandidateInviteRequest,
     CandidateInviteResponse,
     CandidateResponse,
@@ -44,7 +45,8 @@ __all__ = [
     "PackageResponse",
     "AssessmentIn",
     "AssessmentResponse",
-    "CandidateLogin",
+    "CandidateAuthOtpSendRequest",
+    "CandidateAuthOtpVerifyRequest",
     "CandidateInviteRequest",
     "CandidateInviteResponse",
     "CandidateResponse",

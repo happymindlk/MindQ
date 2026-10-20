@@ -11,7 +11,7 @@ from app.models.package import Package
 from app.models.assessment import Assessment
 from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
-from app.schemas.candidate import CandidateLogin
+from app.schemas.candidate import CandidateAuthOtpVerifyRequest
 from decimal import Decimal
 
 from app.schemas.response import ResponseSave
@@ -159,7 +159,9 @@ def _utcnow() -> datetime:
 
 class CandidateService:
     @staticmethod
-    async def login(session: AsyncSession, login_data: CandidateLogin) -> tuple[Candidate, bool]:
+    async def login(
+        session: AsyncSession, login_data: CandidateAuthOtpVerifyRequest
+    ) -> tuple[Candidate, bool]:
         """Authenticate or register a candidate for a package.
 
         Returns:
