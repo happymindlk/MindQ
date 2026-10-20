@@ -1,4 +1,3 @@
-import { supabaseOtp } from './supabase-otp-client';
 import {
   clearClientSession,
   readClientSession,
@@ -52,36 +51,45 @@ async function clientFetch(path, fallback) {
  * (psychometric modules stripped) and tenant-scoped by the client JWT.
  */
 export const clientApi = {
+  /**
+   * Ask the backend to email a one-time code (FastAPI + AWS SES; no
+   * Supabase Auth email is involved).
+   *
+   * @param {string} email Registered corporate email.
+   * @returns {Promise<string>} Temp token that must accompany the code at verify.
+   */
   async requestOtp(email) {
-    const { error } = await supabaseOtp.auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: false },
+    const res = await fetch(`${API_BASE}/api/v1/hr/auth/otp/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
     });
-    if (error) throw new Error(error.message);
+    if (!res.ok) throw new Error(await readError(res, 'Could not send code'));
+    const payload = await res.json();
+    if (!payload?.temp_token) {
+      throw new Error('Verification did not return a session. Request a new code.');
+    }
+    return payload.temp_token;
   },
 
   /**
-   * Verify the emailed code, then exchange the short-lived Supabase token for a
-   * client JWT. The Supabase session is discarded immediately afterwards.
+   * Verify the emailed code against the backend challenge. The response is
+   * the backend-minted client JWT session directly; there is no Supabase
+   * session to exchange or discard.
    *
+   * @param {string} email Corporate email the code was sent to.
+   * @param {string} token Six-digit code from the email.
+   * @param {string} tempToken Temp token returned by {@link clientApi.requestOtp}.
    * @returns {Promise<import('../pages/client/client-session').ClientSession>}
    */
-  async verifyOtp(email, token) {
-    const { data, error } = await supabaseOtp.auth.verifyOtp({ email, token, type: 'email' });
-    if (error) throw new Error(error.message);
-    const supabaseToken = data.session?.access_token;
-    if (!supabaseToken) throw new Error('Verification did not return a session');
-
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/client/auth/session`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${supabaseToken}` },
-      });
-      if (!res.ok) throw new Error(await readError(res, 'Could not start client session'));
-      return writeClientSession(await res.json());
-    } finally {
-      await supabaseOtp.auth.signOut({ scope: 'local' });
-    }
+  async verifyOtp(email, token, tempToken) {
+    const res = await fetch(`${API_BASE}/api/v1/hr/auth/otp/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, otp_code: token, temp_token: tempToken }),
+    });
+    if (!res.ok) throw new Error(await readError(res, 'Could not start client session'));
+    return writeClientSession(await res.json());
   },
 
   signOut() {

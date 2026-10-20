@@ -29,7 +29,7 @@ export function readClientSession() {
 }
 
 /**
- * Persist the exchange response from `POST /client/auth/session`.
+ * Persist the session response from `POST /api/v1/hr/auth/otp/verify`.
  *
  * @param {{ access_token: string, expires_in: number, corporate: ClientCorporate }} response
  * @returns {ClientSession}

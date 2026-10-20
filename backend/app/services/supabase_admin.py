@@ -135,6 +135,30 @@ def _normalize_email(email: str) -> str:
     return normalized
 
 
+def find_auth_user_id_by_email(email: str) -> UUID | None:
+    """Resolve an existing Supabase Auth user id by email, server-side only.
+
+    Identity *resolution* only: no Supabase email is sent and no Supabase
+    session is created. HR OTP challenges are issued and verified entirely
+    by FastAPI; this lookup just maps the submitted email to the
+    ``hr_users.user_id`` provisioned at invite time.
+
+    Args:
+        email: Normalized login email.
+
+    Returns:
+        The Auth user UUID, or None when no Auth user has that email.
+
+    Raises:
+        SupabaseAdminError: Auth Admin is not configured or listing failed
+            in a way that cannot be distinguished from "no such user" is
+            surfaced by the underlying lookup returning None.
+    """
+    normalized = _normalize_email(email)
+    client = _admin_client()
+    return _lookup_user_id_by_email(client, normalized)
+
+
 def ensure_auth_user(email: str) -> UUID:
     """Create (or find) a confirmed Supabase Auth user without sending email.
 

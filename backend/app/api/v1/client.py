@@ -57,7 +57,11 @@ async def create_client_session(
     user: SupabaseUserContext = Depends(get_current_supabase_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Exchange a verified Supabase OTP session for a client-portal JWT.
+    """Legacy exchange of a verified Supabase session for a client-portal JWT.
+
+    Superseded by ``POST /api/v1/hr/auth/otp/verify``, which verifies the
+    SES-delivered code and mints the client JWT in one step. Retained for
+    backward compatibility with already-deployed clients.
 
     Tenancy comes from ``hr_users`` (source of truth), not from JWT claims,
     so a stale or forged ``app_metadata.corporate_id`` cannot widen access.

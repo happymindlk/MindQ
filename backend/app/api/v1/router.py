@@ -13,6 +13,7 @@ from .packages import router as packages_router
 from .client import router as client_router
 from .admin_ops import router as admin_ops_router
 from .admin_auth import router as admin_auth_router
+from .hr_auth import router as hr_auth_router
 from .library import router as library_router
 
 api_router = APIRouter()
@@ -32,6 +33,7 @@ api_router.include_router(jobs_router, prefix="/admin/jobs", tags=["jobs"])
 api_router.include_router(corporates_router, prefix="/corporates", tags=["corporates"])
 api_router.include_router(packages_router, prefix="/packages", tags=["packages"])
 api_router.include_router(admin_auth_router, prefix="/admin/auth", tags=["admin-auth"])
+api_router.include_router(hr_auth_router, prefix="/hr/auth", tags=["hr-auth"])
 api_router.include_router(admin_ops_router, prefix="/admin", tags=["admin"])
 api_router.include_router(library_router, prefix="/library", tags=["library"])
 api_router.include_router(client_router, prefix="/client", tags=["client"])

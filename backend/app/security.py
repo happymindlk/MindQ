@@ -146,6 +146,10 @@ admin_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
 # and the 3-strike lock live on the challenge row.
 candidate_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
 candidate_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
+# HR/client OTP mirrors the candidate budgets; per-user send caps and the
+# 3-strike lock live on the hr_login_challenges row.
+hr_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
+hr_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
 # Invites are legitimately bulk (a hiring round), so the budget is higher than nudges.
 invite_limiter = RateLimiter(max_requests=200, window_seconds=60 * 60)
 

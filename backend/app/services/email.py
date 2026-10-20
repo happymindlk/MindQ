@@ -678,6 +678,25 @@ async def send_admin_otp_email(to_email: str, otp: str) -> None:
     )
 
 
+async def send_hr_otp_email(to_email: str, otp: str) -> None:
+    """Deliver an HR/client sign-in code (see ``_send_portal_otp_email``).
+
+    Args:
+        to_email: HR inbox that requested sign-in. Cleaned again by
+            ``send_transactional_email`` before SES dispatch.
+        otp: Six-digit verification code.
+
+    Raises:
+        RuntimeError: In production, when delivery fails.
+    """
+    await _send_portal_otp_email(
+        to_email,
+        otp,
+        portal_name="HR & Client Portal",
+        subject="Your MindQ HR & Client Portal Verification Code",
+    )
+
+
 async def send_candidate_otp_email(to_email: str, otp: str) -> None:
     """Deliver a candidate sign-in code (see ``_send_portal_otp_email``).
 

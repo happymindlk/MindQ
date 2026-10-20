@@ -269,7 +269,7 @@ class ClientCorporate(BaseModel):
 
 
 class ClientSessionResponse(BaseModel):
-    """Client-portal JWT issued after a verified Supabase OTP exchange."""
+    """Client-portal JWT issued after a verified email OTP (legacy exchange shape)."""
 
     access_token: str
     token_type: Literal["bearer"] = "bearer"

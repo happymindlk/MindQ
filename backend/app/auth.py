@@ -7,8 +7,9 @@ Two independent token types:
   one-shot proof, never a candidate session.
 - HR tokens: access tokens minted by Supabase Auth, verified with
   SUPABASE_JWT_SECRET. The tenant (`corporate_id`) is read from app_metadata.
-- Client-portal tokens: minted by THIS service after a Supabase OTP exchange,
-  signed with SECRET_KEY under a dedicated audience so they can never satisfy
+- Client-portal tokens: minted by THIS service after an email OTP verified by
+  THIS service (SES-delivered challenge in ``hr_login_challenges``), signed
+  with SECRET_KEY under a dedicated audience so they can never satisfy
   ops/HR dependencies (and Supabase tokens never satisfy client dependencies).
 """
 from uuid import UUID

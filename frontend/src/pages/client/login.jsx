@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Mail } from 'lucide-react';
 import BrandLogo from '../../components/BrandLogo';
 import { clientApi } from '../../lib/clientApi';
-import { isSupabaseConfigured } from '../../lib/supabaseClient';
 import { useClientSession } from './use-client-session';
 
 const CODE_LENGTH = 6;
@@ -50,6 +49,7 @@ export default function ClientLogin() {
     ? fromPath
     : '/client/dashboard';
   const [email, setEmail] = useState('');
+  const [tempToken, setTempToken] = useState('');
   const [code, setCode] = useState('');
   const [step, setStep] = useState('email');
   const [loading, setLoading] = useState(false);
@@ -64,7 +64,8 @@ export default function ClientLogin() {
     setError(null);
     setLoading(true);
     try {
-      await clientApi.requestOtp(email.trim().toLowerCase());
+      const issuedTempToken = await clientApi.requestOtp(email.trim().toLowerCase());
+      setTempToken(issuedTempToken);
       setStep('code');
     } catch (err) {
       setError(err.message || 'Could not send code');
@@ -78,7 +79,7 @@ export default function ClientLogin() {
     setError(null);
     setLoading(true);
     try {
-      const session = await clientApi.verifyOtp(email.trim().toLowerCase(), code);
+      const session = await clientApi.verifyOtp(email.trim().toLowerCase(), code, tempToken);
       signIn(session);
       navigate(returnTo, { replace: true });
     } catch (err) {
@@ -89,6 +90,7 @@ export default function ClientLogin() {
 
   const resetEmail = () => {
     setStep('email');
+    setTempToken('');
     setCode('');
     setError(null);
   };
@@ -104,12 +106,6 @@ export default function ClientLogin() {
             <span aria-hidden="true" className="h-px w-6 bg-surface-raised" />
             <span className={step === 'code' ? 'text-indigo-600 dark:text-indigo-400' : 'text-muted'}>2 Verify</span>
           </div>
-
-          {!isSupabaseConfigured && (
-            <p className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
-              Supabase is not configured.
-            </p>
-          )}
 
           {step === 'email' ? (
             <form onSubmit={sendCode} className="space-y-4" noValidate>
