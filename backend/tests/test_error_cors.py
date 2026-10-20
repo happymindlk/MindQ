@@ -44,6 +44,26 @@ def test_explicit_allowlist_contains_required_origins():
         "http://localhost:3000",
     ):
         assert origin in allowed_origins
+
+
+def test_preflight_from_qa_origin_succeeds():
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app, raise_server_exceptions=False)
+    res = client.options(
+        "/api/candidates/invite",
+        headers={
+            "Origin": "https://qa.app.mindqtalent.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert res.status_code == 200
+    assert (
+        res.headers["access-control-allow-origin"]
+        == "https://qa.app.mindqtalent.com"
+    )
+    assert res.headers["access-control-allow-credentials"] == "true"
 PATH = "/api/v1/packages/corporates"
 
 

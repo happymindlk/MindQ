@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 
 from app.services.email import (
+    _assessment_invite_link,
+    clean_recipient_email,
     render_candidate_invite_html,
     render_candidate_nudge_html,
     render_hr_completion_html,
@@ -70,6 +72,16 @@ class EmailService:
         Returns:
             True when SES accepted the message; False when unconfigured or failed.
         """
+        clean_email = clean_recipient_email(email)
+        link = _assessment_invite_link(access_code, origin=origin)
+        # Always logged (even before SES is attempted) so QA testers can open
+        # the assessment when SES sandbox throttles/drops the invite.
+        logger.info(
+            "[INVITE DISPATCHED] Candidate=%s Code=%s Link=%s",
+            clean_email or email,
+            access_code,
+            link,
+        )
         company = (corporate_name or "").strip() or "Assess Pulse"
         subject = f"{company} invited you: {package_title}"
         html_body = render_candidate_invite_html(
@@ -79,10 +91,40 @@ class EmailService:
             corporate_name=company,
             origin=origin,
         )
-        result = await send_transactional_email_async(
-            email, subject, html_body, raise_on_error=raise_on_error
+        try:
+            result = await send_transactional_email_async(
+                clean_email or email,
+                subject,
+                html_body,
+                raise_on_error=raise_on_error,
+            )
+        except Exception:  # noqa: BLE001 - logged, then re-raised if requested
+            logger.exception(
+                "[INVITE FAILED] Candidate=%s Code=%s Link=%s",
+                clean_email or email,
+                access_code,
+                link,
+            )
+            if raise_on_error:
+                raise
+            return False
+        if result:
+            logger.info(
+                "[INVITE SENT] Candidate=%s Code=%s MessageId=%s Link=%s",
+                clean_email or email,
+                access_code,
+                result.get("MessageId") or result.get("id"),
+                link,
+            )
+            return True
+        logger.error(
+            "[INVITE FAILED] Candidate=%s Code=%s Link=%s result=None "
+            "(SES not configured or rejected; see SES logs above)",
+            clean_email or email,
+            access_code,
+            link,
         )
-        return result is not None
+        return False
 
     @staticmethod
     async def send_hr_completion_email(
