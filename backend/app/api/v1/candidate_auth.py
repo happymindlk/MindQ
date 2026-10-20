@@ -64,6 +64,17 @@ async def send_candidate_otp(
     Returns:
         ``otp_required`` plus the temp token required at verify.
     """
+    # #region agent log
+    try:
+        import json as _json
+        import time as _time
+        from pathlib import Path as _Path
+
+        with open(_Path(__file__).resolve().parents[4] / "debug-605235.log", "a", encoding="utf-8") as _fh:
+            _fh.write(_json.dumps({"sessionId": "605235", "runId": "pre-fix", "hypothesisId": "A,B", "location": "candidate_auth.py:send", "message": "otp send handler entered", "data": {"path": request.url.path, "method": request.method}, "timestamp": int(_time.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     enforce_rate_limit(candidate_otp_limiter, request, "candidate_otp_send")
     try:
         return await request_candidate_otp(db, body.access_code, str(body.email))
