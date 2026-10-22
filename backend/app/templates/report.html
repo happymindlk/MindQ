@@ -212,6 +212,14 @@
     {% endif %}
 
     <h2>Competency Breakdown</h2>
+    {% if report.category_summaries %}
+        {% for item in report.category_summaries %}
+    <div class="summary">
+        <strong>{{ item.category }}</strong>
+        <p style="margin: 4px 0 0 0;">{{ item.summary }}</p>
+    </div>
+        {% endfor %}
+    {% endif %}
     {% if report.competency_breakdown %}
     <table class="results-table">
         <thead>
@@ -276,10 +284,10 @@
     <div class="footer">
         <span class="mq-badge">MindQ</span>
         <p class="muted" style="margin-top: 8px;">
-            This is an auto-generated Mind Queue report. This cannot be reproduced, edited or redistributed without the written consent of Mind Queue Private Limited.
+            This is an auto-generated Mind Queue report. This cannot be reproduced, edited or redistributed without the written consent of MindQ (Pvt.) Ltd.
         </p>
         <p class="disclaimer">
-            This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis over an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.
+            This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.
         </p>
     </div>
 </body>

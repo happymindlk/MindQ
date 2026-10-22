@@ -213,6 +213,9 @@ SYNTHESIS = ReportSynthesis.model_validate(
             {"assessment_key": "A1", "assessment_name": "Big Five", "performance_summary": "Calm and steady."},
             {"assessment_key": "A2", "assessment_name": "SQL Basics", "performance_summary": "Strong SQL. Hire now."},
         ],
+        "category_summaries": [
+            {"category": "Personality", "summary": "Calm and steady under pressure."},
+        ],
     }
 )
 
@@ -244,6 +247,9 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
     ]
     assert breakdown[1]["performance_summary"] == "Strong SQL."
     assert breakdown[2]["performance_summary"].startswith("Pat scored 90% on Custom Technical")
+    assert body["category_summaries"] == [
+        {"category": "Personality", "summary": "Calm and steady under pressure."}
+    ]
 
     for forbidden in ("overall_fit", "recommendation_key", "recommendation_label", "jd_fit"):
         assert forbidden not in body
@@ -273,6 +279,9 @@ def test_report_data_falls_back_when_synthesis_fails(app, corp_id, candidate_id,
     assert body["risks_and_antipatterns"] == []
     assert len(body["competency_breakdown"]) == 3
     assert all(b["performance_summary"] for b in body["competency_breakdown"])
+    # Pillar summaries fall back to server-computed prose when synthesis fails.
+    assert [s["category"] for s in body["category_summaries"]] == ["Personality"]
+    assert "75" in body["category_summaries"][0]["summary"]
 
 
 def test_report_data_skipped_synthesis_status(app, corp_id, candidate_id, synthesis_stub):

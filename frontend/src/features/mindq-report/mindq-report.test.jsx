@@ -5,10 +5,10 @@ import MindQReport from './mindq-report';
 import { FIT_DISCLAIMER, FOOTER_NOTICE, REPORT_TITLE } from './report-copy';
 
 const SPEC_FOOTER =
-  'This is an auto-generated Mind Queue report. This cannot be reproduced, edited or redistributed without the written consent of Mind Queue Private Limited.';
+  'This is an auto-generated Mind Queue report. This cannot be reproduced, edited or redistributed without the written consent of MindQ (Pvt.) Ltd.';
 
 const SPEC_FIT_DISCLAIMER =
-  'This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis over an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.';
+  'This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.';
 
 const row = (category, name, score) => ({
   category,
@@ -35,6 +35,11 @@ const BASE = {
     row('Personality', 'Work Style Inventory', 64),
     row('Cognitive', 'Numerical Reasoning', 90),
     row('Cognitive', 'Verbal Reasoning', 75),
+  ],
+  category_summaries: [
+    { category: 'Cognitive', summary: 'Strong reasoning across both cognitive tests.' },
+    { category: 'Personality', summary: 'Steady work style overall.' },
+    { category: 'Technical', summary: 'Must never render as a pillar summary.' },
   ],
   custom_questions: [],
 };
@@ -120,6 +125,31 @@ describe('MindQReport', () => {
     expect(within(items[0]).getByText('90%')).toBeInTheDocument();
     expect(within(items[0]).getByText('Numerical Reasoning summary sentence.')).toBeInTheDocument();
     expect(items[0].querySelector('.mq-bar-fill')).toHaveStyle({ width: '90%' });
+  });
+
+  it('renders pillar summaries for psychometric categories only', () => {
+    const { container } = render(<MindQReport data={BASE} />);
+    const cognitive = screen.getByRole('heading', { name: 'Cognitive' }).closest('article');
+    expect(within(cognitive).getByText('Strong reasoning across both cognitive tests.')).toBeInTheDocument();
+    expect(cognitive.querySelector('.mq-group-summary')).toHaveTextContent(
+      'Strong reasoning across both cognitive tests.',
+    );
+    const personality = screen.getByRole('heading', { name: 'Personality' }).closest('article');
+    expect(within(personality).getByText('Steady work style overall.')).toBeInTheDocument();
+    expect(container.textContent).not.toContain('Must never render as a pillar summary.');
+  });
+
+  it('renders unchanged when category_summaries is absent or malformed', () => {
+    const { container, rerender } = render(
+      <MindQReport data={{ ...BASE, category_summaries: undefined }} />,
+    );
+    expect(container.querySelectorAll('.mq-group-summary')).toHaveLength(0);
+    rerender(
+      <MindQReport
+        data={{ ...BASE, category_summaries: [null, { category: 'Cognitive' }, { summary: 'x' }] }}
+      />,
+    );
+    expect(container.querySelectorAll('.mq-group-summary')).toHaveLength(0);
   });
 
   it('marks each major section as a keep-together block for print and PDF', () => {

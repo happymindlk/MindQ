@@ -17,6 +17,7 @@ import AssessmentLibrary from './pages/admin/AssessmentLibrary';
 import SuiteBuilder from './pages/admin/SuiteBuilder';
 import AssessmentHistory from './pages/admin/AssessmentHistory';
 import CandidateReport from './pages/admin/CandidateReport';
+import CandidateReportPreview from './pages/admin/CandidateReportPreview';
 import AccountSettings from './pages/admin/AccountSettings';
 import PendingApproval from './pages/PendingApproval';
 
@@ -105,6 +106,7 @@ function App() {
             <Route path="history/:companyId/:packageId" element={<AssessmentHistory />} />
             <Route path="track" element={<Navigate to="/admin/history" replace />} />
             <Route path="candidates/:candidateId" element={<CandidateReport />} />
+            <Route path="candidates/:candidateId/report" element={<CandidateReportPreview />} />
             <Route path="candidates" element={<Navigate to="/admin/history" replace />} />
             <Route path="settings" element={<AccountSettings />} />
           </Route>

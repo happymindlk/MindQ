@@ -50,6 +50,12 @@ VALID_SYNTHESIS = {
             "performance_summary": "Scored 80%, indicating strong numerical reasoning.",
         }
     ],
+    "category_summaries": [
+        {
+            "category": "Cognitive",
+            "summary": "Strong quantitative reasoning for the role. Applies structured logic consistently.",
+        }
+    ],
 }
 
 LEGACY_FIT = {
@@ -96,6 +102,10 @@ def test_prompt_does_not_embed_json_schema():
         "sentence summarizing the candidate's performance based on their score.",
         "Generate an executive summary and detailed bullet points for Strengths and "
         "Risks/Anti-patterns.",
+        "The psychometric assessments are grouped into three pillars: Cognitive, Personality, "
+        "and Behavioral. Technical assessments are separate and never get a pillar summary.",
+        "category_summaries must contain one entry per psychometric category (Cognitive, "
+        "Personality, or Behavioral) present in assessment_scores",
     ],
 )
 def test_system_instruction_contains_required_directives_verbatim(instruction):
@@ -113,7 +123,7 @@ def test_prompt_falls_back_to_package_title_without_role():
 
 
 def test_prompt_version_is_report_synthesis():
-    assert PROMPT_VERSION.startswith("mindq-report")
+    assert PROMPT_VERSION == "mindq-report-v2"
 
 
 def test_build_evidence_strips_answer_keys():
@@ -259,7 +269,32 @@ def test_synthesis_drops_hallucinated_fit_and_recommendation():
         "strengths",
         "risks_and_antipatterns",
         "competency_breakdown",
+        "category_summaries",
     }
+
+
+def test_synthesis_without_category_summaries_still_validates():
+    legacy = {k: v for k, v in VALID_SYNTHESIS.items() if k != "category_summaries"}
+    result = ReportSynthesis.model_validate(legacy)
+    assert result.category_summaries == []
+    assert result.summaries_by_category() == {}
+
+
+def test_category_summaries_first_occurrence_wins_and_rejects_technical():
+    result = ReportSynthesis.model_validate(
+        {
+            **VALID_SYNTHESIS,
+            "category_summaries": [
+                {"category": "Cognitive", "summary": "  First   summary. "},
+                {"category": "Cognitive", "summary": "Second summary."},
+            ],
+        }
+    )
+    assert result.summaries_by_category() == {"Cognitive": "First summary."}
+    with pytest.raises(ValidationError):
+        ReportSynthesis.model_validate(
+            {**VALID_SYNTHESIS, "category_summaries": [{"category": "Technical", "summary": "Nope."}]}
+        )
 
 
 def test_synthesis_requires_executive_summary():
@@ -361,6 +396,9 @@ def _report(**overrides):
                 "performance_summary": "Scored 80%, indicating strong numerical reasoning.",
             }
         ],
+        "category_summaries": [
+            {"category": "Cognitive", "summary": "Strong quantitative pillar overall."}
+        ],
         "custom_questions": [],
     }
     report.update(overrides)
@@ -381,7 +419,11 @@ def test_report_html_renders_synthesis_without_fit_or_recommendation():
     assert "Assess Pulse" not in html
     assert "AI " not in html
     assert "auto-generated Mind Queue report" in html
+    assert "MindQ (Pvt.) Ltd." in html
+    assert "Mind Queue Private Limited" not in html
     assert "not an indication of whether the candidate is a good fit" in html
+    assert "This is merely an analysis of an assessment." in html
+    assert "Strong quantitative pillar overall." in html
 
 
 def test_report_html_shows_na_for_categories_without_assessments():

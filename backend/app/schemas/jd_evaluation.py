@@ -6,7 +6,7 @@ can never reach a report.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -56,6 +56,29 @@ class AssessmentNarrative(BaseModel):
         return sentence
 
 
+PsychometricCategory = Literal["Cognitive", "Personality", "Behavioral"]
+
+
+class CategoryNarrative(BaseModel):
+    """Gemini's holistic summary for one psychometric pillar.
+
+    Technical is excluded: it is reported separately and never carries a
+    pillar summary. Prose only — the category average shown beside it is
+    computed server-side.
+    """
+
+    category: PsychometricCategory
+    summary: str = Field(min_length=1)
+
+    @field_validator("summary", mode="after")
+    @classmethod
+    def normalize_summary(cls, value: str) -> str:
+        cleaned = " ".join(str(value or "").split())
+        if not cleaned:
+            raise ValueError("summary must not be blank")
+        return cleaned
+
+
 class ReportSynthesis(BaseModel):
     """Narrative fields of the MindQ Report produced by Gemini.
 
@@ -67,6 +90,8 @@ class ReportSynthesis(BaseModel):
     strengths: list[str] = Field(default_factory=list)
     risks_and_antipatterns: list[str] = Field(default_factory=list)
     competency_breakdown: list[AssessmentNarrative] = Field(default_factory=list)
+    # Default empty so payloads cached under older prompt versions still validate.
+    category_summaries: list[CategoryNarrative] = Field(default_factory=list)
 
     @field_validator("strengths", "risks_and_antipatterns", mode="before")
     @classmethod
@@ -84,6 +109,17 @@ class ReportSynthesis(BaseModel):
         out: dict[str, str] = {}
         for item in self.competency_breakdown:
             out.setdefault(item.assessment_key.strip(), item.performance_summary)
+        return out
+
+    def summaries_by_category(self) -> dict[str, str]:
+        """Map psychometric category → pillar summary (first occurrence wins).
+
+        Returns:
+            Lookup used to merge Gemini prose onto server-computed pillars.
+        """
+        out: dict[str, str] = {}
+        for item in self.category_summaries:
+            out.setdefault(item.category, item.summary)
         return out
 
 
@@ -106,11 +142,26 @@ REPORT_SYNTHESIS_JSON_SCHEMA: dict = {
                 "required": ["assessment_key", "assessment_name", "performance_summary"],
             },
         },
+        "category_summaries": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": ["Cognitive", "Personality", "Behavioral"],
+                    },
+                    "summary": {"type": "string"},
+                },
+                "required": ["category", "summary"],
+            },
+        },
     },
     "required": [
         "executive_summary",
         "strengths",
         "risks_and_antipatterns",
         "competency_breakdown",
+        "category_summaries",
     ],
 }

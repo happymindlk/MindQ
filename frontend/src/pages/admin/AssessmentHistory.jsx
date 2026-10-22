@@ -455,7 +455,7 @@ export default function AssessmentHistory() {
                                           <button
                                             type="button"
                                             onClick={() =>
-                                              navigate(`/admin/candidates/${cand.id}`)
+                                              navigate(`/admin/candidates/${cand.id}/report`)
                                             }
                                             className="min-w-0 text-left"
                                           >
