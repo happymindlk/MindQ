@@ -24,6 +24,8 @@ interface AssessmentRunnerProps {
   transport: RunnerTransport;
   onAnswersChange?: (answers: Record<string, AnswerValue>) => void;
   onSubmitted: () => void;
+  /** Called instead of `onSubmitted` when a strict-timer expiry submit succeeds. */
+  onTimeExpired?: () => void;
   onLocked: (message: string) => void;
   onExit: () => void;
   exitLabel?: string;
@@ -32,7 +34,6 @@ interface AssessmentRunnerProps {
 }
 
 const AUTOSAVE_DELAY_MS = 2000;
-const WARNING_SECONDS = 60;
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -45,6 +46,7 @@ export function AssessmentRunner({
   transport,
   onAnswersChange,
   onSubmitted,
+  onTimeExpired,
   onLocked,
   onExit,
   exitLabel = 'Back to dashboard',
@@ -81,7 +83,11 @@ export function AssessmentRunner({
           total_module_duration_seconds: telemetry.totalModuleSeconds(),
         });
         setConfirmOpen(false);
-        onSubmitted();
+        if (reason === 'expired' && onTimeExpired) {
+          onTimeExpired();
+        } else {
+          onSubmitted();
+        }
       } catch (err) {
         submittedRef.current = false;
         if (isAttemptLocked(err)) {
@@ -98,7 +104,7 @@ export function AssessmentRunner({
         setSubmitting(false);
       }
     },
-    [onLocked, onSubmitted, telemetry, test.id, transport],
+    [onLocked, onSubmitted, onTimeExpired, telemetry, test.id, transport],
   );
 
   const onExpire = useCallback(() => {
@@ -218,8 +224,8 @@ export function AssessmentRunner({
   const progressPct = Math.round(((index + 1) / questions.length) * 100);
   const remaining = timer.remainingSeconds;
   const strict = test.timer_mode === 'strict';
-  const warning = remaining !== null && remaining <= WARNING_SECONDS && remaining > 0;
   const tone = remaining !== null && test.duration_seconds ? timerTone(remaining, test.duration_seconds) : 'safe';
+  const warning = tone === 'urgent' && remaining !== null && remaining > 0;
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 py-6">
@@ -242,7 +248,9 @@ export function AssessmentRunner({
               className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-mono text-sm tabular-nums transition-colors duration-300 ${
                 tone === 'urgent'
                   ? 'border-danger/50 bg-danger/15 font-semibold text-danger'
-                  : 'border-success/40 bg-success/10 font-medium text-success'
+                  : tone === 'caution'
+                    ? 'border-warning/40 bg-warning/10 font-medium text-warning'
+                    : 'border-success/40 bg-success/10 font-medium text-success'
               }`}
             >
               {strict ? <AlarmClock className="h-3.5 w-3.5" aria-hidden /> : <Timer className="h-3.5 w-3.5" aria-hidden />}
@@ -285,6 +293,14 @@ export function AssessmentRunner({
 
       <section className="flex min-h-[320px] flex-col rounded-lg border border-border bg-surface p-4 sm:p-5" aria-labelledby={`q-${current.id}`}>
         <div className="flex-1">
+          {test.show_top_disclaimer && test.top_disclaimer_text?.trim() && (
+            <p
+              role="note"
+              className="mb-4 whitespace-pre-line rounded-md border border-border bg-surface-raised px-3 py-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300"
+            >
+              {test.top_disclaimer_text}
+            </p>
+          )}
           {current.show_disclaimer && current.disclaimer_text?.trim() && (
             <p
               role="note"
@@ -307,11 +323,12 @@ export function AssessmentRunner({
             </figure>
           )}
           <RunnerQuestionInput question={current} value={value} disabled={timeUp || submitting} onChange={handleChange} />
-          {test.module_kind === 'psychometric' && (
-            <p role="note" className="mt-4 text-sm font-bold italic leading-relaxed text-foreground">
-              ***CONFIDENTIALITY &amp; INTEGRITY NOTICE***
-              <br />
-              ***This assessment is monitored for unauthorized AI assistance, automated inputs, and screen capture. Copying, reproducing, or sharing these questions is strictly prohibited. Violations will result in immediate test invalidation and reporting to the hiring organization.***
+          {test.show_confidentiality_notice && test.confidentiality_notice_text?.trim() && (
+            <p
+              role="note"
+              className="mt-4 whitespace-pre-line text-sm font-bold italic leading-relaxed text-foreground"
+            >
+              {test.confidentiality_notice_text}
             </p>
           )}
         </div>

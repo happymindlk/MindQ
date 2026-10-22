@@ -1,4 +1,8 @@
 import { supabase } from '../../../lib/supabaseClient';
+import {
+  DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+  DEFAULT_TOP_DISCLAIMER_TEXT,
+} from '../types/module';
 import type {
   AssessmentCategory,
   AssessmentModule,
@@ -25,6 +29,10 @@ interface TemplateSummaryDto {
   time_limit_minutes: number | null;
   timer_mode: TimerMode;
   shuffle_questions: boolean;
+  show_top_disclaimer?: boolean;
+  top_disclaimer_text?: string | null;
+  show_confidentiality_notice?: boolean;
+  confidentiality_notice_text?: string | null;
   status: ModuleStatus;
   version: number;
   lineage_id: string | null;
@@ -51,6 +59,10 @@ interface CatalogModuleDto {
   time_limit_minutes: number | null;
   timer_mode: TimerMode;
   shuffle_questions: boolean;
+  show_top_disclaimer?: boolean;
+  top_disclaimer_text?: string | null;
+  show_confidentiality_notice?: boolean;
+  confidentiality_notice_text?: string | null;
   version: number;
   question_count: number;
   facet_count: number;
@@ -80,6 +92,10 @@ export interface RunnerTest {
   duration_seconds: number | null;
   timer_mode: TimerMode;
   shuffle_questions: boolean;
+  show_top_disclaimer?: boolean;
+  top_disclaimer_text?: string | null;
+  show_confidentiality_notice?: boolean;
+  confidentiality_notice_text?: string | null;
   started_at: string | null;
   questions: RunnerQuestion[];
   answers: Record<string, unknown>;
@@ -101,6 +117,10 @@ export function toAssessmentModule(dto: TemplateSummaryDto): AssessmentModule {
     durationSeconds: durationOf(dto),
     timerMode: dto.timer_mode,
     shuffleQuestions: dto.shuffle_questions,
+    showTopDisclaimer: dto.show_top_disclaimer ?? false,
+    topDisclaimerText: dto.top_disclaimer_text ?? DEFAULT_TOP_DISCLAIMER_TEXT,
+    showConfidentialityNotice: dto.show_confidentiality_notice ?? false,
+    confidentialityNoticeText: dto.confidentiality_notice_text ?? DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
     status: dto.status,
     version: dto.version,
     lineageId: dto.lineage_id ?? dto.id,
@@ -128,6 +148,10 @@ function toCatalogModule(dto: CatalogModuleDto): CatalogModule {
     durationSeconds: durationOf(dto),
     timerMode: dto.timer_mode,
     shuffleQuestions: dto.shuffle_questions,
+    showTopDisclaimer: dto.show_top_disclaimer ?? false,
+    topDisclaimerText: dto.top_disclaimer_text ?? DEFAULT_TOP_DISCLAIMER_TEXT,
+    showConfidentialityNotice: dto.show_confidentiality_notice ?? false,
+    confidentialityNoticeText: dto.confidentiality_notice_text ?? DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
     version: dto.version,
     questionCount: dto.question_count,
     facetCount: dto.facet_count,
@@ -165,6 +189,14 @@ function settingsBody(settings: Partial<ModuleSettings>): Record<string, unknown
   if (settings.durationSeconds !== undefined) body.duration_seconds = settings.durationSeconds ?? 0;
   if (settings.timerMode !== undefined) body.timer_mode = settings.timerMode;
   if (settings.shuffleQuestions !== undefined) body.shuffle_questions = settings.shuffleQuestions;
+  if (settings.showTopDisclaimer !== undefined) body.show_top_disclaimer = settings.showTopDisclaimer;
+  if (settings.topDisclaimerText !== undefined)
+    body.top_disclaimer_text = settings.topDisclaimerText.trim() || DEFAULT_TOP_DISCLAIMER_TEXT;
+  if (settings.showConfidentialityNotice !== undefined)
+    body.show_confidentiality_notice = settings.showConfidentialityNotice;
+  if (settings.confidentialityNoticeText !== undefined)
+    body.confidentiality_notice_text =
+      settings.confidentialityNoticeText.trim() || DEFAULT_CONFIDENTIALITY_NOTICE_TEXT;
   return body;
 }
 

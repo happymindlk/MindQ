@@ -8,7 +8,11 @@ from uuid import uuid4
 import pytest
 
 from app.schemas.client_package import CustomQuestionIn
-from app.schemas.library import TemplateQuestionCreate, TemplateUpdate
+from app.schemas.library import TemplateCreate, TemplateQuestionCreate, TemplateUpdate
+from app.schemas.question_payload import (
+    DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+    DEFAULT_TOP_DISCLAIMER_TEXT,
+)
 from app.schemas.package_builder import QuestionType
 from app.services.library import (
     LibraryConflictError,
@@ -539,6 +543,120 @@ async def test_clone_version_increments_version_and_copies_questions():
     assert "id" not in copied.question_payload
     assert question_row.question_payload["id"] == "tq-001"
     session.commit.assert_awaited_once()
+
+
+def test_template_create_notice_defaults_and_blank_normalization():
+    body = TemplateCreate(title="Personality", category="psychometric")
+    assert body.show_top_disclaimer is False
+    assert body.top_disclaimer_text == DEFAULT_TOP_DISCLAIMER_TEXT
+    assert body.show_confidentiality_notice is False
+    assert body.confidentiality_notice_text == DEFAULT_CONFIDENTIALITY_NOTICE_TEXT
+
+    blank = TemplateCreate(
+        title="Personality",
+        category="psychometric",
+        show_top_disclaimer=True,
+        top_disclaimer_text="   ",
+        show_confidentiality_notice=True,
+        confidentiality_notice_text="  ",
+    )
+    assert blank.top_disclaimer_text == DEFAULT_TOP_DISCLAIMER_TEXT
+    assert blank.confidentiality_notice_text == DEFAULT_CONFIDENTIALITY_NOTICE_TEXT
+
+
+def test_template_update_notice_fields_touch_runner_config():
+    assert TemplateUpdate(show_top_disclaimer=True).touches_runner_config() is True
+    assert TemplateUpdate(confidentiality_notice_text="Custom").touches_runner_config() is True
+    assert TemplateUpdate(title="Only a title").touches_runner_config() is False
+
+
+@pytest.mark.asyncio
+async def test_update_notice_on_published_module_raises_module_locked():
+    template_id = uuid4()
+    module = _module_row(template_id, status="published", version=2)
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[_scalar_result(module)])
+    session.commit = AsyncMock()
+
+    with pytest.raises(ModuleLockedError):
+        await LibraryService.update_template(
+            session, template_id, TemplateUpdate(show_confidentiality_notice=False)
+        )
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_notice_on_draft_module_applies_and_round_trips():
+    template_id = uuid4()
+    module = _module_row(template_id)
+    module.show_top_disclaimer = False
+    module.top_disclaimer_text = DEFAULT_TOP_DISCLAIMER_TEXT
+    module.show_confidentiality_notice = False
+    module.confidentiality_notice_text = DEFAULT_CONFIDENTIALITY_NOTICE_TEXT
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        side_effect=[_scalar_result(module), _count_result(0), *_detail_results(module)]
+    )
+    session.commit = AsyncMock()
+
+    result = await LibraryService.update_template(
+        session,
+        template_id,
+        TemplateUpdate(
+            show_top_disclaimer=True,
+            top_disclaimer_text="Be yourself.",
+            show_confidentiality_notice=True,
+            confidentiality_notice_text="Custom confidentiality.",
+        ),
+    )
+
+    assert module.show_top_disclaimer is True
+    assert module.top_disclaimer_text == "Be yourself."
+    assert result.show_top_disclaimer is True
+    assert result.top_disclaimer_text == "Be yourself."
+    assert result.show_confidentiality_notice is True
+    assert result.confidentiality_notice_text == "Custom confidentiality."
+    session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_clone_version_copies_notice_fields():
+    lineage = uuid4()
+    source = _module_row(uuid4(), status="published", version=1, lineage_id=lineage)
+    source.slug = "sql-basics"
+    source.show_top_disclaimer = True
+    source.top_disclaimer_text = "Copied top note."
+    source.show_confidentiality_notice = True
+    source.confidentiality_notice_text = "Copied confidentiality."
+    rows_result = MagicMock()
+    rows_result.scalars.return_value.all.return_value = []
+    max_version = MagicMock()
+    max_version.scalar_one.return_value = 1
+
+    added: list = []
+    session = AsyncMock()
+    session.add = MagicMock(side_effect=added.append)
+    session.execute = AsyncMock(
+        side_effect=[
+            _scalar_result(source),
+            _scalar_result(None),
+            max_version,
+            _scalar_result(None),
+            rows_result,
+        ]
+    )
+    detail = SimpleNamespace(version=2)
+    with (
+        patch.object(LibraryService, "rebuild_module_questions_json", AsyncMock(return_value=[])),
+        patch.object(LibraryService, "get_template", AsyncMock(return_value=detail)),
+    ):
+        await LibraryService.clone_version(session, source.id)
+
+    clone = added[0]
+    assert clone.show_top_disclaimer is True
+    assert clone.top_disclaimer_text == "Copied top note."
+    assert clone.show_confidentiality_notice is True
+    assert clone.confidentiality_notice_text == "Copied confidentiality."
 
 
 def test_eager_snapshot_logic_prefers_override_over_catalog():

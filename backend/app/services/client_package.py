@@ -52,6 +52,10 @@ from app.schemas.client_package import (
 )
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.package_builder import QuestionItem, QuestionType
+from app.schemas.question_payload import (
+    DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+    DEFAULT_TOP_DISCLAIMER_TEXT,
+)
 from app.services.jd_scoring import evaluation_is_ok
 from app.services.runner_payload import build_runner_payload
 from app.services.package_generator import (
@@ -608,6 +612,16 @@ class ClientPackageService:
                     duration_seconds=getattr(row, "duration_seconds", None),
                     timer_mode=getattr(row, "timer_mode", None) or "flexible",
                     shuffle_questions=bool(getattr(row, "shuffle_questions", False)),
+                    show_top_disclaimer=bool(getattr(row, "show_top_disclaimer", False)),
+                    top_disclaimer_text=getattr(row, "top_disclaimer_text", None)
+                    or DEFAULT_TOP_DISCLAIMER_TEXT,
+                    show_confidentiality_notice=bool(
+                        getattr(row, "show_confidentiality_notice", False)
+                    ),
+                    confidentiality_notice_text=getattr(
+                        row, "confidentiality_notice_text", None
+                    )
+                    or DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
                     status=getattr(row, "status", None) or "published",
                     version=int(getattr(row, "version", 1) or 1),
                     lineage_id=getattr(row, "lineage_id", None),
@@ -670,6 +684,14 @@ class ClientPackageService:
                     shuffle=bool(getattr(module, "shuffle_questions", False)),
                     seed=f"preview:{module.id}",
                     module_kind=getattr(module, "module_kind", None),
+                    show_top_disclaimer=bool(getattr(module, "show_top_disclaimer", False)),
+                    top_disclaimer_text=getattr(module, "top_disclaimer_text", None),
+                    show_confidentiality_notice=bool(
+                        getattr(module, "show_confidentiality_notice", False)
+                    ),
+                    confidentiality_notice_text=getattr(
+                        module, "confidentiality_notice_text", None
+                    ),
                 )
             )
         return out
@@ -904,6 +926,18 @@ class ClientPackageService:
                     time_limit_minutes=catalog.time_limit_minutes,
                     duration_seconds=catalog.duration_seconds,
                     timer_mode=catalog.timer_mode or "flexible",  # type: ignore[arg-type]
+                    show_top_disclaimer=bool(
+                        getattr(catalog, "show_top_disclaimer", False)
+                    ),
+                    top_disclaimer_text=getattr(catalog, "top_disclaimer_text", None)
+                    or DEFAULT_TOP_DISCLAIMER_TEXT,
+                    show_confidentiality_notice=bool(
+                        getattr(catalog, "show_confidentiality_notice", False)
+                    ),
+                    confidentiality_notice_text=getattr(
+                        catalog, "confidentiality_notice_text", None
+                    )
+                    or DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
                     version=catalog.version or 1,
                     upgraded_from_version=(pinned.version or 1) if catalog.id != pinned.id else None,
                     question_count=len(questions),
@@ -1278,6 +1312,16 @@ class ClientPackageService:
                     timer_mode=getattr(module, "timer_mode", None) or "flexible",
                     duration_seconds=getattr(module, "duration_seconds", None),
                     shuffle_questions=bool(getattr(module, "shuffle_questions", False)),
+                    show_top_disclaimer=bool(getattr(module, "show_top_disclaimer", False)),
+                    top_disclaimer_text=getattr(module, "top_disclaimer_text", None)
+                    or DEFAULT_TOP_DISCLAIMER_TEXT,
+                    show_confidentiality_notice=bool(
+                        getattr(module, "show_confidentiality_notice", False)
+                    ),
+                    confidentiality_notice_text=getattr(
+                        module, "confidentiality_notice_text", None
+                    )
+                    or DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
                     scoring_profile=getattr(module, "scoring_profile", None),
                     position=position,
                     questions=questions,

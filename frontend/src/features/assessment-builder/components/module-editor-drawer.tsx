@@ -230,7 +230,15 @@ export function ModuleEditorDrawer({
   };
 
   const settings: ModuleSettings | null = module
-    ? { durationSeconds: module.durationSeconds, timerMode: module.timerMode, shuffleQuestions: module.shuffleQuestions }
+    ? {
+        durationSeconds: module.durationSeconds,
+        timerMode: module.timerMode,
+        shuffleQuestions: module.shuffleQuestions,
+        showTopDisclaimer: module.showTopDisclaimer,
+        topDisclaimerText: module.topDisclaimerText,
+        showConfidentialityNotice: module.showConfidentialityNotice,
+        confidentialityNoticeText: module.confidentialityNoticeText,
+      }
     : null;
 
   return (
@@ -327,6 +335,7 @@ export function ModuleEditorDrawer({
             <ModuleSettingsPanel
               moduleId={module.id}
               settings={settings}
+              moduleKind={module.moduleKind}
               locked={locked}
               saving={pending === 'settings'}
               onSave={onSaveSettings}

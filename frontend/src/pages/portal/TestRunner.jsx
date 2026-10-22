@@ -6,6 +6,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import { api } from '../../api/client';
 import { readDraft, writeDraft, clearDraft, mergeAnswers } from '../../lib/assessment-draft';
 import { AssessmentRunner } from '../../features/assessment-runner/assessment-runner';
+import { useToast } from '../../components/ui/useToast';
 
 const LOCKED_DETAIL = 'Assessment already completed. Modifications are locked.';
 
@@ -16,6 +17,7 @@ function isAssessmentLocked(err) {
 export default function TestRunner() {
   const { testId } = useParams();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const candidateId = typeof window !== 'undefined' ? localStorage.getItem('candidateId') : null;
 
   const [test, setTest] = useState(null);
@@ -73,6 +75,16 @@ export default function TestRunner() {
   );
 
   const backToDashboard = useCallback(() => navigate('/portal/dashboard'), [navigate]);
+
+  const onTimeExpired = useCallback(() => {
+    toast({
+      title: 'Time expired',
+      description: 'Your time for this test has ended. Your answers were automatically submitted.',
+      variant: 'warning',
+      duration: 6000,
+    });
+    navigate('/portal/dashboard');
+  }, [navigate, toast]);
 
   if (isLoading) {
     return (
@@ -132,6 +144,7 @@ export default function TestRunner() {
       transport={transport}
       onAnswersChange={onAnswersChange}
       onSubmitted={backToDashboard}
+      onTimeExpired={onTimeExpired}
       onLocked={setLockDetail}
       onExit={backToDashboard}
     />

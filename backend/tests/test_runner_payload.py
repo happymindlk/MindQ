@@ -64,6 +64,51 @@ def test_build_runner_payload_strips_keys_and_shuffles():
     assert [q["id"] for q in dumped["questions"]] == expected
 
 
+def test_runner_payload_carries_module_notices_at_test_level():
+    payload = build_runner_payload(
+        assessment_id=uuid4(),
+        title="Personality",
+        description=None,
+        questions=QUESTIONS,
+        time_limit_minutes=None,
+        duration_seconds=None,
+        timer_mode="flexible",
+        shuffle=False,
+        seed="cand:assess",
+        module_kind="psychometric",
+        show_top_disclaimer=True,
+        top_disclaimer_text="Module top note.",
+        show_confidentiality_notice=True,
+        confidentiality_notice_text="Module confidentiality note.",
+    )
+    dumped = payload.model_dump()
+    assert dumped["show_top_disclaimer"] is True
+    assert dumped["top_disclaimer_text"] == "Module top note."
+    assert dumped["show_confidentiality_notice"] is True
+    assert dumped["confidentiality_notice_text"] == "Module confidentiality note."
+    # Notices are test-level presentation, never per-question answer keys.
+    assert all("confidentiality_notice_text" not in q for q in dumped["questions"])
+
+
+def test_runner_payload_defaults_notices_off_with_default_texts():
+    payload = build_runner_payload(
+        assessment_id=uuid4(),
+        title="SQL",
+        description=None,
+        questions=QUESTIONS,
+        time_limit_minutes=None,
+        duration_seconds=None,
+        timer_mode="flexible",
+        shuffle=False,
+        seed="cand:assess",
+    )
+    dumped = payload.model_dump()
+    assert dumped["show_top_disclaimer"] is False
+    assert dumped["show_confidentiality_notice"] is False
+    assert "no right or wrong answers" in dumped["top_disclaimer_text"]
+    assert dumped["confidentiality_notice_text"].startswith("CONFIDENTIALITY")
+
+
 def test_runner_payload_carries_psychometric_module_kind():
     payload = build_runner_payload(
         assessment_id=uuid4(),

@@ -45,6 +45,29 @@ class GlobalModule(Base):
     timer_mode: Mapped[str] = mapped_column(String(16), default="flexible", nullable=False)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     shuffle_questions: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    show_top_disclaimer: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    top_disclaimer_text: Mapped[str] = mapped_column(
+        Text,
+        default=(
+            "There are no right or wrong answers for this assessment. "
+            "Answer all questions from your own perspective."
+        ),
+        nullable=False,
+    )
+    show_confidentiality_notice: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    confidentiality_notice_text: Mapped[str] = mapped_column(
+        Text,
+        default=(
+            "CONFIDENTIALITY & INTEGRITY NOTICE\n"
+            "This assessment is monitored for unauthorized AI assistance, automated inputs, "
+            "and screen capture. Copying, reproducing, or sharing these questions is strictly "
+            "prohibited. Violations will result in immediate test invalidation and reporting "
+            "to the hiring organization."
+        ),
+        nullable=False,
+    )
     scoring_profile: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(

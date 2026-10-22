@@ -17,6 +17,30 @@ export const CATEGORY_LABELS: Record<AssessmentCategory, string> = {
   personality: 'Personality',
 };
 
+/** Default module-level disclaimer rendered above every question when enabled. */
+export const DEFAULT_TOP_DISCLAIMER_TEXT =
+  'There are no right or wrong answers for this assessment. Answer all questions from your own perspective.';
+export const TOP_DISCLAIMER_TEXT_MAX = 500;
+/** Default confidentiality/integrity notice rendered below every question's answers when enabled. */
+export const DEFAULT_CONFIDENTIALITY_NOTICE_TEXT =
+  'CONFIDENTIALITY & INTEGRITY NOTICE\nThis assessment is monitored for unauthorized AI assistance, automated inputs, and screen capture. Copying, reproducing, or sharing these questions is strictly prohibited. Violations will result in immediate test invalidation and reporting to the hiring organization.';
+export const CONFIDENTIALITY_TEXT_MAX = 1000;
+
+/** Module-level candidate notices editable in the Standard Library settings. */
+export interface ModuleNotices {
+  showTopDisclaimer: boolean;
+  topDisclaimerText: string;
+  showConfidentialityNotice: boolean;
+  confidentialityNoticeText: string;
+}
+
+export const DEFAULT_MODULE_NOTICES: ModuleNotices = {
+  showTopDisclaimer: false,
+  topDisclaimerText: DEFAULT_TOP_DISCLAIMER_TEXT,
+  showConfidentialityNotice: false,
+  confidentialityNoticeText: DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+};
+
 /** Library module in camelCase, normalized from the snake_case API rows. */
 export interface AssessmentModule {
   id: string;
@@ -29,6 +53,10 @@ export interface AssessmentModule {
   durationSeconds: number | null;
   timerMode: TimerMode;
   shuffleQuestions: boolean;
+  showTopDisclaimer: boolean;
+  topDisclaimerText: string;
+  showConfidentialityNotice: boolean;
+  confidentialityNoticeText: string;
   status: ModuleStatus;
   version: number;
   lineageId: string;
@@ -47,7 +75,7 @@ export interface AssessmentModuleDetail extends AssessmentModule {
 }
 
 /** Runner configuration editable while a module is a draft. */
-export interface ModuleSettings {
+export interface ModuleSettings extends ModuleNotices {
   durationSeconds: number | null;
   timerMode: TimerMode;
   shuffleQuestions: boolean;
@@ -71,6 +99,10 @@ export interface CatalogModule {
   durationSeconds: number | null;
   timerMode: TimerMode;
   shuffleQuestions: boolean;
+  showTopDisclaimer: boolean;
+  topDisclaimerText: string;
+  showConfidentialityNotice: boolean;
+  confidentialityNoticeText: string;
   version: number;
   questionCount: number;
   facetCount: number;

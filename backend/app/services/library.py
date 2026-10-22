@@ -31,7 +31,12 @@ from app.schemas.library import (
     TemplateUpdate,
 )
 from app.schemas.package_builder import QuestionItem, QuestionType
-from app.schemas.question_payload import QuestionPayload, payload_from_storage
+from app.schemas.question_payload import (
+    DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+    DEFAULT_TOP_DISCLAIMER_TEXT,
+    QuestionPayload,
+    payload_from_storage,
+)
 from app.services.client_package import ClientPackageError, PackageLockedError
 from app.services.package_generator import blueprint_question_to_storage
 
@@ -349,6 +354,14 @@ def _module_to_summary(
         duration_seconds=duration,
         timer_mode=getattr(module, "timer_mode", None) or "flexible",
         shuffle_questions=bool(getattr(module, "shuffle_questions", False)),
+        show_top_disclaimer=bool(getattr(module, "show_top_disclaimer", False)),
+        top_disclaimer_text=getattr(module, "top_disclaimer_text", None)
+        or DEFAULT_TOP_DISCLAIMER_TEXT,
+        show_confidentiality_notice=bool(
+            getattr(module, "show_confidentiality_notice", False)
+        ),
+        confidentiality_notice_text=getattr(module, "confidentiality_notice_text", None)
+        or DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
         status=status,
         version=int(getattr(module, "version", 1) or 1),
         lineage_id=getattr(module, "lineage_id", None) or module.id,
@@ -589,6 +602,10 @@ class LibraryService:
             duration_seconds=None,
             timer_mode=body.timer_mode,
             shuffle_questions=body.shuffle_questions,
+            show_top_disclaimer=body.show_top_disclaimer,
+            top_disclaimer_text=body.top_disclaimer_text,
+            show_confidentiality_notice=body.show_confidentiality_notice,
+            confidentiality_notice_text=body.confidentiality_notice_text,
             status=MODULE_STATUS_DRAFT,
             version=1,
             lineage_id=module_id,
@@ -658,6 +675,14 @@ class LibraryService:
             module.timer_mode = body.timer_mode
         if body.shuffle_questions is not None:
             module.shuffle_questions = body.shuffle_questions
+        if body.show_top_disclaimer is not None:
+            module.show_top_disclaimer = body.show_top_disclaimer
+        if body.top_disclaimer_text is not None:
+            module.top_disclaimer_text = body.top_disclaimer_text
+        if body.show_confidentiality_notice is not None:
+            module.show_confidentiality_notice = body.show_confidentiality_notice
+        if body.confidentiality_notice_text is not None:
+            module.confidentiality_notice_text = body.confidentiality_notice_text
         if body.is_active is not None:
             module.is_active = body.is_active
         if body.position is not None:
@@ -787,6 +812,14 @@ class LibraryService:
             duration_seconds=getattr(source, "duration_seconds", None),
             timer_mode=getattr(source, "timer_mode", None) or "flexible",
             shuffle_questions=bool(getattr(source, "shuffle_questions", False)),
+            show_top_disclaimer=bool(getattr(source, "show_top_disclaimer", False)),
+            top_disclaimer_text=getattr(source, "top_disclaimer_text", None)
+            or DEFAULT_TOP_DISCLAIMER_TEXT,
+            show_confidentiality_notice=bool(
+                getattr(source, "show_confidentiality_notice", False)
+            ),
+            confidentiality_notice_text=getattr(source, "confidentiality_notice_text", None)
+            or DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
             scoring_profile=getattr(source, "scoring_profile", None),
             status=MODULE_STATUS_DRAFT,
             version=next_version,

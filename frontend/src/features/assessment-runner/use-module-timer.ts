@@ -74,14 +74,18 @@ export function useModuleTimer({
   };
 }
 
-export type TimerTone = 'safe' | 'urgent';
+export type TimerTone = 'safe' | 'caution' | 'urgent';
 
-/** Fraction of the total duration that counts as the urgent final stretch. */
-export const URGENT_FRACTION = 0.25;
+/** Remaining fraction above which the countdown stays green. */
+export const SAFE_FRACTION = 2 / 3;
+/** Remaining fraction above which the countdown is amber (below: red). */
+export const CAUTION_FRACTION = 1 / 3;
 
 /**
- * Green while more than the final quarter remains; red from the last 25%
- * onward, including expiry and flexible-mode overtime.
+ * Dynamic 3-stage tone scaled to the total duration: green while more than
+ * two-thirds remains, amber between one-third and two-thirds, red below
+ * one-third — including expiry and flexible-mode overtime. E.g. an 18-minute
+ * test is green 18–12 min, amber 12–6 min, red under 6 min.
  *
  * @param remainingSeconds - Signed seconds left.
  * @param totalSeconds - Full module duration.
@@ -89,7 +93,9 @@ export const URGENT_FRACTION = 0.25;
  */
 export function timerTone(remainingSeconds: number, totalSeconds: number): TimerTone {
   if (totalSeconds <= 0) return 'urgent';
-  return remainingSeconds > totalSeconds * URGENT_FRACTION ? 'safe' : 'urgent';
+  if (remainingSeconds > totalSeconds * SAFE_FRACTION) return 'safe';
+  if (remainingSeconds > totalSeconds * CAUTION_FRACTION) return 'caution';
+  return 'urgent';
 }
 
 /**
