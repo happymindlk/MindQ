@@ -75,6 +75,7 @@ export interface RunnerTest {
   id: string;
   title: string;
   description: string | null;
+  module_kind?: ModuleKind;
   time_limit_minutes: number | null;
   duration_seconds: number | null;
   timer_mode: TimerMode;

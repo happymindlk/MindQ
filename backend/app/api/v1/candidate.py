@@ -87,6 +87,7 @@ async def get_test(
         seed=f"{candidate.id}:{assessment.id}",
         answers=answers,
         started_at=getattr(progress, "started_at", None),
+        module_kind=getattr(assessment, "module_kind", None),
     )
 
 

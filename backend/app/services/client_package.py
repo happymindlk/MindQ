@@ -669,6 +669,7 @@ class ClientPackageService:
                     timer_mode=getattr(module, "timer_mode", None),
                     shuffle=bool(getattr(module, "shuffle_questions", False)),
                     seed=f"preview:{module.id}",
+                    module_kind=getattr(module, "module_kind", None),
                 )
             )
         return out

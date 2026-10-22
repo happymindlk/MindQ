@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 from pydantic import BaseModel, EmailStr, ConfigDict, Field, StringConstraints, field_validator
 
 
@@ -174,6 +174,7 @@ class CandidateTestResponse(BaseModel):
     id: uuid.UUID
     title: str
     description: Optional[str] = None
+    module_kind: Literal["psychometric", "technical"] = "technical"
     time_limit_minutes: Optional[int] = None
     duration_seconds: Optional[int] = None
     timer_mode: str = "flexible"

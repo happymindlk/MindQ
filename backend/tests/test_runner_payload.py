@@ -64,6 +64,39 @@ def test_build_runner_payload_strips_keys_and_shuffles():
     assert [q["id"] for q in dumped["questions"]] == expected
 
 
+def test_runner_payload_carries_psychometric_module_kind():
+    payload = build_runner_payload(
+        assessment_id=uuid4(),
+        title="Personality",
+        description=None,
+        questions=QUESTIONS,
+        time_limit_minutes=None,
+        duration_seconds=None,
+        timer_mode="flexible",
+        shuffle=False,
+        seed="cand:assess",
+        module_kind="psychometric",
+    )
+    assert payload.model_dump()["module_kind"] == "psychometric"
+
+
+def test_runner_payload_defaults_and_normalizes_module_kind_to_technical():
+    for module_kind in (None, "technical", "bogus"):
+        payload = build_runner_payload(
+            assessment_id=uuid4(),
+            title="SQL",
+            description=None,
+            questions=QUESTIONS,
+            time_limit_minutes=None,
+            duration_seconds=None,
+            timer_mode="flexible",
+            shuffle=False,
+            seed="cand:assess",
+            module_kind=module_kind,
+        )
+        assert payload.model_dump()["module_kind"] == "technical"
+
+
 def test_runner_payload_exposes_custom_likert_labels_but_not_reverse_flag():
     labels = ["Never", "Rarely", "Sometimes", "Often", "Always"]
     payload = build_runner_payload(
