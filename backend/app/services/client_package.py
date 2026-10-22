@@ -116,6 +116,8 @@ def _company_response(corporate: Corporate) -> CompanyCreateResponse:
         name=corporate.name,
         slug=corporate.slug,
         contact_email=corporate.contact_email,
+        allowed_hr_emails=list(corporate.allowed_hr_emails or []),
+        is_active=bool(corporate.is_active) if corporate.is_active is not None else True,
         logo_url=corporate.logo_url,
         created_at=corporate.created_at,
     )
@@ -137,7 +139,7 @@ async def _get_corporate_or_raise(session: AsyncSession, company_id: UUID) -> Co
     corporate = (
         await session.execute(select(Corporate).where(Corporate.id == company_id))
     ).scalar_one_or_none()
-    if corporate is None:
+    if corporate is None or corporate.is_active is False:
         raise LookupError("Company not found")
     return corporate
 
@@ -276,9 +278,6 @@ def _draft_response(
         title=package.title,
         description=package.description,
         target_role=package.target_role,
-        passing_threshold=float(package.passing_threshold)
-        if package.passing_threshold is not None
-        else None,
         status=package.status if package.status in ("draft", "published") else "draft",
         is_active=bool(package.is_active),
         access_code=access,
@@ -670,6 +669,7 @@ class ClientPackageService:
                     timer_mode=getattr(module, "timer_mode", None),
                     shuffle=bool(getattr(module, "shuffle_questions", False)),
                     seed=f"preview:{module.id}",
+                    module_kind=getattr(module, "module_kind", None),
                 )
             )
         return out
@@ -745,7 +745,16 @@ class ClientPackageService:
         else:
             raise ClientPackageError("Could not allocate a unique company slug")
 
-        corporate = Corporate(name=body.name, slug=slug, contact_email=body.contact_email)
+        allowed = list(body.allowed_hr_emails or [])
+        if body.contact_email and body.contact_email not in allowed:
+            allowed.append(body.contact_email)
+        corporate = Corporate(
+            name=body.name,
+            slug=slug,
+            contact_email=body.contact_email,
+            allowed_hr_emails=allowed,
+            is_active=True,
+        )
         session.add(corporate)
         try:
             await session.commit()
@@ -775,6 +784,32 @@ class ClientPackageService:
         corporate = await _get_corporate_or_raise(session, company_id)
         for field, value in body.model_dump(exclude_unset=True).items():
             setattr(corporate, field, value)
+        await session.commit()
+        await session.refresh(corporate)
+        return _company_response(corporate)
+
+    @staticmethod
+    async def soft_delete_company(
+        session: AsyncSession, company_id: UUID
+    ) -> CompanyCreateResponse:
+        """Soft-delete a company: hide it from active views, keep all records.
+
+        Args:
+            session: Async database session.
+            company_id: Target corporate UUID.
+
+        Returns:
+            The company row with ``is_active`` now False.
+
+        Raises:
+            LookupError: No active company exists with ``company_id``.
+        """
+        corporate = (
+            await session.execute(select(Corporate).where(Corporate.id == company_id))
+        ).scalar_one_or_none()
+        if corporate is None or corporate.is_active is False:
+            raise LookupError("Company not found")
+        corporate.is_active = False
         await session.commit()
         await session.refresh(corporate)
         return _company_response(corporate)
@@ -877,17 +912,11 @@ class ClientPackageService:
                 )
             )
 
-        threshold = (
-            float(package.passing_threshold)
-            if package.passing_threshold is not None
-            else None
-        )
         return AdminPackageDetail(
             id=package.id,
             corporate_id=package.corporate_id,
             title=package.title,
             target_role=package.target_role,
-            passing_threshold=threshold,
             status="published" if published else "draft",
             review_token=package.review_token,
             description=package.description,
@@ -956,7 +985,6 @@ class ClientPackageService:
             if body.description is not None
             else (package.description or ""),
             target_role=body.target_role,
-            passing_threshold=body.passing_threshold,
             module_ids=body.module_ids,
             custom_questions=custom_payload,
             module_question_overrides=body.module_question_overrides,
@@ -1079,7 +1107,6 @@ class ClientPackageService:
                 title=body.title,
                 description=body.description.strip() or None,
                 target_role=(body.target_role or "").strip() or None,
-                passing_threshold=body.passing_threshold,
                 access_code=access_code,
                 status="draft",
                 is_active=False,
@@ -1094,7 +1121,6 @@ class ClientPackageService:
             package.title = body.title
             package.description = body.description.strip() or None
             package.target_role = (body.target_role or "").strip() or None
-            package.passing_threshold = body.passing_threshold
             if "open_time" in body.model_fields_set:
                 package.open_time = body.open_time
             if "close_time" in body.model_fields_set:

@@ -398,6 +398,17 @@ def score_against_jd_with_model(
         logger.warning(
             "report_synthesis_missing_summaries keys=%s model=%s", sorted(missing), model
         )
+    psychometric = {"Cognitive", "Personality", "Behavioral"}
+    expected_categories = {
+        str(row.get("category")) for row in assessment_scores or []
+    } & psychometric
+    missing_categories = expected_categories - set(synthesis.summaries_by_category())
+    if missing_categories:
+        logger.warning(
+            "report_synthesis_missing_category_summaries categories=%s model=%s",
+            sorted(missing_categories),
+            model,
+        )
     return synthesis, model
 
 

@@ -178,6 +178,88 @@ def test_update_company_rejects_invalid_payload(payload: dict):
     session.execute.assert_not_called()
 
 
+def test_create_company_normalizes_and_dedupes_whitelist():
+    session = _session(None)
+
+    async def _refresh(obj: Corporate) -> None:
+        obj.id = uuid4()
+        obj.created_at = datetime.now(timezone.utc)
+
+    session.refresh.side_effect = _refresh
+
+    res = _client(session).post(
+        "/admin/companies",
+        json={
+            "name": "Acme",
+            "allowed_hr_emails": ["HR@Acme.Test", "hr@acme.test", " People@Acme.Test "],
+        },
+    )
+
+    assert res.status_code == 200
+    assert res.json()["allowed_hr_emails"] == ["hr@acme.test", "people@acme.test"]
+    added: Corporate = session.add.call_args.args[0]
+    assert added.allowed_hr_emails == ["hr@acme.test", "people@acme.test"]
+
+
+def test_create_company_rejects_invalid_whitelist_email():
+    session = _session(None)
+    res = _client(session).post(
+        "/admin/companies",
+        json={"name": "Acme", "allowed_hr_emails": ["not-an-email"]},
+    )
+    assert res.status_code == 422
+    session.add.assert_not_called()
+
+
+def test_update_company_replaces_whitelist():
+    corp = _corporate()
+    corp.allowed_hr_emails = ["old@acme.test"]
+    session = _session(corp)
+
+    res = _client(session).patch(
+        f"/admin/companies/{corp.id}",
+        json={"allowed_hr_emails": ["New@Acme.Test"]},
+    )
+
+    assert res.status_code == 200
+    assert corp.allowed_hr_emails == ["new@acme.test"]
+
+
+def test_soft_delete_company_marks_inactive():
+    corp = _corporate()
+    corp.is_active = True
+    session = _session(corp)
+
+    res = _client(session).delete(f"/admin/companies/{corp.id}")
+
+    assert res.status_code == 200
+    assert corp.is_active is False
+    assert res.json()["is_active"] is False
+    session.commit.assert_awaited_once()
+
+
+def test_soft_delete_missing_or_inactive_company_returns_404():
+    inactive = _corporate()
+    inactive.is_active = False
+    session = _session(inactive)
+
+    res = _client(session).delete(f"/admin/companies/{inactive.id}")
+
+    assert res.status_code == 404
+    session.commit.assert_not_called()
+
+
+def test_update_inactive_company_returns_404():
+    inactive = _corporate()
+    inactive.is_active = False
+    session = _session(inactive)
+
+    res = _client(session).patch(f"/admin/companies/{inactive.id}", json={"name": "X"})
+
+    assert res.status_code == 404
+    session.commit.assert_not_called()
+
+
 # --------------------------------------------------------------------------- logo
 
 

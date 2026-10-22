@@ -53,11 +53,18 @@ def test_invite_rejects_existing_ops_email_without_sending(ops_role: str):
 
 def test_invite_proceeds_for_new_or_hr_email():
     corporate = MagicMock()
+    corporate.contact_email = None
+    corporate.allowed_hr_emails = []
     session = AsyncMock()
-    session.execute.side_effect = [_scalar(corporate), _scalar(None), MagicMock()]
+    session.execute.side_effect = [
+        _scalar(corporate),
+        _scalar(None),
+        _scalar(None),
+        MagicMock(),
+    ]
 
     with patch(
-        "app.api.v1.admin_ops.invite_hr_user_by_email", return_value=str(uuid4())
+        "app.api.v1.admin_ops.invite_hr_user_by_email", return_value=uuid4()
     ) as invite:
         res = _client(session).post(
             f"/admin/companies/{uuid4()}/invite-hr",
@@ -67,3 +74,32 @@ def test_invite_proceeds_for_new_or_hr_email():
     assert res.status_code == 200
     invite.assert_called_once()
     session.commit.assert_awaited_once()
+    assert corporate.allowed_hr_emails == ["hr@acme.test"]
+
+
+def test_invite_rejects_email_bound_to_another_company():
+    from types import SimpleNamespace
+
+    company_id, other_company_id = uuid4(), uuid4()
+    corporate = MagicMock()
+    existing = SimpleNamespace(
+        user_id=uuid4(), corporate_id=other_company_id, role="hr"
+    )
+    session = AsyncMock()
+    session.execute.side_effect = [
+        _scalar(corporate),
+        _scalar(None),
+        _scalar(existing),
+    ]
+
+    with patch(
+        "app.api.v1.admin_ops.invite_hr_user_by_email", return_value=existing.user_id
+    ):
+        res = _client(session).post(
+            f"/admin/companies/{company_id}/invite-hr",
+            json={"email": "hr@acme.test"},
+        )
+
+    assert res.status_code == 409
+    assert "another company" in res.json()["detail"]
+    session.commit.assert_not_called()

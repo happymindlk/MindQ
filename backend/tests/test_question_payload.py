@@ -190,6 +190,52 @@ def test_likert_legacy_storage_without_scale_labels_rebuilds_full_set():
     assert rebuilt["scale_labels"] == ["Low", *LIKERT_DEFAULT_LABELS[1:4], "High"]
 
 
+def test_disclaimer_defaults_off_and_round_trips_when_enabled():
+    plain = question_payload_adapter.validate_python({"type": "likert", "prompt": "Q"})
+    assert plain.to_storage()["show_disclaimer"] is False
+
+    flagged = question_payload_adapter.validate_python(
+        {"type": "likert", "prompt": "Q", "show_disclaimer": True, "disclaimer_text": " Custom note. "}
+    )
+    stored = flagged.to_storage()
+    assert stored["show_disclaimer"] is True
+    assert stored["disclaimer_text"] == "Custom note."
+    rebuilt = payload_from_storage(stored)
+    assert rebuilt is not None
+    assert rebuilt["show_disclaimer"] is True
+    assert rebuilt["disclaimer_text"] == "Custom note."
+    assert question_payload_adapter.validate_python(rebuilt).to_storage() == stored
+
+
+def test_disclaimer_blank_text_falls_back_to_default_wording():
+    from app.schemas.question_payload import DEFAULT_DISCLAIMER_TEXT
+
+    payload = question_payload_adapter.validate_python(
+        {"type": "likert", "prompt": "Q", "show_disclaimer": True, "disclaimer_text": "   "}
+    )
+    assert payload.to_storage()["disclaimer_text"] == DEFAULT_DISCLAIMER_TEXT
+
+
+def test_disclaimer_survives_candidate_sanitization():
+    from app.schemas.candidate import CandidateQuestion, strip_answer_keys
+
+    stored = question_payload_adapter.validate_python(
+        {
+            "type": "likert",
+            "prompt": "Q",
+            "show_disclaimer": True,
+            "disclaimer_text": "Be yourself.",
+        }
+    ).to_storage()
+    stored["id"] = "q1"
+    [safe] = strip_answer_keys([stored])
+    assert safe["show_disclaimer"] is True
+    assert "correct_answer" not in safe
+    question = CandidateQuestion.model_validate(safe)
+    assert question.show_disclaimer is True
+    assert question.disclaimer_text == "Be yourself."
+
+
 def test_open_ended_round_trip_maps_rubric():
     payload = question_payload_adapter.validate_python(
         {"type": "open_ended", "prompt": "Explain joins", "rubric": "Mentions inner/outer"}

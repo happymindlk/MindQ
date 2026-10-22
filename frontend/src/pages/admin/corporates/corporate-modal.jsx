@@ -35,6 +35,92 @@ function validateFields({ name, contactEmail }) {
   return errors;
 }
 
+/**
+ * HR portal whitelist editor: add/remove the exact emails allowed to
+ * OTP-login to this company's client portal.
+ */
+function AllowedHrEmailsEditor({ emails, disabled, onChange }) {
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState(null);
+
+  const add = () => {
+    const trimmed = draft.trim().toLowerCase();
+    if (!trimmed) {
+      setError('Enter an email address to add.');
+      return;
+    }
+    if (!EMAIL_PATTERN.test(trimmed)) {
+      setError('Enter a valid email address.');
+      return;
+    }
+    if (emails.includes(trimmed)) {
+      setError('That email is already on the list.');
+      return;
+    }
+    setError(null);
+    setDraft('');
+    onChange([...emails, trimmed]);
+  };
+
+  return (
+    <div>
+      <span className="metric-label mb-1.5 block">Allowed HR emails</span>
+      {emails.length > 0 ? (
+        <ul className="mb-2 flex flex-wrap gap-1.5" aria-label="Whitelisted HR emails">
+          {emails.map((email) => (
+            <li
+              key={email}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-300 dark:border-neutral-700 px-2 py-0.5 text-xs text-foreground"
+            >
+              {email}
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => onChange(emails.filter((e) => e !== email))}
+                aria-label={`Remove ${email} from allowed HR emails`}
+                className="p-0.5 rounded-full text-neutral-400 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:opacity-50"
+              >
+                <X className="w-3 h-3" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mb-2 text-xs text-neutral-500 dark:text-neutral-400">
+          No HR emails whitelisted yet — nobody can sign in to this company&apos;s HR portal.
+        </p>
+      )}
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <Input
+            type="email"
+            icon={Mail}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                add();
+              }
+            }}
+            placeholder="hr@acme.com"
+            aria-label="Add an allowed HR email"
+            error={error || undefined}
+            disabled={disabled}
+            autoComplete="off"
+          />
+        </div>
+        <Button type="button" variant="secondary" size="sm" onClick={add} disabled={disabled}>
+          Add
+        </Button>
+      </div>
+      <p className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+        Only these emails (with an HR invite) can sign in to this company&apos;s HR portal.
+      </p>
+    </div>
+  );
+}
+
 function LogoDropzone({ inputId, previewUrl, fallbackName, error, disabled, onFile, onClear }) {
   const inputRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -130,6 +216,7 @@ export default function CorporateModal({ isOpen, corporate, onClose, onSave }) {
 
   const [name, setName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
+  const [allowedHrEmails, setAllowedHrEmails] = useState([]);
   const [logoFile, setLogoFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [errors, setErrors] = useState({});
@@ -140,6 +227,13 @@ export default function CorporateModal({ isOpen, corporate, onClose, onSave }) {
     if (!isOpen) return;
     setName(corporate?.name ?? '');
     setContactEmail(corporate?.contact_email ?? '');
+    setAllowedHrEmails(
+      corporate?.allowed_hr_emails?.length
+        ? [...corporate.allowed_hr_emails]
+        : corporate?.contact_email
+          ? [corporate.contact_email]
+          : [],
+    );
     setLogoFile(null);
     setErrors({});
     setSubmitError(null);
@@ -178,6 +272,7 @@ export default function CorporateModal({ isOpen, corporate, onClose, onSave }) {
         id: corporate?.id,
         name: name.trim(),
         contactEmail: contactEmail.trim(),
+        allowedHrEmails,
         logoFile,
       });
       if (logoError) {
@@ -243,6 +338,11 @@ export default function CorporateModal({ isOpen, corporate, onClose, onSave }) {
           error={errors.contactEmail}
           disabled={isSaving}
           autoComplete="off"
+        />
+        <AllowedHrEmailsEditor
+          emails={allowedHrEmails}
+          disabled={isSaving}
+          onChange={setAllowedHrEmails}
         />
         <LogoDropzone
           inputId={logoInputId}

@@ -1,7 +1,7 @@
 import uuid
 import secrets
 from datetime import datetime, timezone
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -24,7 +24,6 @@ class Package(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=True)
     target_role: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    passing_threshold: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     access_code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     track_secret: Mapped[str] = mapped_column(
         String(64), unique=True, nullable=False, default=_track_secret

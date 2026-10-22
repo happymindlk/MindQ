@@ -11,7 +11,7 @@ import type { QuestionPayload, TemplateQuestion } from '../types/question';
 import { CloneVersionDialog } from './clone-version-dialog';
 import { ModuleSettingsPanel } from './module-settings-panel';
 import { NeonDrawer } from './neon-drawer';
-import { NeonButton, Pill } from './primitives';
+import { FieldLabel, NeonButton, Pill, inputClass } from './primitives';
 import { QuestionEditorModal } from './question-editor-modal';
 import { CATEGORY_TONES } from './tones';
 
@@ -32,6 +32,80 @@ interface EditorTarget {
 
 function questionPrompt(question: TemplateQuestion): string {
   return question.builder_payload?.prompt || question.question_text || 'Untitled question';
+}
+
+interface ModuleTitleEditorProps {
+  moduleId: string;
+  title: string;
+  locked: boolean;
+  saving: boolean;
+  onSave: (title: string) => void;
+  onLockedEdit: () => void;
+}
+
+/**
+ * Rename a draft assessment. Locked (published/live) versions route to
+ * Clone-as-New-Version instead, mirroring the timing settings guard.
+ */
+function ModuleTitleEditor({ moduleId, title, locked, saving, onSave, onLockedEdit }: ModuleTitleEditorProps) {
+  const [draft, setDraft] = useState(title);
+  const [prevTitle, setPrevTitle] = useState(title);
+  if (prevTitle !== title) {
+    setPrevTitle(title);
+    setDraft(title);
+  }
+  const trimmed = draft.trim();
+  const dirty = trimmed.length > 0 && trimmed !== title;
+  const inputId = `${moduleId}-title`;
+
+  return (
+    <section
+      aria-labelledby={`${moduleId}-title-heading`}
+      className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur-md"
+    >
+      <header className="flex items-center justify-between gap-2">
+        <h3 id={`${moduleId}-title-heading`} className="text-sm font-semibold text-white">
+          Assessment title
+        </h3>
+        {locked && (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-300">
+            <Lock className="h-3 w-3" aria-hidden /> Locked
+          </span>
+        )}
+      </header>
+      <div>
+        <FieldLabel htmlFor={inputId} hint={locked ? 'Clone as a new version to rename' : undefined}>
+          Title
+        </FieldLabel>
+        <input
+          id={inputId}
+          className={inputClass}
+          value={draft}
+          maxLength={255}
+          readOnly={locked}
+          onFocus={() => locked && onLockedEdit()}
+          onChange={(e) => {
+            if (locked) {
+              onLockedEdit();
+              return;
+            }
+            setDraft(e.target.value);
+          }}
+          aria-describedby={`${moduleId}-title-help`}
+        />
+        <p id={`${moduleId}-title-help`} className="mt-1 text-[11px] text-slate-500">
+          {locked
+            ? 'Published versions keep their title. Clone as a new version, rename the draft, then publish it.'
+            : 'Renaming applies to this draft version only.'}
+        </p>
+      </div>
+      <div className="flex justify-end">
+        <NeonButton size="sm" disabled={!dirty || locked} loading={saving} onClick={() => onSave(trimmed)}>
+          Save title
+        </NeonButton>
+      </div>
+    </section>
+  );
 }
 
 export function ModuleEditorDrawer({
@@ -74,6 +148,16 @@ export function ModuleEditorDrawer({
     if (locked) setCloneOpen(true);
     return !locked;
   }, [locked]);
+
+  const onSaveTitle = async (title: string) => {
+    try {
+      const updated = await detail.saveTitle(title);
+      onModuleChanged(updated);
+      toast({ title: 'Assessment title saved', variant: 'success' });
+    } catch (err) {
+      handleError(err, 'Could not save the assessment title.');
+    }
+  };
 
   const onSaveSettings = async (settings: ModuleSettings) => {
     try {
@@ -230,6 +314,15 @@ export function ModuleEditorDrawer({
                 </div>
               </div>
             )}
+
+            <ModuleTitleEditor
+              moduleId={module.id}
+              title={module.title}
+              locked={locked}
+              saving={pending === 'settings'}
+              onSave={(title) => void onSaveTitle(title)}
+              onLockedEdit={() => setCloneOpen(true)}
+            />
 
             <ModuleSettingsPanel
               moduleId={module.id}

@@ -8,6 +8,8 @@ import PageHeader from '../../components/ui/PageHeader';
 import Skeleton from '../../components/ui/Skeleton';
 import CorporateCard from './corporates/corporate-card';
 import CorporateModal from './corporates/corporate-modal';
+import Modal from '../../components/ui/Modal';
+import { useToast } from '../../components/ui/useToast';
 import { filterCorporates, useCorporates } from './corporates/use-corporates';
 
 const GRID = 'grid grid-cols-1 lg:grid-cols-2 gap-4';
@@ -70,9 +72,12 @@ function CorporateFilterBar({ value, onChange, onSearch, onReset, canReset }) {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { corporates, isLoading, error, reload, saveCorporate } = useCorporates();
+  const { toast } = useToast();
+  const { corporates, isLoading, error, reload, saveCorporate, deleteCorporate } = useCorporates();
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [draftKeyword, setDraftKeyword] = useState('');
   const [appliedKeyword, setAppliedKeyword] = useState('');
 
@@ -104,6 +109,28 @@ export default function Dashboard() {
   );
 
   const closeModal = useCallback(() => setModalOpen(false), []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleting) return;
+    setIsDeleting(true);
+    try {
+      await deleteCorporate(deleting);
+      toast({
+        variant: 'success',
+        title: 'Company deleted',
+        description: `${deleting.name} is hidden from active views. Its records are kept.`,
+      });
+      setDeleting(null);
+    } catch (err) {
+      toast({
+        variant: 'error',
+        title: 'Delete failed',
+        description: err.message || 'Something went wrong. Try again.',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleting, deleteCorporate, toast]);
 
   let body;
   if (isLoading && corporates.length === 0) {
@@ -157,6 +184,7 @@ export default function Dashboard() {
             corporate={corporate}
             onOpen={openCorporate}
             onEdit={openEdit}
+            onDelete={setDeleting}
           />
         ))}
       </div>
@@ -198,6 +226,41 @@ export default function Dashboard() {
         onClose={closeModal}
         onSave={saveCorporate}
       />
+
+      <Modal
+        isOpen={deleting !== null}
+        onClose={() => !isDeleting && setDeleting(null)}
+        title={deleting ? `Delete ${deleting.name}?` : 'Delete company'}
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setDeleting(null)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              isLoading={isDeleting}
+              onClick={confirmDelete}
+            >
+              Delete company
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          {deleting?.name} will be hidden from the dashboard, Suite Builder, and Assessment
+          History, and its HR users will no longer be able to sign in. Packages, candidates,
+          and reports are kept and can be restored by an administrator — nothing is permanently
+          erased.
+        </p>
+      </Modal>
     </div>
   );
 }

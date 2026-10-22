@@ -127,7 +127,6 @@ class DraftPackageRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(default="", max_length=50_000)
     target_role: str | None = Field(default=None, max_length=255)
-    passing_threshold: float | None = Field(default=None, ge=0, le=100)
     module_ids: list[UUID] = Field(default_factory=list)
     custom_questions: list[CustomQuestionIn] = Field(default_factory=list)
     module_question_overrides: dict[str, list[dict[str, Any]]] | None = None
@@ -147,7 +146,7 @@ class DraftPackageRequest(BaseModel):
             raise ValueError("Title is required")
         return stripped
 
-    @field_validator("target_role", "passing_threshold", "open_time", "close_time", mode="before")
+    @field_validator("target_role", "open_time", "close_time", mode="before")
     @classmethod
     def _optional_blanks(cls, value: object) -> object:
         return _blank_to_none(value)
@@ -166,7 +165,6 @@ class DraftPackageResponse(BaseModel):
     title: str
     description: str | None = None
     target_role: str | None = None
-    passing_threshold: float | None = None
     status: Literal["draft", "published"]
     is_active: bool
     access_code: str | None = None
@@ -325,6 +323,8 @@ class CorporateListItem(BaseModel):
     name: str
     slug: str
     contact_email: str | None = None
+    allowed_hr_emails: list[str] = Field(default_factory=list)
+    is_active: bool = True
     logo_url: str | None = None
     package_count: int = 0
     candidate_count: int = 0
@@ -354,6 +354,34 @@ def _normalize_optional_email(value: str | None) -> str | None:
     return stripped
 
 
+def _normalize_email_list(value: object) -> list[str]:
+    """Normalize an HR whitelist: lower-case, validate, de-duplicate.
+
+    Args:
+        value: Raw list from the request body (None means unset).
+
+    Returns:
+        Normalized emails in first-seen order.
+
+    Raises:
+        ValueError: The value is not a list, or an entry is not a valid email.
+    """
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("allowed_hr_emails must be a list of email addresses")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for entry in value:
+        email = _normalize_optional_email(str(entry) if entry is not None else None)
+        if email is None:
+            raise ValueError("A valid email address is required")
+        if email not in seen:
+            seen.add(email)
+            normalized.append(email)
+    return normalized
+
+
 def _require_company_name(value: str) -> str:
     """Strip a company name and reject whitespace-only input.
 
@@ -378,6 +406,7 @@ class CompanyCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     slug: str | None = Field(default=None, max_length=255)
     contact_email: str | None = Field(default=None, max_length=255)
+    allowed_hr_emails: list[str] = Field(default_factory=list, max_length=100)
 
     @field_validator("name")
     @classmethod
@@ -397,12 +426,18 @@ class CompanyCreateRequest(BaseModel):
     def _email(cls, value: str | None) -> str | None:
         return _normalize_optional_email(value)
 
+    @field_validator("allowed_hr_emails", mode="before")
+    @classmethod
+    def _emails(cls, value: object) -> list[str]:
+        return _normalize_email_list(value)
+
 
 class CompanyUpdateRequest(BaseModel):
     """Ops payload to edit a company; omitted fields are left unchanged."""
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     contact_email: str | None = Field(default=None, max_length=255)
+    allowed_hr_emails: list[str] | None = Field(default=None, max_length=100)
 
     @field_validator("name")
     @classmethod
@@ -416,6 +451,13 @@ class CompanyUpdateRequest(BaseModel):
     def _email(cls, value: str | None) -> str | None:
         return _normalize_optional_email(value)
 
+    @field_validator("allowed_hr_emails", mode="before")
+    @classmethod
+    def _emails(cls, value: object) -> list[str] | None:
+        if value is None:
+            raise ValueError("allowed_hr_emails cannot be null")
+        return _normalize_email_list(value)
+
 
 class CompanyCreateResponse(BaseModel):
     """Corporates row returned after an ops create or update."""
@@ -424,6 +466,8 @@ class CompanyCreateResponse(BaseModel):
     name: str
     slug: str
     contact_email: str | None = None
+    allowed_hr_emails: list[str] = Field(default_factory=list)
+    is_active: bool = True
     logo_url: str | None = None
     created_at: datetime
 
@@ -504,7 +548,6 @@ class AdminPackageDetail(BaseModel):
     corporate_id: UUID
     title: str
     target_role: str | None = None
-    passing_threshold: float | None = None
     status: Literal["draft", "published"]
     review_token: str | None = None
     description: str | None = None
@@ -525,7 +568,6 @@ class AdminPackageUpdateRequest(BaseModel):
     # Role Assessment Brief. None keeps the stored value so older clients cannot wipe it.
     description: str | None = Field(default=None, max_length=50_000)
     target_role: str | None = Field(default=None, max_length=255)
-    passing_threshold: float | None = Field(default=None, ge=0, le=100)
     corporate_id: UUID | None = None
     module_ids: list[UUID] = Field(default_factory=list)
     custom_questions: list[CustomQuestionIn] | None = None
@@ -547,7 +589,7 @@ class AdminPackageUpdateRequest(BaseModel):
             raise ValueError("Title is required")
         return stripped
 
-    @field_validator("target_role", "passing_threshold", "open_time", "close_time", mode="before")
+    @field_validator("target_role", "open_time", "close_time", mode="before")
     @classmethod
     def _optional_blanks(cls, value: object) -> object:
         return _blank_to_none(value)

@@ -23,6 +23,7 @@ from app.security import enforce_user_rate_limit, report_limiter
 from app.services.client_package import PSYCHOMETRIC, TECHNICAL, _strip_answer_keys
 from app.services.jd_scoring import JdScoringService
 from app.services.report_synthesis import (
+    build_category_summaries,
     build_competency_breakdown,
     build_module_outcomes,
     compute_category_averages,
@@ -403,5 +404,6 @@ async def build_technical_report_data(
         strengths=synthesis.strengths if synthesis else [],
         risks_and_antipatterns=synthesis.risks_and_antipatterns if synthesis else [],
         competency_breakdown=breakdown,
+        category_summaries=build_category_summaries(candidate.full_name, outcomes, synthesis),
         custom_questions=_custom_questions(assessments, responses_by_assessment, summaries),
     )

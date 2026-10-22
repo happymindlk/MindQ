@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Pencil } from 'lucide-react';
+import { Pencil, Trash2 } from 'lucide-react';
 import { formatDate } from '../../../lib/format-date';
 import CorporateLogo from './corporate-logo';
 
@@ -31,8 +31,9 @@ function CorporateStatusPill({ active }) {
  * @param {import('./use-corporates').CorporateRow} props.corporate
  * @param {(corporate: import('./use-corporates').CorporateRow) => void} props.onOpen
  * @param {(corporate: import('./use-corporates').CorporateRow) => void} props.onEdit
+ * @param {(corporate: import('./use-corporates').CorporateRow) => void} [props.onDelete]
  */
-function CorporateCard({ corporate, onOpen, onEdit }) {
+function CorporateCard({ corporate, onOpen, onEdit, onDelete }) {
   const isActive = (corporate.package_count ?? 0) > 0;
   const members = corporate.candidate_count ?? 0;
 
@@ -85,6 +86,21 @@ function CorporateCard({ corporate, onOpen, onEdit }) {
           >
             <Pencil className="w-3.5 h-3.5" />
           </button>
+          {onDelete && (
+            <button
+              type="button"
+              aria-label={`Delete ${corporate.name}`}
+              title={`Delete ${corporate.name}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onDelete(corporate);
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+              className="p-1.5 rounded-md text-slate-400 transition-colors duration-150 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
         <p className="tabular-data text-xs text-slate-500 dark:text-slate-400">
           Created {formatDate(corporate.created_at)}

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Literal, Optional
 from pydantic import BaseModel, EmailStr, ConfigDict, Field, StringConstraints, field_validator
 
 
@@ -142,6 +142,10 @@ class CandidateQuestion(BaseModel):
     options: list[str] = Field(default_factory=list)
     allow_multiple: bool = False
     media_url: Optional[str] = None
+    # Presentation-only per-question disclaimer; not an answer key, so it is
+    # deliberately absent from _ANSWER_KEY_ALIASES above.
+    show_disclaimer: bool = False
+    disclaimer_text: Optional[str] = None
     likert_label_1: Optional[str] = None
     likert_label_5: Optional[str] = None
     scale_labels: Optional[list[str]] = None
@@ -170,6 +174,7 @@ class CandidateTestResponse(BaseModel):
     id: uuid.UUID
     title: str
     description: Optional[str] = None
+    module_kind: Literal["psychometric", "technical"] = "technical"
     time_limit_minutes: Optional[int] = None
     duration_seconds: Optional[int] = None
     timer_mode: str = "flexible"

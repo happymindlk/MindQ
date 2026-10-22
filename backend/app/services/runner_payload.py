@@ -87,6 +87,7 @@ def build_runner_payload(
     seed: str,
     answers: dict[str, Any] | None = None,
     started_at: datetime | None = None,
+    module_kind: str | None = None,
 ) -> CandidateTestResponse:
     """Assemble the sanitized test payload served to the candidate runner.
 
@@ -102,6 +103,9 @@ def build_runner_payload(
         seed: Shuffle seed.
         answers: Previously saved answers for hydration.
         started_at: Attempt start, so the client can resume a strict countdown.
+        module_kind: ``psychometric`` or ``technical``; anything else
+            normalizes to ``technical`` so integrity notices only ever
+            appear on psychometric modules.
 
     Returns:
         Typed payload; ``CandidateQuestion`` drops every non-allowlisted key.
@@ -115,6 +119,7 @@ def build_runner_payload(
             "id": assessment_id,
             "title": title,
             "description": description,
+            "module_kind": "psychometric" if module_kind == "psychometric" else "technical",
             "time_limit_minutes": time_limit_minutes,
             "duration_seconds": duration,
             "timer_mode": timer_mode if timer_mode in ("strict", "flexible") else "flexible",

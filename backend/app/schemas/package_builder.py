@@ -56,6 +56,20 @@ class GeneratePackageRequest(BaseModel):
     question_count: int = Field(default=10, ge=4, le=20)
 
 
+class JdPdfExtractResponse(BaseModel):
+    """Plain text extracted from an uploaded JD PDF.
+
+    The text is a drop-in replacement for a pasted job description: the
+    builder drops it into the Role Assessment Brief so generation, draft
+    save, and JD-fit scoring all see the same string.
+    """
+
+    text: str
+    page_count: int
+    char_count: int
+    truncated: bool = False
+
+
 class SavePackageRequest(BaseModel):
     """Approved blueprint plus JD text persisted for later JD-fit scoring."""
 

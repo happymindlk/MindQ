@@ -87,6 +87,7 @@ export const REPORT_CSS = `
 .mq-avg-label {
   font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; font-weight: 600;
 }
+.mq-group-summary { margin-bottom: 8px !important; font-size: 12.5px; line-height: 1.55; color: #374151; }
 .mq-score-list { list-style: none; margin: 0; padding: 0; }
 .mq-score-item { padding: 8px 0; border-top: 1px solid #f3f4f6; }
 .mq-score-item:first-child { border-top: 0; padding-top: 0; }
@@ -145,9 +146,7 @@ export const REPORT_CSS = `
 .mq-footer-text { font-size: 10px; line-height: 1.5; color: #6b7280; }
 .mq-footer-disclaimer { color: #92400e; font-weight: 600; }
 .mq-brand { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.mq-brand svg { display: block; }
-.mq-brand-word { font-size: 15px; font-weight: 800; letter-spacing: -0.01em; color: #111827; }
-.mq-brand-q { color: #4f46e5; }
+.mq-brand img { display: block; }
 
 .mindq-report [data-pdf-block], .mq-score-item {
   break-inside: avoid; page-break-inside: avoid; break-after: auto; page-break-after: auto;
@@ -166,7 +165,7 @@ export const REPORT_CSS = `
     position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: 8px 0 0;
     min-height: ${PRINT_FOOTER_HEIGHT_MM - 2}mm;
   }
-  .mq-dash-card, .mq-sr-strengths, .mq-sr-risks, .mq-bar-fill, .mq-logo-fallback, .mq-brand svg {
+  .mq-dash-card, .mq-sr-strengths, .mq-sr-risks, .mq-bar-fill, .mq-logo-fallback, .mq-brand img {
     -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
 }

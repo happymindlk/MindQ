@@ -56,6 +56,12 @@ beforeEach(() => {
 });
 
 describe('AdminLogin OTP', () => {
+  it('does not link to the candidate or client portals', () => {
+    renderLogin();
+    expect(screen.queryByRole('link', { name: /candidate access/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /client access/i })).not.toBeInTheDocument();
+  });
+
   it('moves to the code form when the password step requires a code', async () => {
     const user = userEvent.setup();
     renderLogin();

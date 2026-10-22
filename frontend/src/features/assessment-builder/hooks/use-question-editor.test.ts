@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_DISCLAIMER_TEXT,
   LIKERT_DEFAULT_LABELS,
   createEmptyQuestion,
   resolveLikertLabels,
@@ -82,6 +83,32 @@ describe('validateQuestion / toApiPayload', () => {
 
   it('requires a prompt', () => {
     expect(validateQuestion(createEmptyQuestion('likert'))).toContain('Question prompt is required.');
+  });
+});
+
+describe('question disclaimer', () => {
+  it('defaults off with the standard wording', () => {
+    const q = createEmptyQuestion('likert');
+    expect(q.show_disclaimer).toBe(false);
+    expect(q.disclaimer_text).toBe(DEFAULT_DISCLAIMER_TEXT);
+  });
+
+  it('toggles and edits via the reducer, and survives a type switch', () => {
+    let state: QuestionPayload = createEmptyQuestion('likert');
+    state = questionEditorReducer(state, { kind: 'set-disclaimer', value: true });
+    state = questionEditorReducer(state, { kind: 'set-disclaimer-text', value: 'Custom wording.' });
+    expect(state.show_disclaimer).toBe(true);
+    state = questionEditorReducer(state, { kind: 'set-type', type: 'mcq' });
+    expect(state.show_disclaimer).toBe(true);
+    expect(state.disclaimer_text).toBe('Custom wording.');
+  });
+
+  it('requires text when enabled and carries both fields into the API payload', () => {
+    const blank = { ...createEmptyQuestion('likert'), prompt: 'Q', show_disclaimer: true, disclaimer_text: '  ' };
+    expect(validateQuestion(blank)).toContain('Disclaimer text is required when the disclaimer is enabled.');
+    const ok = { ...blank, disclaimer_text: ' Be yourself. ' };
+    expect(validateQuestion(ok)).toEqual([]);
+    expect(toApiPayload(ok)).toMatchObject({ show_disclaimer: true, disclaimer_text: 'Be yourself.' });
   });
 });
 

@@ -21,6 +21,16 @@ class AssessmentBreakdownItem(BaseModel):
     performance_summary: str
 
 
+PsychometricCategory = Literal["Cognitive", "Personality", "Behavioral"]
+
+
+class CategorySummaryItem(BaseModel):
+    """Holistic prose summary for one psychometric pillar (Technical excluded)."""
+
+    category: PsychometricCategory
+    summary: str
+
+
 class ReportCustomQuestion(BaseModel):
     """Sanitized technical item evaluation (no answer keys)."""
 
@@ -53,6 +63,7 @@ class MindQReport(BaseModel):
     strengths: list[str] = Field(default_factory=list)
     risks_and_antipatterns: list[str] = Field(default_factory=list)
     competency_breakdown: list[AssessmentBreakdownItem] = Field(default_factory=list)
+    category_summaries: list[CategorySummaryItem] = Field(default_factory=list)
 
 
 class MindQReportResponse(MindQReport):

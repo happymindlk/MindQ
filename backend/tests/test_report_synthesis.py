@@ -10,12 +10,14 @@ import pytest
 from app.schemas.jd_evaluation import (
     REPORT_SYNTHESIS_JSON_SCHEMA,
     AssessmentNarrative,
+    CategoryNarrative,
     ReportSynthesis,
     first_sentence,
 )
 from app.schemas.mindq_report import AssessmentBreakdownItem, MindQReport
 from app.services.report_synthesis import (
     ModuleOutcome,
+    build_category_summaries,
     build_competency_breakdown,
     build_module_outcomes,
     compute_category_averages,
@@ -262,6 +264,51 @@ def test_duplicate_titles_keep_distinct_summaries() -> None:
     assert [r.performance_summary for r in rows] == ["First.", "Second."]
 
 
+def _pillar_synthesis(summaries: dict[str, str]) -> ReportSynthesis:
+    return ReportSynthesis(
+        executive_summary="Summary.",
+        category_summaries=[
+            CategoryNarrative(category=k, summary=v) for k, v in summaries.items()  # type: ignore[arg-type]
+        ],
+    )
+
+
+def test_build_category_summaries_orders_pillars_and_excludes_technical() -> None:
+    outcomes = [
+        _outcome("Scenarios", "behavioral", 60.0, key="A1"),
+        _outcome("SQL", "technical", 90.0, key="A2"),
+        _outcome("Logic", "cognitive", 80.0, key="A3"),
+        _outcome("Big Five", "personality", 70.0, key="A4"),
+    ]
+    synthesis = _pillar_synthesis(
+        {"Behavioral": "Sound judgement.", "Cognitive": "Sharp reasoning.", "Personality": "Steady style."}
+    )
+    result = build_category_summaries("Ada", outcomes, synthesis)
+    assert [(s.category, s.summary) for s in result] == [
+        ("Cognitive", "Sharp reasoning."),
+        ("Personality", "Steady style."),
+        ("Behavioral", "Sound judgement."),
+    ]
+
+
+def test_build_category_summaries_falls_back_and_omits_unscored_pillars() -> None:
+    outcomes = [
+        _outcome("Logic", "cognitive", 80.0, key="A1"),
+        _outcome("Verbal", "cognitive", 60.0, key="A2"),
+        _outcome("Big Five", "personality", None, key="A3"),
+    ]
+    result = build_category_summaries("Ada Lovelace", outcomes, None)
+    assert len(result) == 1
+    assert result[0].category == "Cognitive"
+    assert "averaged 70%" in result[0].summary
+    assert "Logic, Verbal" in result[0].summary
+
+
+def test_build_category_summaries_ignores_technical_prose() -> None:
+    outcomes = [_outcome("SQL", "technical", 90.0, key="A1")]
+    assert build_category_summaries("Ada", outcomes, _pillar_synthesis({})) == []
+
+
 def test_prompt_assessments_and_fingerprint() -> None:
     scored = _outcome("Logic", "cognitive", 80.0, key="A1")
     unscored = _outcome("Essay", "technical", None, key="A2")
@@ -311,6 +358,10 @@ def test_gemini_json_schema_matches_pydantic_model() -> None:
         REPORT_SYNTHESIS_JSON_SCHEMA["properties"]["competency_breakdown"]["items"]["properties"]
     )
     assert item_fields == set(AssessmentNarrative.model_fields)
+    category_fields = set(
+        REPORT_SYNTHESIS_JSON_SCHEMA["properties"]["category_summaries"]["items"]["properties"]
+    )
+    assert category_fields == set(CategoryNarrative.model_fields)
     assert "overall_fit" not in schema_fields
     assert "hiring_recommendation" not in schema_fields
 
@@ -334,5 +385,6 @@ def test_mindq_report_has_no_fit_or_recommendation_fields() -> None:
         "strengths",
         "risks_and_antipatterns",
         "competency_breakdown",
+        "category_summaries",
     } <= fields
     assert not any("fit" in f or "recommendation" in f for f in fields)

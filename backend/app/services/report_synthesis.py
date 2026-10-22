@@ -22,7 +22,11 @@ from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.models.global_module import GlobalModule
 from app.schemas.jd_evaluation import ReportSynthesis
-from app.schemas.mindq_report import AssessmentBreakdownItem, ReportCategory
+from app.schemas.mindq_report import (
+    AssessmentBreakdownItem,
+    CategorySummaryItem,
+    ReportCategory,
+)
 from app.services.candidate_service import COMPLETED_STATUS
 from app.services.scoring import _extract_answer, _normalize_answer_set
 
@@ -357,6 +361,80 @@ def performance_summaries(
         for o in outcomes
         if o.score is not None
     }
+
+
+_BAND_PHRASES: dict[Band, str] = {
+    "exceptional": "an exceptional result well above typical benchmarks",
+    "strong": "a strong result indicating solid capability in this area",
+    "moderate": "a moderate result indicating functional capability with room to grow",
+    "developing": "a developing result suggesting this area may need support",
+    "emerging": "a low result indicating this area is currently a gap",
+}
+
+
+def fallback_category_summary(
+    candidate_name: str, category: CategoryKey, outcomes: Sequence[ModuleOutcome]
+) -> str:
+    """Deterministic pillar summary used when Gemini prose is missing.
+
+    Args:
+        candidate_name: Candidate full name (fallback copy).
+        category: Psychometric pillar key.
+        outcomes: Scored outcomes in that pillar.
+
+    Returns:
+        Two-sentence summary derived only from server-computed scores.
+    """
+    label = CATEGORY_LABELS[category]
+    scores = [o.score for o in outcomes if o.score is not None]
+    average = round(sum(scores) / len(scores), 1) if scores else 0.0
+    count = len(scores)
+    noun = "assessment" if count == 1 else "assessments"
+    titles = ", ".join(o.title for o in outcomes if o.score is not None)
+    return (
+        f"{_first_name(candidate_name)} averaged {average:g}% across {count} {label} "
+        f"{noun}, {_BAND_PHRASES[score_band(average)]}. "
+        f"This pillar covers {titles}."
+    )
+
+
+def build_category_summaries(
+    candidate_name: str,
+    outcomes: Iterable[ModuleOutcome],
+    synthesis: ReportSynthesis | None,
+) -> list[CategorySummaryItem]:
+    """Merge pillar prose onto the psychometric pillars actually completed.
+
+    Only Cognitive, Personality, and Behavioral pillars with at least one
+    scored outcome are returned, in fixed category order; Technical never
+    carries a pillar summary. Gemini prose wins, with a deterministic
+    fallback so a pillar never renders blank.
+
+    Args:
+        candidate_name: Candidate full name (fallback copy).
+        outcomes: Completed module outcomes.
+        synthesis: Gemini synthesis, or None when unavailable.
+
+    Returns:
+        Pillar summaries in category order.
+    """
+    outcome_list = list(outcomes)
+    prose = synthesis.summaries_by_category() if synthesis else {}
+    summaries: list[CategorySummaryItem] = []
+    for key in CATEGORY_ORDER:
+        if key == "technical":
+            continue
+        pillar = [o for o in outcome_list if o.category == key and o.score is not None]
+        if not pillar:
+            continue
+        label = CATEGORY_LABELS[key]
+        summaries.append(
+            CategorySummaryItem(
+                category=label,  # type: ignore[arg-type]
+                summary=prose.get(label) or fallback_category_summary(candidate_name, key, pillar),
+            )
+        )
+    return summaries
 
 
 def build_competency_breakdown(

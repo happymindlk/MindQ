@@ -67,12 +67,15 @@ export interface RunnerQuestion {
   likert_label_1: string | null;
   likert_label_5: string | null;
   scale_labels?: string[] | null;
+  show_disclaimer?: boolean;
+  disclaimer_text?: string | null;
 }
 
 export interface RunnerTest {
   id: string;
   title: string;
   description: string | null;
+  module_kind?: ModuleKind;
   time_limit_minutes: number | null;
   duration_seconds: number | null;
   timer_mode: TimerMode;

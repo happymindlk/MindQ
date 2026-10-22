@@ -15,6 +15,8 @@ export type EditorAction =
   | { kind: 'set-facet'; value: string }
   | { kind: 'set-rationale'; value: string }
   | { kind: 'set-media'; value: string | null }
+  | { kind: 'set-disclaimer'; value: boolean }
+  | { kind: 'set-disclaimer-text'; value: string }
   | { kind: 'sjt-option-text'; index: number; value: string }
   | { kind: 'sjt-option-weight'; index: number; weight: SjtWeight }
   | { kind: 'mcq-mode'; mode: McqMode }
@@ -62,6 +64,10 @@ export function questionEditorReducer(state: QuestionPayload, action: EditorActi
       return { ...state, sme_rationale: action.value };
     case 'set-media':
       return { ...state, media_url: action.value };
+    case 'set-disclaimer':
+      return { ...state, show_disclaimer: action.value };
+    case 'set-disclaimer-text':
+      return { ...state, disclaimer_text: action.value };
     case 'sjt-option-text': {
       if (state.type !== 'sjt') return state;
       const current = state.options[action.index];

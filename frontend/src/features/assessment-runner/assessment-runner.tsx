@@ -64,6 +64,7 @@ export function AssessmentRunner({
   const answersRef = useRef(answers);
   answersRef.current = answers;
   const dirtyRef = useRef<Set<string>>(new Set());
+  const inFlightSaveRef = useRef<Set<string>>(new Set());
   const debounceRef = useRef<number | null>(null);
   const submittedRef = useRef(false);
 
@@ -117,6 +118,14 @@ export function AssessmentRunner({
     async (questionId: string) => {
       const answer = answersRef.current[questionId];
       if (!hasContent(answer)) return;
+      // A debounced save and a navigation flush can race for the same
+      // question; keep it dirty so the in-flight save's completion (or the
+      // next flush) is the single writer instead of posting duplicates.
+      if (inFlightSaveRef.current.has(questionId)) {
+        dirtyRef.current.add(questionId);
+        return;
+      }
+      inFlightSaveRef.current.add(questionId);
       dirtyRef.current.delete(questionId);
       setSaveStatus('saving');
       try {
@@ -136,6 +145,8 @@ export function AssessmentRunner({
         } else if (isAttemptLocked(err)) {
           onLocked(errorMessage(err, 'Assessment already completed. Modifications are locked.'));
         }
+      } finally {
+        inFlightSaveRef.current.delete(questionId);
       }
     },
     [onLocked, submit, telemetry, test.id, transport],
@@ -149,6 +160,14 @@ export function AssessmentRunner({
     // Draft lives in localStorage; a failed save must never block navigation.
     await Promise.allSettled(Array.from(dirtyRef.current).map((id) => saveQuestion(id)));
   }, [saveQuestion]);
+
+  // Navigation must never wait on the network: advance locally and let the
+  // autosave settle in the background. Failures stay in dirtyRef (saveQuestion
+  // re-queues them) and are retried on the next navigation, debounced save,
+  // exit flush, or final submit — whose payload re-sends every answer anyway.
+  const flushDirtyInBackground = useCallback(() => {
+    void flushDirty().catch(() => undefined);
+  }, [flushDirty]);
 
   useEffect(
     () => () => {
@@ -173,18 +192,18 @@ export function AssessmentRunner({
     }, AUTOSAVE_DELAY_MS);
   };
 
-  const go = async (nextIndex: number) => {
-    await flushDirty();
+  const go = (nextIndex: number) => {
+    flushDirtyInBackground();
     setIndex(Math.max(0, Math.min(questions.length - 1, nextIndex)));
   };
 
-  const handleNext = async () => {
+  const handleNext = () => {
     if (index === questions.length - 1) {
-      await flushDirty();
+      flushDirtyInBackground();
       setConfirmOpen(true);
       return;
     }
-    await go(index + 1);
+    go(index + 1);
   };
 
   const answeredCount = useMemo(
@@ -266,6 +285,14 @@ export function AssessmentRunner({
 
       <section className="flex min-h-[320px] flex-col rounded-lg border border-border bg-surface p-4 sm:p-5" aria-labelledby={`q-${current.id}`}>
         <div className="flex-1">
+          {current.show_disclaimer && current.disclaimer_text?.trim() && (
+            <p
+              role="note"
+              className="mb-4 rounded-md border border-border bg-surface-raised px-3 py-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300"
+            >
+              {current.disclaimer_text}
+            </p>
+          )}
           <div id={`q-${current.id}`} className="text-lg font-medium leading-relaxed text-slate-900 dark:text-slate-100">
             <MarkdownText source={current.text} />
           </div>
@@ -280,13 +307,20 @@ export function AssessmentRunner({
             </figure>
           )}
           <RunnerQuestionInput question={current} value={value} disabled={timeUp || submitting} onChange={handleChange} />
+          {test.module_kind === 'psychometric' && (
+            <p role="note" className="mt-4 text-sm font-bold italic leading-relaxed text-foreground">
+              ***CONFIDENTIALITY &amp; INTEGRITY NOTICE***
+              <br />
+              ***This assessment is monitored for unauthorized AI assistance, automated inputs, and screen capture. Copying, reproducing, or sharing these questions is strictly prohibited. Violations will result in immediate test invalidation and reporting to the hiring organization.***
+            </p>
+          )}
         </div>
 
         <div className="mt-8 flex flex-col gap-2 border-t border-border pt-4">
           <div className="flex items-center justify-between">
             <button
               type="button"
-              onClick={() => void go(index - 1)}
+              onClick={() => go(index - 1)}
               disabled={index === 0 || timeUp}
               className="inline-flex h-10 items-center gap-1 rounded-md px-3 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-surface-raised hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -294,7 +328,7 @@ export function AssessmentRunner({
             </button>
             <button
               type="button"
-              onClick={() => void handleNext()}
+              onClick={() => handleNext()}
               disabled={!canAdvance || timeUp}
               className="inline-flex h-10 items-center gap-1 rounded-md bg-primary px-4 text-sm font-medium text-primary-fg hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50"
             >

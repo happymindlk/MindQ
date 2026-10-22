@@ -78,8 +78,28 @@ function SynthesisFallback({ status }) {
 
 /**
  * @typedef {{ category: string, assessmentName: string, score: number, summary: string }} BreakdownRow
- * @typedef {{ category: string, average: number | null, rows: BreakdownRow[] }} CategoryGroup
+ * @typedef {{ category: string, average: number | null, rows: BreakdownRow[], summary: string | null }} CategoryGroup
  */
+
+const PSYCHOMETRIC_CATEGORIES = new Set(['Cognitive', 'Personality', 'Behavioral']);
+
+/**
+ * @param {unknown} raw
+ * @returns {Record<string, string>}
+ */
+function toCategorySummaries(raw) {
+  if (!Array.isArray(raw)) return {};
+  /** @type {Record<string, string>} */
+  const out = {};
+  raw.forEach((item) => {
+    if (!item || typeof item !== 'object') return;
+    const category = String(item.category || '').trim();
+    const summary = String(item.summary || '').trim();
+    if (!PSYCHOMETRIC_CATEGORIES.has(category) || !summary) return;
+    if (!(category in out)) out[category] = summary;
+  });
+  return out;
+}
 
 /**
  * @param {unknown} raw
@@ -106,9 +126,10 @@ function toBreakdownRows(raw) {
 /**
  * @param {BreakdownRow[]} rows
  * @param {Record<string, number>} averages
+ * @param {Record<string, string>} summaries
  * @returns {CategoryGroup[]}
  */
-function groupByCategory(rows, averages) {
+function groupByCategory(rows, averages, summaries) {
   const byCategory = new Map();
   rows.forEach((row) => {
     if (!byCategory.has(row.category)) byCategory.set(row.category, []);
@@ -123,6 +144,7 @@ function groupByCategory(rows, averages) {
     .map((category) => ({
       category,
       average: averages[category] ?? null,
+      summary: summaries[category] ?? null,
       rows: byCategory.get(category),
     }));
 }
@@ -163,7 +185,7 @@ function toViewModel(data) {
     synthesisStatus: typeof data.synthesis_status === 'string' ? data.synthesis_status : 'pending',
     strengths: asList(data.strengths),
     risks: asList(data.risks_and_antipatterns),
-    groups: groupByCategory(breakdown, averages),
+    groups: groupByCategory(breakdown, averages, toCategorySummaries(data.category_summaries)),
     customs: Array.isArray(data.custom_questions) ? data.custom_questions : [],
   };
 }
@@ -179,6 +201,7 @@ function CategoryBreakdown({ group }) {
           {formatScore(group.average)}
         </span>
       </div>
+      {group.summary && <p className="mq-group-summary">{group.summary}</p>}
       <ul className="mq-score-list">
         {group.rows.map((row, index) => (
           <li key={`${row.assessmentName}-${index}`} className="mq-score-item" data-pdf-row>
