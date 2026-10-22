@@ -108,6 +108,100 @@ function ModuleTitleEditor({ moduleId, title, locked, saving, onSave, onLockedEd
   );
 }
 
+interface ModuleDescriptionEditorProps {
+  moduleId: string;
+  description: string | null;
+  locked: boolean;
+  saving: boolean;
+  onSave: (description: string) => void;
+  onLockedEdit: () => void;
+}
+
+/**
+ * Edit a draft assessment's description. Mirrors {@link ModuleTitleEditor}:
+ * same lock guard, dirty tracking, and save flow; locked (published/live)
+ * versions route to Clone-as-New-Version instead. An empty description
+ * clears the stored value.
+ */
+export function ModuleDescriptionEditor({
+  moduleId,
+  description,
+  locked,
+  saving,
+  onSave,
+  onLockedEdit,
+}: ModuleDescriptionEditorProps) {
+  const current = description ?? '';
+  const [draft, setDraft] = useState(current);
+  const [prevDescription, setPrevDescription] = useState(current);
+  if (prevDescription !== current) {
+    setPrevDescription(current);
+    setDraft(current);
+  }
+  const dirty = draft.trim() !== current.trim();
+  const inputId = `${moduleId}-description`;
+
+  return (
+    <section
+      aria-labelledby={`${moduleId}-description-heading`}
+      className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur-md"
+    >
+      <header className="flex items-center justify-between gap-2">
+        <h3 id={`${moduleId}-description-heading`} className="text-sm font-semibold text-white">
+          Assessment description
+        </h3>
+        {locked && (
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-300">
+            <Lock className="h-3 w-3" aria-hidden /> Locked
+          </span>
+        )}
+      </header>
+      <div>
+        <FieldLabel htmlFor={inputId} hint={locked ? 'Clone as a new version to edit' : undefined}>
+          Description
+        </FieldLabel>
+        <textarea
+          id={inputId}
+          className={`${inputClass} min-h-24 resize-y leading-relaxed`}
+          value={draft}
+          rows={4}
+          placeholder="What this assessment measures, who it is for, and how to interpret it…"
+          readOnly={locked}
+          onFocus={() => locked && onLockedEdit()}
+          onChange={(e) => {
+            if (locked) {
+              onLockedEdit();
+              return;
+            }
+            setDraft(e.target.value);
+          }}
+          aria-describedby={`${moduleId}-description-help`}
+        />
+        <p id={`${moduleId}-description-help`} className="mt-1 text-[11px] text-slate-500">
+          {locked
+            ? 'Published versions keep their description. Clone as a new version, edit the draft, then publish it.'
+            : 'Leave blank to clear the description. Editing applies to this draft version only.'}
+        </p>
+      </div>
+      <div className="flex justify-end gap-2">
+        {dirty && !locked && (
+          <NeonButton size="sm" variant="ghost" disabled={saving} onClick={() => setDraft(current)}>
+            Cancel
+          </NeonButton>
+        )}
+        <NeonButton
+          size="sm"
+          disabled={!dirty || locked}
+          loading={saving}
+          onClick={() => onSave(draft.trim())}
+        >
+          Save description
+        </NeonButton>
+      </div>
+    </section>
+  );
+}
+
 export function ModuleEditorDrawer({
   moduleId,
   onClose,
@@ -156,6 +250,16 @@ export function ModuleEditorDrawer({
       toast({ title: 'Assessment title saved', variant: 'success' });
     } catch (err) {
       handleError(err, 'Could not save the assessment title.');
+    }
+  };
+
+  const onSaveDescription = async (description: string) => {
+    try {
+      const updated = await detail.saveDescription(description);
+      onModuleChanged(updated);
+      toast({ title: 'Assessment description saved', variant: 'success' });
+    } catch (err) {
+      handleError(err, 'Could not save the assessment description.');
     }
   };
 
@@ -329,6 +433,15 @@ export function ModuleEditorDrawer({
               locked={locked}
               saving={pending === 'settings'}
               onSave={(title) => void onSaveTitle(title)}
+              onLockedEdit={() => setCloneOpen(true)}
+            />
+
+            <ModuleDescriptionEditor
+              moduleId={module.id}
+              description={module.description}
+              locked={locked}
+              saving={pending === 'settings'}
+              onSave={(description) => void onSaveDescription(description)}
               onLockedEdit={() => setCloneOpen(true)}
             />
 
