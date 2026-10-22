@@ -4,20 +4,32 @@ import { formatClock, timerTone, useModuleTimer } from './use-module-timer';
 
 describe('timerTone', () => {
   it.each([
+    // 600s total: >400 safe, >200 caution, otherwise urgent.
     [600, 600, 'safe'],
-    [151, 600, 'safe'],
-    [150, 600, 'urgent'],
+    [401, 600, 'safe'],
+    [400, 600, 'caution'],
+    [201, 600, 'caution'],
+    [200, 600, 'urgent'],
     [1, 600, 'urgent'],
     [0, 600, 'urgent'],
     [-30, 600, 'urgent'],
-    [46, 180, 'safe'],
-    [45, 180, 'urgent'],
+    // 18-minute (1080s) example: 18–12 min safe, 12–6 min caution, <6 min urgent.
+    [1080, 1080, 'safe'],
+    [721, 1080, 'safe'],
+    [720, 1080, 'caution'],
+    [361, 1080, 'caution'],
+    [360, 1080, 'urgent'],
+    [121, 180, 'safe'],
+    [120, 180, 'caution'],
+    [61, 180, 'caution'],
+    [60, 180, 'urgent'],
   ] as const)('remaining %is of %is is %s', (remaining, total, tone) => {
     expect(timerTone(remaining, total)).toBe(tone);
   });
 
   it('treats a non-positive duration as urgent', () => {
     expect(timerTone(10, 0)).toBe('urgent');
+    expect(timerTone(10, -5)).toBe('urgent');
   });
 });
 

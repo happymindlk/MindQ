@@ -1,3 +1,7 @@
+import {
+  DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+  DEFAULT_TOP_DISCLAIMER_TEXT,
+} from '../types/module';
 import type { AssessmentCategory, CatalogModule, ModuleKind, TimerMode } from '../types/module';
 
 const CATEGORIES: readonly string[] = ['behavioral', 'cognitive', 'personality'];
@@ -34,6 +38,11 @@ export function catalogFromRow(row: Record<string, unknown>): CatalogModule {
     durationSeconds,
     timerMode,
     shuffleQuestions: row.shuffle_questions === true,
+    showTopDisclaimer: row.show_top_disclaimer === true,
+    topDisclaimerText: str(row.top_disclaimer_text) ?? DEFAULT_TOP_DISCLAIMER_TEXT,
+    showConfidentialityNotice: row.show_confidentiality_notice === true,
+    confidentialityNoticeText:
+      str(row.confidentiality_notice_text) ?? DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
     version: num(row.version) ?? 1,
     questionCount: num(row.question_count) ?? questions.length,
     facetCount: num(row.facet_count) ?? 0,

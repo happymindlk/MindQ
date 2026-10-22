@@ -163,6 +163,40 @@ async def test_get_test_response_omits_answer_keys(candidate_client, monkeypatch
     assert body["answers"] == {"q1": "4"}
 
 
+@pytest.mark.asyncio
+async def test_get_test_carries_module_notices_at_test_level(candidate_client, monkeypatch):
+    client, _ = candidate_client
+    assessment_id = uuid4()
+    fake = _assessment(assessment_id)
+    fake.show_top_disclaimer = True
+    fake.top_disclaimer_text = "Module top note."
+    fake.show_confidentiality_notice = True
+    fake.confidentiality_notice_text = "Module confidentiality note."
+
+    async def require_writable(session, candidate, aid):
+        return fake, None
+
+    async def saved_answers(session, candidate_id, aid):
+        return {}
+
+    async def ensure_started(session, candidate, assessment, progress):
+        return SimpleNamespace(started_at=None)
+
+    monkeypatch.setattr(CandidateService, "require_writable_assessment", require_writable)
+    monkeypatch.setattr(CandidateService, "get_saved_answers", saved_answers)
+    monkeypatch.setattr(CandidateService, "ensure_started", ensure_started)
+    response = await client.get(f"/api/v1/candidate/test/{assessment_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["show_top_disclaimer"] is True
+    assert body["top_disclaimer_text"] == "Module top note."
+    assert body["show_confidentiality_notice"] is True
+    assert body["confidentiality_notice_text"] == "Module confidentiality note."
+    # Notices are presentation-only test-level fields, not question payloads.
+    assert "top_disclaimer_text" not in body["questions"][0]
+    assert "confidentiality_notice_text" not in body["questions"][0]
+
+
 SERVER_ONLY_QUESTIONS = [
     {
         "id": "sjt1",

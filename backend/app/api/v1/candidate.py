@@ -88,6 +88,12 @@ async def get_test(
         answers=answers,
         started_at=getattr(progress, "started_at", None),
         module_kind=getattr(assessment, "module_kind", None),
+        show_top_disclaimer=bool(getattr(assessment, "show_top_disclaimer", False)),
+        top_disclaimer_text=getattr(assessment, "top_disclaimer_text", None),
+        show_confidentiality_notice=bool(
+            getattr(assessment, "show_confidentiality_notice", False)
+        ),
+        confidentiality_notice_text=getattr(assessment, "confidentiality_notice_text", None),
     )
 
 

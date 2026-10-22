@@ -179,6 +179,12 @@ class CandidateTestResponse(BaseModel):
     duration_seconds: Optional[int] = None
     timer_mode: str = "flexible"
     shuffle_questions: bool = False
+    # Module-level candidate notices (presentation-only, test-level so they
+    # render on every question; distinct from the per-question disclaimer).
+    show_top_disclaimer: bool = False
+    top_disclaimer_text: Optional[str] = None
+    show_confidentiality_notice: bool = False
+    confidentiality_notice_text: Optional[str] = None
     started_at: Optional[datetime] = None
     questions: list[CandidateQuestion] = Field(default_factory=list)
     answers: dict[str, Any] = Field(default_factory=dict)

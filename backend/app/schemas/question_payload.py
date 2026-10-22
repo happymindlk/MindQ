@@ -45,6 +45,34 @@ DEFAULT_DISCLAIMER_TEXT = (
 )
 DISCLAIMER_TEXT_MAX = 500
 
+# Module-level candidate notices (Standard Library module settings). These are
+# test-level presentation fields, distinct from the per-question disclaimer
+# above: when enabled they render on every question in the module.
+DEFAULT_TOP_DISCLAIMER_TEXT = DEFAULT_DISCLAIMER_TEXT
+TOP_DISCLAIMER_TEXT_MAX = DISCLAIMER_TEXT_MAX
+DEFAULT_CONFIDENTIALITY_NOTICE_TEXT = (
+    "CONFIDENTIALITY & INTEGRITY NOTICE\n"
+    "This assessment is monitored for unauthorized AI assistance, automated inputs, "
+    "and screen capture. Copying, reproducing, or sharing these questions is strictly "
+    "prohibited. Violations will result in immediate test invalidation and reporting "
+    "to the hiring organization."
+)
+CONFIDENTIALITY_TEXT_MAX = 1000
+
+
+def normalize_notice_text(value: str | None, *, default: str) -> str:
+    """Trim a module notice, falling back to its default when blank.
+
+    Args:
+        value: Raw notice text from an admin payload (may be None/blank).
+        default: Default wording used when ``value`` carries no content.
+
+    Returns:
+        Trimmed notice text, or ``default`` when blank.
+    """
+    text = (value or "").strip()
+    return text or default
+
 _QUOTED_ANSWER = re.compile(r'"([^"]*)"')
 
 

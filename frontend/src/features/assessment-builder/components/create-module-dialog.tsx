@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import { ASSESSMENT_CATEGORIES, CATEGORY_LABELS } from '../types/module';
+import {
+  ASSESSMENT_CATEGORIES,
+  CATEGORY_LABELS,
+  CONFIDENTIALITY_TEXT_MAX,
+  DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+  DEFAULT_TOP_DISCLAIMER_TEXT,
+  TOP_DISCLAIMER_TEXT_MAX,
+} from '../types/module';
 import type { AssessmentCategory, ModuleCreateInput, ModuleKind, TimerMode } from '../types/module';
 import { FieldLabel, NeonButton, NeonDialog, Switch, inputClass } from './primitives';
 
@@ -33,6 +40,12 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
   const [minutes, setMinutes] = useState(defaults.minutes);
   const [timerMode, setTimerMode] = useState<TimerMode>(defaults.timerMode);
   const [shuffle, setShuffle] = useState(defaults.shuffle);
+  const [showTopDisclaimer, setShowTopDisclaimer] = useState(false);
+  const [topDisclaimerText, setTopDisclaimerText] = useState(DEFAULT_TOP_DISCLAIMER_TEXT);
+  const [showConfidentialityNotice, setShowConfidentialityNotice] = useState(true);
+  const [confidentialityNoticeText, setConfidentialityNoticeText] = useState(
+    DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+  );
 
   if (!draft) return null;
 
@@ -55,6 +68,11 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
         durationSeconds: minutes > 0 ? minutes * 60 : null,
         timerMode: minutes > 0 ? timerMode : 'flexible',
         shuffleQuestions: shuffle,
+        showTopDisclaimer: draft.kind === 'psychometric' ? showTopDisclaimer : false,
+        topDisclaimerText: topDisclaimerText.trim() || DEFAULT_TOP_DISCLAIMER_TEXT,
+        showConfidentialityNotice: draft.kind === 'psychometric' ? showConfidentialityNotice : false,
+        confidentialityNoticeText:
+          confidentialityNoticeText.trim() || DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
       },
     });
   };
@@ -157,6 +175,56 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
           </div>
         </div>
         <Switch id="new-module-shuffle" checked={shuffle} onChange={setShuffle} label="Randomize Question Order" />
+        {draft.kind === 'psychometric' && (
+          <div className="space-y-4 border-t border-slate-800 pt-4">
+            <div className="space-y-3">
+              <Switch
+                id="new-module-top-disclaimer"
+                checked={showTopDisclaimer}
+                onChange={setShowTopDisclaimer}
+                label="Show disclaimer above every question"
+                description="Rendered above each question in this assessment."
+              />
+              {showTopDisclaimer && (
+                <div>
+                  <FieldLabel htmlFor="new-module-top-disclaimer-text">Top disclaimer text</FieldLabel>
+                  <textarea
+                    id="new-module-top-disclaimer-text"
+                    rows={3}
+                    maxLength={TOP_DISCLAIMER_TEXT_MAX}
+                    className={inputClass}
+                    value={topDisclaimerText}
+                    onChange={(e) => setTopDisclaimerText(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="space-y-3">
+              <Switch
+                id="new-module-confidentiality-notice"
+                checked={showConfidentialityNotice}
+                onChange={setShowConfidentialityNotice}
+                label="Show confidentiality & integrity notice"
+                description="Rendered in bold italic below the answers on every question."
+              />
+              {showConfidentialityNotice && (
+                <div>
+                  <FieldLabel htmlFor="new-module-confidentiality-notice-text">
+                    Confidentiality notice text
+                  </FieldLabel>
+                  <textarea
+                    id="new-module-confidentiality-notice-text"
+                    rows={5}
+                    maxLength={CONFIDENTIALITY_TEXT_MAX}
+                    className={inputClass}
+                    value={confidentialityNoticeText}
+                    onChange={(e) => setConfidentialityNoticeText(e.target.value)}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </form>
     </NeonDialog>
   );

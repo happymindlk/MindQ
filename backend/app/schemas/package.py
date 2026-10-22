@@ -3,11 +3,26 @@ from typing import List, Optional, Any
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 
+from app.schemas.question_payload import (
+    CONFIDENTIALITY_TEXT_MAX,
+    DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+    DEFAULT_TOP_DISCLAIMER_TEXT,
+    TOP_DISCLAIMER_TEXT_MAX,
+)
+
 
 class AssessmentIn(BaseModel):
     title: str
     description: Optional[str] = None
     time_limit_minutes: Optional[int] = None
+    show_top_disclaimer: bool = False
+    top_disclaimer_text: str = Field(
+        default=DEFAULT_TOP_DISCLAIMER_TEXT, max_length=TOP_DISCLAIMER_TEXT_MAX
+    )
+    show_confidentiality_notice: bool = False
+    confidentiality_notice_text: str = Field(
+        default=DEFAULT_CONFIDENTIALITY_NOTICE_TEXT, max_length=CONFIDENTIALITY_TEXT_MAX
+    )
     questions: List[Any] = Field(default_factory=list)
 
 
@@ -16,6 +31,10 @@ class AssessmentResponse(BaseModel):
     title: str
     description: Optional[str] = None
     time_limit_minutes: Optional[int] = None
+    show_top_disclaimer: bool = False
+    top_disclaimer_text: str = DEFAULT_TOP_DISCLAIMER_TEXT
+    show_confidentiality_notice: bool = False
+    confidentiality_notice_text: str = DEFAULT_CONFIDENTIALITY_NOTICE_TEXT
     position: int
     questions: List[Any]
 

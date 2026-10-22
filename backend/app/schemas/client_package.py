@@ -8,6 +8,10 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.package_builder import QuestionType
+from app.schemas.question_payload import (
+    DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+    DEFAULT_TOP_DISCLAIMER_TEXT,
+)
 
 
 def _blank_to_none(value: object) -> object:
@@ -68,6 +72,10 @@ class GlobalModuleResponse(BaseModel):
     duration_seconds: int | None = None
     timer_mode: Literal["strict", "flexible"] = "flexible"
     shuffle_questions: bool = False
+    show_top_disclaimer: bool = False
+    top_disclaimer_text: str = DEFAULT_TOP_DISCLAIMER_TEXT
+    show_confidentiality_notice: bool = False
+    confidentiality_notice_text: str = DEFAULT_CONFIDENTIALITY_NOTICE_TEXT
     status: Literal["draft", "published"] = "published"
     version: int = 1
     lineage_id: UUID | None = None
@@ -532,6 +540,10 @@ class AdminPackageModule(BaseModel):
     time_limit_minutes: int | None = None
     duration_seconds: int | None = None
     timer_mode: Literal["strict", "flexible"] = "flexible"
+    show_top_disclaimer: bool = False
+    top_disclaimer_text: str = DEFAULT_TOP_DISCLAIMER_TEXT
+    show_confidentiality_notice: bool = False
+    confidentiality_notice_text: str = DEFAULT_CONFIDENTIALITY_NOTICE_TEXT
     version: int = 1
     # Set when a draft cart row was resolved to a newer published version of its lineage.
     upgraded_from_version: int | None = None

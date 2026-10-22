@@ -8,6 +8,10 @@ from typing import Any
 from uuid import UUID
 
 from app.schemas.candidate import CandidateTestResponse, strip_answer_keys
+from app.schemas.question_payload import (
+    DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+    DEFAULT_TOP_DISCLAIMER_TEXT,
+)
 
 # Network latency + auto-submit round-trip allowance after a strict deadline.
 STRICT_GRACE_SECONDS = 30
@@ -88,6 +92,10 @@ def build_runner_payload(
     answers: dict[str, Any] | None = None,
     started_at: datetime | None = None,
     module_kind: str | None = None,
+    show_top_disclaimer: bool = False,
+    top_disclaimer_text: str | None = None,
+    show_confidentiality_notice: bool = False,
+    confidentiality_notice_text: str | None = None,
 ) -> CandidateTestResponse:
     """Assemble the sanitized test payload served to the candidate runner.
 
@@ -104,8 +112,11 @@ def build_runner_payload(
         answers: Previously saved answers for hydration.
         started_at: Attempt start, so the client can resume a strict countdown.
         module_kind: ``psychometric`` or ``technical``; anything else
-            normalizes to ``technical`` so integrity notices only ever
-            appear on psychometric modules.
+            normalizes to ``technical``.
+        show_top_disclaimer: Whether the module top disclaimer renders.
+        top_disclaimer_text: Module top disclaimer wording.
+        show_confidentiality_notice: Whether the confidentiality notice renders.
+        confidentiality_notice_text: Confidentiality notice wording.
 
     Returns:
         Typed payload; ``CandidateQuestion`` drops every non-allowlisted key.
@@ -124,6 +135,11 @@ def build_runner_payload(
             "duration_seconds": duration,
             "timer_mode": timer_mode if timer_mode in ("strict", "flexible") else "flexible",
             "shuffle_questions": bool(shuffle),
+            "show_top_disclaimer": bool(show_top_disclaimer),
+            "top_disclaimer_text": top_disclaimer_text or DEFAULT_TOP_DISCLAIMER_TEXT,
+            "show_confidentiality_notice": bool(show_confidentiality_notice),
+            "confidentiality_notice_text": confidentiality_notice_text
+            or DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
             "started_at": started_at,
             "questions": safe,
             "answers": answers or {},

@@ -9,7 +9,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.schemas.client_package import CustomQuestionIn
 from app.schemas.package_builder import QuestionType
-from app.schemas.question_payload import QuestionPayload
+from app.schemas.question_payload import (
+    CONFIDENTIALITY_TEXT_MAX,
+    DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+    DEFAULT_TOP_DISCLAIMER_TEXT,
+    TOP_DISCLAIMER_TEXT_MAX,
+    QuestionPayload,
+    normalize_notice_text,
+)
 
 AssessmentCategory = Literal["behavioral", "cognitive", "personality"]
 ModuleStatus = Literal["draft", "published"]
@@ -31,7 +38,25 @@ class TemplateCreate(BaseModel):
     duration_seconds: int | None = Field(default=None, ge=0, le=MAX_DURATION_SECONDS)
     timer_mode: TimerMode = "flexible"
     shuffle_questions: bool = False
+    show_top_disclaimer: bool = False
+    top_disclaimer_text: str = Field(
+        default=DEFAULT_TOP_DISCLAIMER_TEXT, max_length=TOP_DISCLAIMER_TEXT_MAX
+    )
+    show_confidentiality_notice: bool = False
+    confidentiality_notice_text: str = Field(
+        default=DEFAULT_CONFIDENTIALITY_NOTICE_TEXT, max_length=CONFIDENTIALITY_TEXT_MAX
+    )
     slug: str | None = Field(default=None, max_length=128)
+
+    @field_validator("top_disclaimer_text")
+    @classmethod
+    def _top_disclaimer_text(cls, value: str) -> str:
+        return normalize_notice_text(value, default=DEFAULT_TOP_DISCLAIMER_TEXT)
+
+    @field_validator("confidentiality_notice_text")
+    @classmethod
+    def _confidentiality_notice_text(cls, value: str) -> str:
+        return normalize_notice_text(value, default=DEFAULT_CONFIDENTIALITY_NOTICE_TEXT)
 
     @field_validator("slug", mode="before")
     @classmethod
@@ -54,14 +79,34 @@ class TemplateUpdate(BaseModel):
     duration_seconds: int | None = Field(default=None, ge=0, le=MAX_DURATION_SECONDS)
     timer_mode: TimerMode | None = None
     shuffle_questions: bool | None = None
+    show_top_disclaimer: bool | None = None
+    top_disclaimer_text: str | None = Field(default=None, max_length=TOP_DISCLAIMER_TEXT_MAX)
+    show_confidentiality_notice: bool | None = None
+    confidentiality_notice_text: str | None = Field(
+        default=None, max_length=CONFIDENTIALITY_TEXT_MAX
+    )
     is_active: bool | None = None
     position: int | None = None
+
+    @field_validator("top_disclaimer_text")
+    @classmethod
+    def _top_disclaimer_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_notice_text(value, default=DEFAULT_TOP_DISCLAIMER_TEXT)
+
+    @field_validator("confidentiality_notice_text")
+    @classmethod
+    def _confidentiality_notice_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalize_notice_text(value, default=DEFAULT_CONFIDENTIALITY_NOTICE_TEXT)
 
     def touches_runner_config(self) -> bool:
         """Whether this update changes fields that are frozen once published.
 
         Returns:
-            True when timing/shuffle fields are present in the payload.
+            True when timing/shuffle/notice fields are present in the payload.
         """
         return any(
             value is not None
@@ -70,6 +115,10 @@ class TemplateUpdate(BaseModel):
                 self.duration_seconds,
                 self.timer_mode,
                 self.shuffle_questions,
+                self.show_top_disclaimer,
+                self.top_disclaimer_text,
+                self.show_confidentiality_notice,
+                self.confidentiality_notice_text,
             )
         )
 
@@ -156,6 +205,10 @@ class TemplateSummary(BaseModel):
     duration_seconds: int | None = None
     timer_mode: TimerMode = "flexible"
     shuffle_questions: bool = False
+    show_top_disclaimer: bool = False
+    top_disclaimer_text: str = DEFAULT_TOP_DISCLAIMER_TEXT
+    show_confidentiality_notice: bool = False
+    confidentiality_notice_text: str = DEFAULT_CONFIDENTIALITY_NOTICE_TEXT
     status: ModuleStatus = "draft"
     version: int = 1
     lineage_id: UUID | None = None
