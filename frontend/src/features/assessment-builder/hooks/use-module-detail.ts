@@ -12,6 +12,7 @@ export interface ModuleDetailState {
   pending: PendingAction;
   reload: () => Promise<void>;
   saveTitle: (title: string) => Promise<AssessmentModuleDetail>;
+  saveDescription: (description: string) => Promise<AssessmentModuleDetail>;
   saveSettings: (settings: ModuleSettings) => Promise<AssessmentModuleDetail>;
   publish: () => Promise<AssessmentModuleDetail>;
   cloneVersion: () => Promise<AssessmentModuleDetail>;
@@ -93,6 +94,18 @@ export function useModuleDetail(moduleId: string | null): ModuleDetailState {
     [requireId, run],
   );
 
+  const saveDescription = useCallback(
+    (description: string) =>
+      run('settings', async () => {
+        const detail = await libraryApi.updateMetadata(requireId(), {
+          description: description.trim(),
+        });
+        setModule(detail);
+        return detail;
+      }),
+    [requireId, run],
+  );
+
   const publish = useCallback(
     () =>
       run('publish', async () => {
@@ -130,5 +143,18 @@ export function useModuleDetail(moduleId: string | null): ModuleDetailState {
     [reload, requireId, run],
   );
 
-  return { module, loading, error, pending, reload, saveTitle, saveSettings, publish, cloneVersion, saveQuestion, removeQuestion };
+  return {
+    module,
+    loading,
+    error,
+    pending,
+    reload,
+    saveTitle,
+    saveDescription,
+    saveSettings,
+    publish,
+    cloneVersion,
+    saveQuestion,
+    removeQuestion,
+  };
 }
