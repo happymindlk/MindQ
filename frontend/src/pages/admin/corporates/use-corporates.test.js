@@ -4,7 +4,14 @@ import { filterCorporates } from './use-corporates';
 vi.mock('../../../lib/adminApi', () => ({ adminApi: {} }));
 
 const ROWS = [
-  { id: '1', name: 'Acme Corp', slug: 'acme-corp', contact_email: 'hr@acme.test', logo_url: null },
+  {
+    id: '1',
+    name: 'Acme Corp',
+    slug: 'acme-corp',
+    contact_email: 'hr@acme.test',
+    allowed_hr_emails: ['hr@acme.test', 'people@acme.test'],
+    logo_url: null,
+  },
   { id: '2', name: 'Globex', slug: 'globex', contact_email: null, logo_url: null },
   { id: '3', name: 'Initech', slug: 'initech', contact_email: 'people@initrode.io', logo_url: null },
 ];
@@ -24,6 +31,10 @@ describe('filterCorporates', () => {
 
   it('matches on HR contact email only', () => {
     expect(filterCorporates(ROWS, 'initrode').map((r) => r.id)).toEqual(['3']);
+  });
+
+  it('matches on whitelisted HR emails', () => {
+    expect(filterCorporates(ROWS, 'people@acme').map((r) => r.id)).toEqual(['1']);
   });
 
   it('tolerates rows with a null contact email', () => {

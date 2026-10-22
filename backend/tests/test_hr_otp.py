@@ -50,8 +50,14 @@ def _membership(user_id, corporate_id, role: str = "hr"):
     )
 
 
-def _corporate(corporate_id):
-    return SimpleNamespace(id=corporate_id, name="Acme", logo_url=None)
+def _corporate(corporate_id, *, allowed_hr_emails=None, is_active=True):
+    return SimpleNamespace(
+        id=corporate_id,
+        name="Acme",
+        logo_url=None,
+        allowed_hr_emails=[EMAIL] if allowed_hr_emails is None else allowed_hr_emails,
+        is_active=is_active,
+    )
 
 
 class _Result:
@@ -208,6 +214,39 @@ async def test_request_sends_ses_code_and_returns_temp_token():
 
 
 @pytest.mark.asyncio
+async def test_request_rejects_email_not_on_company_whitelist():
+    user_id, corporate_id = uuid4(), uuid4()
+    db = _FakeDb(
+        [
+            _Result(scalar=_membership(user_id, corporate_id)),
+            _Result(scalar=_corporate(corporate_id, allowed_hr_emails=["other@acme.test"])),
+        ]
+    )
+    with patch("app.services.hr_otp.find_auth_user_id_by_email", return_value=user_id):
+        with pytest.raises(HrOtpError) as exc:
+            await request_hr_otp(db, EMAIL)
+    assert exc.value.status_code == 403
+    assert "not registered" in exc.value.detail
+    assert db.added == []
+
+
+@pytest.mark.asyncio
+async def test_request_rejects_inactive_company():
+    user_id, corporate_id = uuid4(), uuid4()
+    db = _FakeDb(
+        [
+            _Result(scalar=_membership(user_id, corporate_id)),
+            _Result(scalar=_corporate(corporate_id, is_active=False)),
+        ]
+    )
+    with patch("app.services.hr_otp.find_auth_user_id_by_email", return_value=user_id):
+        with pytest.raises(HrOtpError) as exc:
+            await request_hr_otp(db, EMAIL)
+    assert exc.value.status_code == 403
+    assert db.added == []
+
+
+@pytest.mark.asyncio
 async def test_request_mail_failure_rolls_back_to_503():
     user_id, corporate_id = uuid4(), uuid4()
     db = _FakeDb(
@@ -263,6 +302,26 @@ async def test_verify_accepts_code_and_mints_backend_client_jwt():
     ctx = await get_current_client_user(authorization=f"Bearer {response.access_token}")
     assert ctx.user_id == user_id
     assert ctx.corporate_id == corporate_id
+
+
+@pytest.mark.asyncio
+async def test_verify_rejects_when_revoked_from_whitelist_after_send():
+    user_id, corporate_id = uuid4(), uuid4()
+    row, _now = _challenge(user_id)
+    token = issue_hr_otp_token(row.id, user_id, EMAIL)
+    db = _FakeDb(
+        [
+            _Result(scalar=row),
+            _Result(scalar=_membership(user_id, corporate_id)),
+            _Result(scalar=_corporate(corporate_id, allowed_hr_emails=[])),
+        ]
+    )
+    with pytest.raises(HrOtpError) as exc:
+        await verify_hr_challenge(
+            db, temp_token=token, otp_code="123456", email=EMAIL
+        )
+    assert exc.value.status_code == 403
+    assert row.consumed_at is not None
 
 
 @pytest.mark.asyncio

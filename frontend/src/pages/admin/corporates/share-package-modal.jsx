@@ -55,7 +55,7 @@ function PreviewBox({ title, rows, copyLabel, copyText, copied, onCopy }) {
  * @param {object} props
  * @param {boolean} props.isOpen
  * @param {import('./use-corporate-packages').CorporatePackage | null} props.pkg
- * @param {{ name: string, contact_email: string | null } | null} props.corporate
+ * @param {{ name: string, contact_email: string | null, allowed_hr_emails?: string[] } | null} props.corporate
  * @param {() => void} props.onClose
  */
 export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
@@ -87,6 +87,14 @@ export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
     : (pkg?.candidate_link ?? '');
   const hrLink = `${frontendOrigin}/client/login`;
   const candidateInvite = `Assessment: ${pkg?.title ?? ''}\nTest link: ${candidateLink}\nPIN: ${accessCode}`;
+  // The HR link itself carries no tenant binding: whoever signs in lands in
+  // the company their own HR membership + whitelist point at. Name that
+  // company here so a mismatch is visible before sending.
+  const recipientWhitelisted =
+    !corporate?.allowed_hr_emails?.length ||
+    corporate.allowed_hr_emails.some(
+      (email) => email.toLowerCase() === recipient.trim().toLowerCase(),
+    );
 
   const copy = async (key, text) => {
     try {
@@ -176,13 +184,21 @@ export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
           onCopy={(text) => copy('candidate', text)}
         />
         <PreviewBox
-          title="HR portal access"
+          title={corporate?.name ? `HR portal access — ${corporate.name}` : 'HR portal access'}
           rows={[{ label: 'Login link', value: hrLink }]}
           copyLabel="Copy HR Link"
           copyText={hrLink}
           copied={copiedKey === 'hr'}
           onCopy={(text) => copy('hr', text)}
         />
+        {recipient.trim() && !recipientWhitelisted && (
+          <p className="flex items-start gap-1.5 text-xs text-amber-400" role="alert">
+            <Info className="w-3.5 h-3.5 shrink-0 mt-px" aria-hidden="true" />
+            {recipient.trim()} is not on {corporate?.name ?? 'this company'}&apos;s allowed HR
+            emails list, so they will not be able to sign in. Add them under Manage Corporates
+            first.
+          </p>
+        )}
 
         <p className="flex items-start gap-1.5 text-xs text-neutral-400">
           <Info className="w-3.5 h-3.5 shrink-0 mt-px" aria-hidden="true" />

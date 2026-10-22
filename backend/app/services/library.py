@@ -624,8 +624,20 @@ class LibraryService:
         """
         module = await LibraryService._load_module(session, template_id)
 
-        if body.touches_runner_config() or (
-            body.category is not None and body.category != module.module_kind
+        # Title/description are identity, not just metadata: renaming a
+        # published version in place would rewrite history for live suites,
+        # so they are frozen under the same lock as runner config. Clone as
+        # a new version to rename.
+        renames_module = (
+            body.title is not None and body.title.strip() != (module.title or "")
+        ) or (
+            body.description is not None
+            and (body.description.strip() or None) != (module.description or None)
+        )
+        if (
+            body.touches_runner_config()
+            or renames_module
+            or (body.category is not None and body.category != module.module_kind)
         ):
             await assert_module_editable(session, module)
 

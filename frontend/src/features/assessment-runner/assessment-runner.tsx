@@ -266,6 +266,14 @@ export function AssessmentRunner({
 
       <section className="flex min-h-[320px] flex-col rounded-lg border border-border bg-surface p-4 sm:p-5" aria-labelledby={`q-${current.id}`}>
         <div className="flex-1">
+          {current.show_disclaimer && current.disclaimer_text?.trim() && (
+            <p
+              role="note"
+              className="mb-4 rounded-md border border-border bg-surface-raised px-3 py-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300"
+            >
+              {current.disclaimer_text}
+            </p>
+          )}
           <div id={`q-${current.id}`} className="text-lg font-medium leading-relaxed text-slate-900 dark:text-slate-100">
             <MarkdownText source={current.text} />
           </div>

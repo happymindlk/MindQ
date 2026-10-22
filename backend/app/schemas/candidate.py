@@ -142,6 +142,10 @@ class CandidateQuestion(BaseModel):
     options: list[str] = Field(default_factory=list)
     allow_multiple: bool = False
     media_url: Optional[str] = None
+    # Presentation-only per-question disclaimer; not an answer key, so it is
+    # deliberately absent from _ANSWER_KEY_ALIASES above.
+    show_disclaimer: bool = False
+    disclaimer_text: Optional[str] = None
     likert_label_1: Optional[str] = None
     likert_label_5: Optional[str] = None
     scale_labels: Optional[list[str]] = None

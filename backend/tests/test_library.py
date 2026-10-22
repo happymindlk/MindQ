@@ -388,11 +388,30 @@ def test_module_locked_maps_to_structured_409():
 
 
 @pytest.mark.asyncio
-async def test_update_metadata_on_published_module_is_allowed():
+async def test_rename_on_published_module_raises_module_locked():
     template_id = uuid4()
     module = _module_row(template_id, status="published")
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_scalar_result(module), *_detail_results(module)])
+    session.execute = AsyncMock(side_effect=[_scalar_result(module)])
+    session.commit = AsyncMock()
+
+    with pytest.raises(ModuleLockedError) as exc_info:
+        await LibraryService.update_template(
+            session, template_id, TemplateUpdate(title="Renamed")
+        )
+
+    assert exc_info.value.code == "MODULE_LOCKED"
+    session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rename_on_draft_module_is_allowed():
+    template_id = uuid4()
+    module = _module_row(template_id)
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        side_effect=[_scalar_result(module), _count_result(0), *_detail_results(module)]
+    )
     session.commit = AsyncMock()
 
     result = await LibraryService.update_template(

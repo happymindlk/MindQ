@@ -44,7 +44,6 @@ class PackageUpdate(PackageBase):
     title: Optional[str] = None
     target_role: Optional[str] = None
     questions: Optional[List[Any]] = None
-    passing_threshold: Optional[float] = Field(default=None, ge=0, le=100)
 
 
 class PackageResponse(PackageBase):

@@ -122,6 +122,23 @@ def _aware(value: datetime) -> datetime:
     return value
 
 
+def _assert_company_access(corporate: Corporate, email: str) -> None:
+    """Require an active company whose HR whitelist contains ``email``.
+
+    Args:
+        corporate: Tenant the membership points at.
+        email: Normalized login email.
+
+    Raises:
+        HrOtpError: 403 with the generic unregistered detail (no tenant leak).
+    """
+    if corporate.is_active is False:
+        raise HrOtpError(403, _INVALID_TARGET)
+    allowed = {str(entry).strip().lower() for entry in (corporate.allowed_hr_emails or [])}
+    if email not in allowed:
+        raise HrOtpError(403, _INVALID_TARGET)
+
+
 async def _resolve_membership(
     db: AsyncSession, email: str
 ) -> tuple[HRUser, Corporate]:
@@ -158,6 +175,7 @@ async def _resolve_membership(
     ).scalar_one_or_none()
     if corporate is None:
         raise HrOtpError(403, _NO_COMPANY)
+    _assert_company_access(corporate, email)
     return membership, corporate
 
 
@@ -336,6 +354,13 @@ async def verify_hr_challenge(
         row.otp_hash = ""
         await db.commit()
         raise HrOtpError(403, _NO_COMPANY)
+    try:
+        _assert_company_access(corporate, normalized_email)
+    except HrOtpError:
+        row.consumed_at = now
+        row.otp_hash = ""
+        await db.commit()
+        raise
 
     verdict = apply_otp_attempt(row, otp_code, now)
     await db.commit()

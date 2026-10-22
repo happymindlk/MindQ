@@ -30,7 +30,9 @@ from app.services.client_package import (
     ClientPackageService,
     PackageLockedError,
 )
+from app.models.hr_user import HRUser
 from app.services.hr_membership import (
+    OPS_ROLES,
     find_ops_role_for_email,
     hr_display_name,
     upsert_hr_membership,
@@ -90,6 +92,28 @@ async def update_company(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.delete("/companies/{company_id}", response_model=CompanyCreateResponse)
+async def delete_company(
+    company_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: HRUserContext = Depends(get_current_ops_user),
+):
+    """Soft-delete a company: hide it from active views, keep its records.
+
+    Args:
+        company_id: Target corporate UUID.
+        db: Async database session.
+        _: Authenticated ops user.
+
+    Returns:
+        The company with ``is_active`` set to False.
+    """
+    try:
+        return await ClientPackageService.soft_delete_company(db, company_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.post("/companies/{company_id}/logo", response_model=CompanyLogoResponse)
 async def upload_company_logo(
     company_id: UUID,
@@ -109,7 +133,11 @@ async def upload_company_logo(
         The persisted public logo URL.
     """
     exists = (
-        await db.execute(select(Corporate.id).where(Corporate.id == company_id))
+        await db.execute(
+            select(Corporate.id).where(
+                Corporate.id == company_id, Corporate.is_active.is_(True)
+            )
+        )
     ).scalar_one_or_none()
     if exists is None:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -161,7 +189,11 @@ async def invite_hr(
         Success acknowledgement with the invited email.
     """
     corporate = (
-        await db.execute(select(Corporate).where(Corporate.id == company_id))
+        await db.execute(
+            select(Corporate).where(
+                Corporate.id == company_id, Corporate.is_active.is_(True)
+            )
+        )
     ).scalar_one_or_none()
     if not corporate:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -180,13 +212,36 @@ async def invite_hr(
     except SupabaseAdminError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
+    # One HR user maps to exactly one company. Re-inviting an email that is
+    # already bound elsewhere must not silently move them (the old upsert
+    # overwrote corporate_id, so HR landed in the wrong portal).
+    existing = (
+        await db.execute(select(HRUser).where(HRUser.user_id == user_id))
+    ).scalar_one_or_none()
+    if (
+        existing is not None
+        and existing.corporate_id != company_id
+        and existing.role not in OPS_ROLES
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This email already has HR access to another company. "
+                "Remove them there before inviting them here."
+            ),
+        )
+
     await upsert_hr_membership(
         db,
         user_id=user_id,
         corporate_id=company_id,
         full_name=hr_display_name(body.email),
     )
-    corporate.contact_email = body.email
+    if not corporate.contact_email:
+        corporate.contact_email = body.email
+    allowed = list(corporate.allowed_hr_emails or [])
+    if body.email not in allowed:
+        corporate.allowed_hr_emails = [*allowed, body.email]
     await db.commit()
 
     return HrInviteResponse(

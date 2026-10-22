@@ -67,6 +67,8 @@ export interface RunnerQuestion {
   likert_label_1: string | null;
   likert_label_5: string | null;
   scale_labels?: string[] | null;
+  show_disclaimer?: boolean;
+  disclaimer_text?: string | null;
 }
 
 export interface RunnerTest {

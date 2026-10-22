@@ -11,7 +11,7 @@ import { McqBuilder } from './answer-builders/mcq-builder';
 import { SjtBuilder } from './answer-builders/sjt-builder';
 import { MarkdownText } from './markdown-preview';
 import { MediaDropZone } from './media-drop-zone';
-import { FieldLabel, NeonButton, NeonDialog, inputClass } from './primitives';
+import { FieldLabel, NeonButton, NeonDialog, Switch, inputClass } from './primitives';
 
 const DEFAULT_FACETS = ['VR', 'MR', 'Teamwork', 'Pace', 'H:Sinc'] as const;
 
@@ -67,6 +67,8 @@ export function QuestionEditorModal({
     facetList: `${uid}-facets`,
     rationale: `${uid}-rationale`,
     rubric: `${uid}-rubric`,
+    disclaimer: `${uid}-disclaimer`,
+    disclaimerText: `${uid}-disclaimer-text`,
   };
 
   const submit = () => {
@@ -190,6 +192,29 @@ export function QuestionEditorModal({
           onChange={(value) => dispatch({ kind: 'set-media', value })}
           storage={storage}
         />
+
+        <section aria-label="Question disclaimer" className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+          <Switch
+            id={ids.disclaimer}
+            checked={question.show_disclaimer}
+            onChange={(next) => dispatch({ kind: 'set-disclaimer', value: next })}
+            label="Show disclaimer above this question"
+            description="Rendered verbatim for candidates, directly above this question only."
+          />
+          {question.show_disclaimer && (
+            <div>
+              <FieldLabel htmlFor={ids.disclaimerText}>Disclaimer text</FieldLabel>
+              <textarea
+                id={ids.disclaimerText}
+                rows={3}
+                maxLength={500}
+                className={inputClass}
+                value={question.disclaimer_text}
+                onChange={(e) => dispatch({ kind: 'set-disclaimer-text', value: e.target.value })}
+              />
+            </div>
+          )}
+        </section>
 
         <section aria-label="Answer builder" className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
           <h3 className="mb-3 text-sm font-semibold text-white">{QUESTION_TYPE_LABELS[question.type]}</h3>

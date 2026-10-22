@@ -215,6 +215,20 @@ export const adminApi = {
     });
   },
 
+  /**
+   * Extract JD text from a PDF via FastAPI (pypdf, in-memory, nothing stored).
+   * Returns { text, page_count, char_count, truncated } for the builder's
+   * Role Assessment Brief. Scanned / image-only PDFs reject with a 422 message.
+   */
+  async extractJdFromPdf(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return authedJson('/api/v1/packages/jd/extract-pdf', 'Could not read that PDF', {
+      method: 'POST',
+      formData,
+    });
+  },
+
   async listGlobalModules() {
     const rows = await authedJson('/api/v1/packages/modules', 'Failed to load modules');
     return expectArray(rows, 'packages/modules');
@@ -278,13 +292,14 @@ export const adminApi = {
     });
   },
 
-  async createCompany({ name, slug, contactEmail }) {
+  async createCompany({ name, slug, contactEmail, allowedHrEmails }) {
     return authedJson('/api/v1/admin/companies', 'Failed to create company', {
       method: 'POST',
       body: {
         name,
         slug: slug || undefined,
         contact_email: contactEmail || undefined,
+        allowed_hr_emails: allowedHrEmails || [],
       },
     });
   },
@@ -296,6 +311,15 @@ export const adminApi = {
     return authedJson(`/api/v1/admin/companies/${companyId}`, 'Failed to update company', {
       method: 'PATCH',
       body: fields,
+    });
+  },
+
+  /**
+   * Ops-only soft delete: hides the company from active views, keeps records.
+   */
+  async deleteCompany(companyId) {
+    return authedJson(`/api/v1/admin/companies/${companyId}`, 'Failed to delete company', {
+      method: 'DELETE',
     });
   },
 

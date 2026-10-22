@@ -56,120 +56,19 @@ function HrInviteInline({ companyId, invitedEmail, onInvited }) {
   const [error, setError] = useState(null);
 
   const submit = async (event) => {
-    // #region agent log
-    const _dbg = {
-      companyId,
-      emailFromState: email,
-      trimmed: email.trim(),
-      busy,
-      invitedEmail,
-    };
-    console.log('[HrInviteInline] submit fired', _dbg);
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aa0f3a' },
-      body: JSON.stringify({
-        sessionId: 'aa0f3a',
-        runId: 'pre-fix',
-        hypothesisId: 'H1-H3',
-        location: 'AssessmentHistory.jsx:HrInviteInline.submit',
-        message: 'submit fired',
-        data: _dbg,
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     event.preventDefault();
     event.stopPropagation();
     const trimmed = email.trim();
     if (!trimmed) {
-      // #region agent log
-      console.log('[HrInviteInline] early exit — empty email', {
-        companyId,
-        dispatchStatus: 'aborted_validation',
-      });
-      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aa0f3a' },
-        body: JSON.stringify({
-          sessionId: 'aa0f3a',
-          runId: 'pre-fix',
-          hypothesisId: 'H1',
-          location: 'AssessmentHistory.jsx:HrInviteInline.earlyExit',
-          message: 'early exit empty email',
-          data: { companyId, dispatchStatus: 'aborted_validation' },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       return;
     }
     setBusy(true);
     setError(null);
-    // #region agent log
-    console.log('[HrInviteInline] dispatching inviteHr', {
-      companyId,
-      trimmed,
-      dispatchStatus: 'calling_api',
-    });
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aa0f3a' },
-      body: JSON.stringify({
-        sessionId: 'aa0f3a',
-        runId: 'pre-fix',
-        hypothesisId: 'H5',
-        location: 'AssessmentHistory.jsx:HrInviteInline.beforeApi',
-        message: 'dispatching inviteHr',
-        data: { companyId, trimmed, dispatchStatus: 'calling_api' },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     try {
       const result = await adminApi.inviteHr(companyId, trimmed);
-      // #region agent log
-      console.log('[HrInviteInline] inviteHr succeeded', {
-        companyId,
-        dispatchStatus: 'success',
-      });
-      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aa0f3a' },
-        body: JSON.stringify({
-          sessionId: 'aa0f3a',
-          runId: 'pre-fix',
-          hypothesisId: 'H5',
-          location: 'AssessmentHistory.jsx:HrInviteInline.apiSuccess',
-          message: 'inviteHr succeeded',
-          data: { companyId, dispatchStatus: 'success' },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       onInvited?.(result.email || trimmed);
       setEmail('');
     } catch (err) {
-      // #region agent log
-      console.log('[HrInviteInline] inviteHr failed', {
-        companyId,
-        dispatchStatus: 'error',
-        error: err?.message,
-      });
-      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aa0f3a' },
-        body: JSON.stringify({
-          sessionId: 'aa0f3a',
-          runId: 'pre-fix',
-          hypothesisId: 'H5',
-          location: 'AssessmentHistory.jsx:HrInviteInline.apiError',
-          message: 'inviteHr failed',
-          data: { companyId, dispatchStatus: 'error', error: err?.message },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setError(err.message || 'Invite failed');
     } finally {
       setBusy(false);
@@ -203,34 +102,6 @@ function HrInviteInline({ companyId, invitedEmail, onInvited }) {
           variant="secondary"
           disabled={busy}
           isLoading={busy}
-          onClick={() => {
-            // #region agent log
-            console.log('[HrInviteInline] button click', {
-              companyId,
-              emailFromState: email,
-              busy,
-              dispatchStatus: 'button_click',
-            });
-            fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aa0f3a' },
-              body: JSON.stringify({
-                sessionId: 'aa0f3a',
-                runId: 'pre-fix',
-                hypothesisId: 'H2-H4',
-                location: 'AssessmentHistory.jsx:HrInviteInline.buttonClick',
-                message: 'Send Access button click',
-                data: {
-                  companyId,
-                  emailFromState: email,
-                  busy,
-                  dispatchStatus: 'button_click',
-                },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-            // #endregion
-          }}
         >
           Send Access
         </Button>

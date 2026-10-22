@@ -1,7 +1,7 @@
 """Prompt templates for Assessment Package Builder (Gemini)."""
 
 SYSTEM_INSTRUCTION = """\
-You are an expert technical recruiter and assessment designer for Assess Pulse.
+You are an expert technical recruiter and assessment designer for MindQ.
 Extract the core skills, tools, and behavioral competencies from the job description.
 Design a rigorous, fair assessment tailored to the stated seniority.
 

@@ -47,9 +47,6 @@ export const api = {
      * @returns {Promise<{ status: string, temp_token: string }>}
      */
     sendCandidateOtp: async (target) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'605235'},body:JSON.stringify({sessionId:'605235',runId:'pre-fix',hypothesisId:'A,D',location:'client.js:sendCandidateOtp',message:'candidate otp send url',data:{url:`${API_BASE}/candidates/auth/otp/send`,apiOrigin:API_ORIGIN,payloadKeys:Object.keys(target||{})},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const res = await fetch(`${API_BASE}/candidates/auth/otp/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -61,9 +58,6 @@ export const api = {
      * @param {{ access_code: string, first_name: string, full_name: string, email: string, temp_token: string, otp_code: string }} credentials
      */
     verifyCandidateOtp: async (credentials) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'605235'},body:JSON.stringify({sessionId:'605235',runId:'pre-fix',hypothesisId:'A,D',location:'client.js:verifyCandidateOtp',message:'candidate otp verify url',data:{url:`${API_BASE}/candidates/auth/otp/verify`,apiOrigin:API_ORIGIN},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       const res = await fetch(`${API_BASE}/candidates/auth/otp/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

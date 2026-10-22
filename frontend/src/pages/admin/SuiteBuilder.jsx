@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Check, ChevronDown, Eye, FileText, GripVertical, Plus, Save, Search, Trash2, X } from 'lucide-react';
+import { Check, ChevronDown, Eye, FileText, GripVertical, Plus, Save, Search, Trash2, Upload, X } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Badge from '../../components/ui/Badge';
@@ -242,7 +242,6 @@ export default function SuiteBuilder() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [targetRole, setTargetRole] = useState('');
-  const [threshold, setThreshold] = useState('');
   const [openTime, setOpenTime] = useState('');
   const [closeTime, setCloseTime] = useState('');
   const [cartIds, setCartIds] = useState([]);
@@ -259,6 +258,11 @@ export default function SuiteBuilder() {
   const [libraryPickId, setLibraryPickId] = useState('');
   const [syncTargetId, setSyncTargetId] = useState('');
   const [syncModal, setSyncModal] = useState(null);
+  const [jdPdfBusy, setJdPdfBusy] = useState(false);
+  const [jdPdfError, setJdPdfError] = useState(null);
+  const [jdPdfDragOver, setJdPdfDragOver] = useState(false);
+  const [jdOverwrite, setJdOverwrite] = useState(null);
+  const jdPdfInputRef = useRef(null);
   const skipSave = useRef(true);
   const draftSave = useRef(createDraftSaveController());
   /** Once true, the editor is leaving after publish — block any residual saves. */
@@ -316,11 +320,6 @@ export default function SuiteBuilder() {
         setTitle(pkg.title || '');
         setDescription(pkg.description || '');
         setTargetRole(pkg.target_role || '');
-        setThreshold(
-          pkg.passing_threshold == null || pkg.passing_threshold === ''
-            ? ''
-            : String(pkg.passing_threshold),
-        );
         setOpenTime(toSriLankaInputValue(pkg.open_time));
         setCloseTime(toSriLankaInputValue(pkg.close_time));
         setStatus(pkg.status);
@@ -414,6 +413,55 @@ export default function SuiteBuilder() {
   const selectedIds = useMemo(() => new Set(cartIds), [cartIds]);
 
   const locked = !isPackageSaveAllowed({ status });
+
+  const applyJdPdfText = useCallback(
+    (result, fileName) => {
+      setDescription(result.text);
+      toast({
+        title: `JD imported from ${fileName}`,
+        description: `${result.page_count} page${result.page_count === 1 ? '' : 's'} · ${result.char_count.toLocaleString()} characters`,
+        variant: 'success',
+      });
+      if (result.truncated) {
+        toast({
+          title: 'JD was longer than 50,000 characters and has been trimmed to fit.',
+          variant: 'warning',
+        });
+      }
+    },
+    [toast],
+  );
+
+  const handleJdPdfFile = useCallback(
+    async (file) => {
+      if (!file || locked || jdPdfBusy) return;
+      setJdPdfError(null);
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+      if (!isPdf) {
+        setJdPdfError('That file is not a PDF. Upload a .pdf job description.');
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        setJdPdfError('PDF must be 10 MB or smaller.');
+        return;
+      }
+      setJdPdfBusy(true);
+      try {
+        const result = await adminApi.extractJdFromPdf(file);
+        if (!result?.text) throw new Error('The server returned no text for that PDF.');
+        if (description.trim()) {
+          setJdOverwrite({ result, fileName: file.name });
+        } else {
+          applyJdPdfText(result, file.name);
+        }
+      } catch (err) {
+        setJdPdfError(friendlyErrorMessage(err, 'Could not read that PDF.'));
+      } finally {
+        setJdPdfBusy(false);
+      }
+    },
+    [locked, jdPdfBusy, description, applyJdPdfText],
+  );
 
   useEffect(() => {
     const controller = draftSave.current;
@@ -529,8 +577,6 @@ export default function SuiteBuilder() {
         evaluated_competency: q.evaluated_competency || 'Technical',
         weight: Number(q.weight) || 3,
       }));
-    const thresholdValue =
-      threshold === '' || threshold == null ? null : Number(threshold);
     const overridesPayload = {};
     cartIds.forEach((id) => {
       if (Array.isArray(moduleOverrides[id])) {
@@ -547,7 +593,6 @@ export default function SuiteBuilder() {
             description,
             ...schedulePayload,
             target_role: targetRole.trim() || null,
-            passing_threshold: Number.isFinite(thresholdValue) ? thresholdValue : null,
             corporate_id: corporateId,
             module_ids: cartIds,
             custom_questions: customPayload,
@@ -563,7 +608,6 @@ export default function SuiteBuilder() {
             description,
             ...schedulePayload,
             target_role: targetRole.trim() || null,
-            passing_threshold: Number.isFinite(thresholdValue) ? thresholdValue : null,
             module_ids: cartIds,
             custom_questions: customPayload,
             module_question_overrides: overridesPayload,
@@ -594,7 +638,6 @@ export default function SuiteBuilder() {
     closeTime,
     scheduleError,
     targetRole,
-    threshold,
     cartIds,
     customQuestions,
     moduleOverrides,
@@ -860,17 +903,6 @@ export default function SuiteBuilder() {
                 placeholder="Analyst"
               />
               <Input
-                label="Threshold"
-                type="number"
-                min={0}
-                max={100}
-                step="0.01"
-                value={threshold}
-                disabled={locked}
-                onChange={(e) => setThreshold(e.target.value)}
-                placeholder="70"
-              />
-              <Input
                 label="Opens (IST / GMT+5:30)"
                 type="datetime-local"
                 value={openTime}
@@ -901,34 +933,81 @@ export default function SuiteBuilder() {
                   Role Assessment Brief
                 </label>
                 {!locked && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setDescription((prev) => insertRoleBriefTemplate(prev))}
-                    disabled={hasRoleBriefTemplate(description)}
-                    title={
-                      hasRoleBriefTemplate(description)
-                        ? 'Template already inserted'
-                        : 'Insert the standard brief headings'
-                    }
-                  >
-                    <FileText className="w-3.5 h-3.5" aria-hidden />
-                    Insert Brief Template
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <input
+                      ref={jdPdfInputRef}
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      className="hidden"
+                      aria-label="Upload job description PDF"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        void handleJdPdfFile(file);
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => jdPdfInputRef.current?.click()}
+                      disabled={jdPdfBusy}
+                      isLoading={jdPdfBusy}
+                      title="Extract the job description text from a PDF"
+                    >
+                      <Upload className="w-3.5 h-3.5" aria-hidden />
+                      Upload JD (PDF)
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setDescription((prev) => insertRoleBriefTemplate(prev))}
+                      disabled={hasRoleBriefTemplate(description)}
+                      title={
+                        hasRoleBriefTemplate(description)
+                          ? 'Template already inserted'
+                          : 'Insert the standard brief headings'
+                      }
+                    >
+                      <FileText className="w-3.5 h-3.5" aria-hidden />
+                      Insert Brief Template
+                    </Button>
+                  </div>
                 )}
               </div>
-              <textarea
-                id="role-assessment-brief"
-                rows={5}
-                maxLength={50000}
-                disabled={locked}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Position details, role description, assessment requirements and HR contact. Used for role-fit scoring."
-                aria-describedby="role-assessment-brief-help"
-                className={`${fieldClass} resize-y min-h-[96px] max-h-[40vh] font-sans leading-relaxed disabled:opacity-60`}
-              />
+              <div
+                onDragOver={(e) => {
+                  if (locked) return;
+                  e.preventDefault();
+                  setJdPdfDragOver(true);
+                }}
+                onDragLeave={() => setJdPdfDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setJdPdfDragOver(false);
+                  if (locked) return;
+                  void handleJdPdfFile(e.dataTransfer.files?.[0]);
+                }}
+                className={jdPdfDragOver ? 'rounded-md ring-2 ring-primary/60 ring-offset-1' : undefined}
+              >
+                <textarea
+                  id="role-assessment-brief"
+                  rows={5}
+                  maxLength={50000}
+                  disabled={locked}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Position details, role description, assessment requirements and HR contact. Used for role-fit scoring. Or drop a JD PDF here."
+                  aria-describedby="role-assessment-brief-help"
+                  className={`${fieldClass} resize-y min-h-[96px] max-h-[40vh] font-sans leading-relaxed disabled:opacity-60`}
+                />
+              </div>
+              {jdPdfError && (
+                <p className="mt-1.5 text-xs text-danger" role="alert">
+                  {jdPdfError}
+                </p>
+              )}
               <p id="role-assessment-brief-help" className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
                 {description.length.toLocaleString()} / 50,000 characters
               </p>
@@ -1160,6 +1239,33 @@ export default function SuiteBuilder() {
         moduleIds={cartIds}
         moduleOverrides={previewOverrides}
       />
+
+      <Modal
+        isOpen={Boolean(jdOverwrite)}
+        onClose={() => setJdOverwrite(null)}
+        title="Replace current brief?"
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => setJdOverwrite(null)}>
+              Keep current text
+            </Button>
+            <Button
+              onClick={() => {
+                if (jdOverwrite) applyJdPdfText(jdOverwrite.result, jdOverwrite.fileName);
+                setJdOverwrite(null);
+              }}
+            >
+              Replace with PDF text
+            </Button>
+          </>
+        }
+      >
+        <div className="p-4">
+          <p className="text-sm text-slate-700 dark:text-slate-300">
+            Importing this PDF will replace the Role Assessment Brief text you already have.
+          </p>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={Boolean(syncModal)}

@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, ArrowLeft } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
@@ -142,23 +142,6 @@ export default function AdminLogin() {
             </form>
           )}
         </Card>
-
-        <p className="mt-6 text-center text-sm text-neutral-400">
-          Looking for candidate or client access?{' '}
-          <Link
-            to="/portal"
-            className="text-foreground underline-offset-4 hover:underline focus:outline-none focus-visible:underline focus-visible:text-primary-text"
-          >
-            Candidate access
-          </Link>
-          <span aria-hidden className="mx-2 text-neutral-600">·</span>
-          <Link
-            to="/client/login"
-            className="text-foreground underline-offset-4 hover:underline focus:outline-none focus-visible:underline focus-visible:text-primary-text"
-          >
-            Client access
-          </Link>
-        </p>
       </div>
     </div>
   );

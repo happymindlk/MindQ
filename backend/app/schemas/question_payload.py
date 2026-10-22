@@ -39,6 +39,12 @@ LIKERT_AGREEMENT_LABELS: tuple[str, ...] = (
 
 BuilderType = Literal["sjt", "mcq", "likert", "crt", "open_ended"]
 
+DEFAULT_DISCLAIMER_TEXT = (
+    "There are no right or wrong answers for this assessment. "
+    "Answer all questions from your own perspective."
+)
+DISCLAIMER_TEXT_MAX = 500
+
 _QUOTED_ANSWER = re.compile(r'"([^"]*)"')
 
 
@@ -102,11 +108,19 @@ class _QuestionBase(BaseModel):
     facet: str = Field(default="", max_length=64)
     sme_rationale: str = Field(default="", max_length=4000)
     media_url: str | None = Field(default=None, max_length=1024)
+    # Candidate-facing per-question disclaimer (presentation-only, never scored).
+    show_disclaimer: bool = False
+    disclaimer_text: str = Field(default=DEFAULT_DISCLAIMER_TEXT, max_length=DISCLAIMER_TEXT_MAX)
 
     @field_validator("media_url")
     @classmethod
     def _media_url(cls, value: str | None) -> str | None:
         return _validate_media_url(value)
+
+    @field_validator("disclaimer_text")
+    @classmethod
+    def _disclaimer_text(cls, value: str) -> str:
+        return value.strip() or DEFAULT_DISCLAIMER_TEXT
 
     def _base_storage(self) -> dict[str, Any]:
         stored: dict[str, Any] = {
@@ -114,6 +128,8 @@ class _QuestionBase(BaseModel):
             "facet": self.facet,
             "evaluated_competency": self.facet or "General",
             "sme_rationale": self.sme_rationale,
+            "show_disclaimer": bool(self.show_disclaimer),
+            "disclaimer_text": self.disclaimer_text if self.show_disclaimer else DEFAULT_DISCLAIMER_TEXT,
         }
         if self.media_url:
             stored["media_url"] = self.media_url
@@ -387,6 +403,8 @@ def payload_from_storage(stored: dict[str, Any]) -> dict[str, Any] | None:
         ),
         "sme_rationale": str(stored.get("sme_rationale") or ""),
         "media_url": stored.get("media_url"),
+        "show_disclaimer": bool(stored.get("show_disclaimer")),
+        "disclaimer_text": str(stored.get("disclaimer_text") or DEFAULT_DISCLAIMER_TEXT),
     }
     options = [str(o) for o in (stored.get("options") or [])]
     if builder == "sjt":

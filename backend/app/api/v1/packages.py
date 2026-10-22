@@ -5,7 +5,17 @@ import asyncio
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, select
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +43,7 @@ from app.schemas.library import AddTemplateRequest, AddTemplateResponse
 from app.schemas.package_builder import (
     AssessmentPackageBlueprint,
     GeneratePackageRequest,
+    JdPdfExtractResponse,
     SavePackageRequest,
     SavePackageResponse,
 )
@@ -55,6 +66,7 @@ from app.services.package_generator import (
     save_blueprint_package,
 )
 from app.services.gemini_client import overall_deadline_seconds
+from app.services.jd_pdf import JdPdfError, JdPdfTooLargeError, extract_jd_text
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +120,46 @@ async def generate_package(
         ) from exc
 
     return blueprint
+
+
+@router.post("/jd/extract-pdf", response_model=JdPdfExtractResponse)
+async def extract_jd_pdf(
+    file: UploadFile = File(...),
+    hr: HRUserContext = Depends(get_current_ops_user),
+):
+    """Extract JD text from an uploaded PDF (nothing is stored).
+
+    The returned text is a drop-in replacement for a pasted job description:
+    the builder places it in the Role Assessment Brief so `/generate`, draft
+    save, and JD-fit scoring all consume the same string.
+
+    Args:
+        file: Multipart PDF upload (text-layer PDFs only; no OCR).
+        hr: Authenticated HR user.
+
+    Returns:
+        Extracted text with page count and a truncation flag.
+
+    Raises:
+        HTTPException: 413 when over the size cap, 422 when the file is not
+            a readable text-layer PDF.
+    """
+    _ = hr  # Auth gate; extraction is stateless.
+    raw = await file.read()
+    try:
+        # Parsing is CPU-bound; keep it off the event loop.
+        result = await asyncio.to_thread(extract_jd_text, raw)
+    except JdPdfTooLargeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except JdPdfError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return JdPdfExtractResponse(
+        text=result.text,
+        page_count=result.page_count,
+        char_count=len(result.text),
+        truncated=result.truncated,
+    )
 
 
 @router.post("/save", response_model=SavePackageResponse)
@@ -212,6 +264,7 @@ async def list_corporates_for_ops(
         )
         .outerjoin(pkg_count, pkg_count.c.corporate_id == Corporate.id)
         .outerjoin(cand_count, cand_count.c.corporate_id == Corporate.id)
+        .where(Corporate.is_active.is_(True))
         .order_by(Corporate.name)
     )
     items: list[CorporateListItem] = []
@@ -222,6 +275,8 @@ async def list_corporates_for_ops(
                 name=corp.name,
                 slug=corp.slug,
                 contact_email=corp.contact_email,
+                allowed_hr_emails=list(corp.allowed_hr_emails or []),
+                is_active=bool(corp.is_active) if corp.is_active is not None else True,
                 logo_url=corp.logo_url,
                 package_count=int(packages_n or 0),
                 candidate_count=int(candidates_n or 0),

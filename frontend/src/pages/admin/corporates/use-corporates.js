@@ -7,6 +7,8 @@ import { adminApi } from '../../../lib/adminApi';
  * @property {string} name
  * @property {string} slug
  * @property {string | null} contact_email
+ * @property {string[]} [allowed_hr_emails]
+ * @property {boolean} [is_active]
  * @property {string | null} logo_url
  * @property {number} [package_count]
  * @property {number} [candidate_count]
@@ -18,6 +20,7 @@ import { adminApi } from '../../../lib/adminApi';
  * @property {string} [id] Present when editing an existing corporate.
  * @property {string} name
  * @property {string} contactEmail Empty string clears the HR email on edit.
+ * @property {string[]} [allowedHrEmails] HR portal whitelist for this company.
  * @property {File | null} [logoFile]
  */
 
@@ -42,7 +45,7 @@ export function filterCorporates(rows, keyword) {
   const q = (keyword || '').trim().toLowerCase();
   if (!q) return rows;
   return rows.filter((row) =>
-    [row.name, row.slug, row.contact_email].some((field) =>
+    [row.name, row.slug, row.contact_email, ...(row.allowed_hr_emails || [])].some((field) =>
       (field || '').toLowerCase().includes(q),
     ),
   );
@@ -89,10 +92,14 @@ export function useCorporates() {
     reload();
   }, [reload]);
 
-  const saveCorporate = useCallback(async ({ id, name, contactEmail, logoFile }) => {
+  const saveCorporate = useCallback(async ({ id, name, contactEmail, allowedHrEmails, logoFile }) => {
     const saved = id
-      ? await adminApi.updateCompany(id, { name, contact_email: contactEmail })
-      : await adminApi.createCompany({ name, contactEmail });
+      ? await adminApi.updateCompany(id, {
+          name,
+          contact_email: contactEmail,
+          allowed_hr_emails: allowedHrEmails || [],
+        })
+      : await adminApi.createCompany({ name, contactEmail, allowedHrEmails });
 
     const corporate = { ...saved };
     let logoError = null;
@@ -114,5 +121,12 @@ export function useCorporates() {
     return { corporate, logoError };
   }, []);
 
-  return { corporates, isLoading, error, reload, saveCorporate };
+  const deleteCorporate = useCallback(async (corporate) => {
+    await adminApi.deleteCompany(corporate.id);
+    if (mountedRef.current) {
+      setCorporates((prev) => prev.filter((c) => c.id !== corporate.id));
+    }
+  }, []);
+
+  return { corporates, isLoading, error, reload, saveCorporate, deleteCorporate };
 }

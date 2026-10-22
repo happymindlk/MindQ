@@ -46,6 +46,10 @@ export function resolveLikertLabels(
 
 export const OPTION_KEYS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
 
+export const DEFAULT_DISCLAIMER_TEXT =
+  'There are no right or wrong answers for this assessment. Answer all questions from your own perspective.';
+export const DISCLAIMER_TEXT_MAX = 500;
+
 export type SjtWeight = 0 | 1 | 2 | 3;
 
 export const SJT_WEIGHT_LABELS: Record<SjtWeight, string> = {
@@ -64,6 +68,10 @@ interface QuestionBase {
   sme_rationale: string;
   /** Public URL inside the `assessment-media` bucket. */
   media_url: string | null;
+  /** Show a candidate-facing disclaimer directly above this question. */
+  show_disclaimer: boolean;
+  /** Disclaimer wording rendered verbatim when `show_disclaimer` is on. */
+  disclaimer_text: string;
 }
 
 export interface SjtOption {
@@ -140,6 +148,8 @@ function base(carry?: Partial<QuestionBase>): QuestionBase {
     facet: carry?.facet ?? '',
     sme_rationale: carry?.sme_rationale ?? '',
     media_url: carry?.media_url ?? null,
+    show_disclaimer: carry?.show_disclaimer ?? false,
+    disclaimer_text: carry?.disclaimer_text ?? DEFAULT_DISCLAIMER_TEXT,
   };
 }
 
@@ -190,6 +200,12 @@ export function validateQuestion(question: QuestionPayload): string[] {
   const errors: string[] = [];
   if (!question.prompt.trim()) errors.push('Question prompt is required.');
   if (question.facet.length > 64) errors.push('Facet must be 64 characters or fewer.');
+  if (question.show_disclaimer && !question.disclaimer_text.trim()) {
+    errors.push('Disclaimer text is required when the disclaimer is enabled.');
+  }
+  if (question.disclaimer_text.length > DISCLAIMER_TEXT_MAX) {
+    errors.push(`Disclaimer text must be ${DISCLAIMER_TEXT_MAX} characters or fewer.`);
+  }
 
   switch (question.type) {
     case 'sjt': {
@@ -258,6 +274,8 @@ export function toApiPayload(question: QuestionPayload): QuestionPayload {
     facet: question.facet.trim(),
     sme_rationale: question.sme_rationale.trim(),
     media_url: question.media_url || null,
+    show_disclaimer: question.show_disclaimer,
+    disclaimer_text: question.disclaimer_text.trim() || DEFAULT_DISCLAIMER_TEXT,
   };
   switch (question.type) {
     case 'sjt':

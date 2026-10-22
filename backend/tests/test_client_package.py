@@ -135,11 +135,9 @@ def test_admin_package_update_accepts_questions_and_target_role_aliases():
     assert body.custom_questions is not None
     assert body.custom_questions[0].prompt.startswith("Explain CAP")
 
-    blank = PackageUpdate.model_validate(
-        {"title": "Analyst pack", "target_role": "", "passing_threshold": ""}
-    )
+    blank = PackageUpdate.model_validate({"title": "Analyst pack", "target_role": ""})
     assert blank.target_role is None
-    assert blank.passing_threshold is None
+    assert not hasattr(blank, "passing_threshold")
 
 
 def test_draft_package_request_maps_questions_dict_to_overrides():
@@ -149,10 +147,9 @@ def test_draft_package_request_maps_questions_dict_to_overrides():
             "corporate_id": str(uuid4()),
             "title": "Draft",
             "target_role": "",
-            "passing_threshold": "",
             "questions": {module_id: [{"id": "q1", "prompt": "Stay calm"}]},
         }
     )
     assert body.target_role is None
-    assert body.passing_threshold is None
+    assert not hasattr(body, "passing_threshold")
     assert module_id in (body.module_question_overrides or {})
