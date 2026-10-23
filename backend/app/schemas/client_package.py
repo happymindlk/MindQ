@@ -507,6 +507,13 @@ class CorporatePackageItem(BaseModel):
     hr_login_link: str | None = None
 
 
+class PackageDeleteResponse(BaseModel):
+    """Result of ops package delete / soft-archive."""
+
+    id: UUID
+    status: Literal["archived", "deleted"]
+
+
 class SharePackageRequest(BaseModel):
     """Ops payload to email package access; blank recipient falls back to HR contact."""
 

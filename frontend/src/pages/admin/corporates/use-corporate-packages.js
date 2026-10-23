@@ -28,6 +28,7 @@ import { adminApi } from '../../../lib/adminApi';
  *   error: string | null,
  *   reload: () => Promise<void>,
  *   patchPackage: (id: string, patch: Partial<CorporatePackage>) => void,
+ *   removePackage: (id: string) => void,
  * }}
  */
 export function useCorporatePackages(corporateId) {
@@ -65,5 +66,9 @@ export function useCorporatePackages(corporateId) {
     setPackages((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   }, []);
 
-  return { packages, isLoading, error, reload, patchPackage };
+  const removePackage = useCallback((id) => {
+    setPackages((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
+  return { packages, isLoading, error, reload, patchPackage, removePackage };
 }

@@ -46,11 +46,15 @@ def display_status(package: Package) -> PackageDisplayStatus:
         package: Loaded package row.
 
     Returns:
-        ``archived`` when deactivated, ``published`` when published, else ``draft``.
+        ``draft`` while editing (drafts are created with ``is_active=False``),
+        ``archived`` when a published suite is soft-deleted, else ``published``.
     """
+    status = (package.status or "").lower()
+    if status == "draft":
+        return "draft"
     if package.is_active is False:
         return "archived"
-    if (package.status or "").lower() == "published":
+    if status == "published":
         return "published"
     return "draft"
 
@@ -112,6 +116,8 @@ async def list_corporate_packages(
         .subquery()
     )
 
+    # Soft-deleted published suites stay in DB for history but leave the company grid.
+    # Drafts keep ``is_active=False`` until publish, so keep them via status == draft.
     rows = (
         await session.execute(
             select(
@@ -120,7 +126,10 @@ async def list_corporate_packages(
                 func.coalesce(candidate_stats.c.completed, 0),
             )
             .outerjoin(candidate_stats, candidate_stats.c.package_id == Package.id)
-            .where(Package.corporate_id == corporate_id)
+            .where(
+                Package.corporate_id == corporate_id,
+                (Package.status == "draft") | (Package.is_active.is_(True)),
+            )
             .order_by(Package.created_at.desc())
         )
     ).all()

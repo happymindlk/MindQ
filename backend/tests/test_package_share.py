@@ -252,8 +252,9 @@ def test_list_packages_maps_status_counts_and_links():
     corp = _corporate()
     published = _package(corp, title="Published")
     draft = _package(corp, title="Draft", status="draft", access_code="HM-DRAFT-1")
-    archived = _package(corp, title="Old", is_active=False, access_code="HM-OLD-1")
-    session = _list_session(True, [(published, 5, 2), (draft, 0, 0), (archived, 3, None)])
+    # Soft-deleted published suites are filtered in SQL; the mock returns only
+    # rows the query would yield (draft + active published).
+    session = _list_session(True, [(published, 5, 2), (draft, 0, 0)])
 
     res = _client(session).get("/packages", params={"corporate_id": str(corp.id)})
 
@@ -266,9 +267,7 @@ def test_list_packages_maps_status_counts_and_links():
     assert by_title["Published"]["hr_login_link"] == f"{ORIGIN}/client/login"
     assert by_title["Draft"]["status"] == "draft"
     assert by_title["Draft"]["candidate_link"] is None
-    assert by_title["Old"]["status"] == "archived"
-    assert by_title["Old"]["completed_count"] == 0
-    assert by_title["Old"]["hr_login_link"] is None
+    assert "Old" not in by_title
 
 
 def test_list_packages_unknown_corporate_returns_404():

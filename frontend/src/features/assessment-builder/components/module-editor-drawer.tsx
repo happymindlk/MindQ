@@ -267,7 +267,7 @@ export function ModuleEditorDrawer({
     try {
       const updated = await detail.saveSettings(settings);
       onModuleChanged(updated);
-      toast({ title: 'Timing settings saved', variant: 'success' });
+      toast({ title: 'Assessment settings saved', variant: 'success' });
     } catch (err) {
       handleError(err, 'Could not save module settings.');
     }

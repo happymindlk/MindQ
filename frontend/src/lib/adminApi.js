@@ -341,6 +341,17 @@ export const adminApi = {
   },
 
   /**
+   * Soft-archive a published suite (or hard-delete a draft). Candidate records stay.
+   * @param {string} packageId
+   * @returns {Promise<{id: string, status: 'archived' | 'deleted'}>}
+   */
+  async deletePackage(packageId) {
+    return authedJson(`/api/v1/admin/packages/${packageId}`, 'Failed to delete package', {
+      method: 'DELETE',
+    });
+  },
+
+  /**
    * @param {string} packageId
    * @param {unknown} body
    * @param {{ signal?: AbortSignal }} [options]
