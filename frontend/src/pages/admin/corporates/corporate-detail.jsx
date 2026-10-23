@@ -3,7 +3,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Building2, Package } from 'lucide-react';
 import Button from '../../../components/ui/Button';
 import EmptyState from '../../../components/ui/EmptyState';
+import Modal from '../../../components/ui/Modal';
 import Skeleton from '../../../components/ui/Skeleton';
+import { useToast } from '../../../components/ui/useToast';
+import { adminApi } from '../../../lib/adminApi';
+import { friendlyErrorMessage } from '../../../lib/friendly-error';
 import CorporateLogo from './corporate-logo';
 import CorporatePackageCard from './corporate-package-card';
 import SharePackageModal from './share-package-modal';
@@ -65,6 +69,7 @@ function ErrorPanel({ title, message, onRetry }) {
 export default function CorporateDetail() {
   const { corporateId } = useParams();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const {
     corporates,
     isLoading: corporatesLoading,
@@ -77,10 +82,13 @@ export default function CorporateDetail() {
     error: packagesError,
     reload: reloadPackages,
     patchPackage,
+    removePackage,
   } = useCorporatePackages(corporateId);
   const [sharePkg, setSharePkg] = useState(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [deadlinePkg, setDeadlinePkg] = useState(null);
+  const [deleting, setDeleting] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const onDeadlineSaved = useCallback(
     (updated) => {
@@ -101,6 +109,28 @@ export default function CorporateDetail() {
     setShareOpen(true);
   }, []);
   const closeShare = useCallback(() => setShareOpen(false), []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!deleting) return;
+    setIsDeleting(true);
+    try {
+      await adminApi.deletePackage(deleting.id);
+      removePackage(deleting.id);
+      toast({
+        title: 'Package deleted',
+        description: 'Pending invitations no longer admit new candidates. History is kept.',
+        variant: 'success',
+      });
+      setDeleting(null);
+    } catch (err) {
+      toast({
+        title: friendlyErrorMessage(err, 'Could not delete this package.'),
+        variant: 'error',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleting, removePackage, toast]);
 
   const backButton = (
     <Button variant="secondary" size="sm" onClick={() => navigate('/admin')}>
@@ -180,6 +210,7 @@ export default function CorporateDetail() {
             corporateId={corporate.id}
             onShare={openShare}
             onExtendDeadline={setDeadlinePkg}
+            onDelete={setDeleting}
           />
         ))}
       </div>
@@ -227,6 +258,39 @@ export default function CorporateDetail() {
         pkg={deadlinePkg}
         onSaved={onDeadlineSaved}
       />
+
+      <Modal
+        isOpen={deleting !== null}
+        onClose={() => !isDeleting && setDeleting(null)}
+        title={deleting ? `Delete ${deleting.title}?` : 'Delete package'}
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setDeleting(null)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              isLoading={isDeleting}
+              onClick={confirmDelete}
+            >
+              Delete package
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          Are you sure you want to delete this package? This will revoke access for any pending
+          invitations. Candidate records and reports are kept.
+        </p>
+      </Modal>
     </div>
   );
 }

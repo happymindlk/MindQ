@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Link } from 'react-router-dom';
-import { CalendarClock, Pencil, Send, Users } from 'lucide-react';
+import { CalendarClock, Pencil, Send, Trash2, Users } from 'lucide-react';
 import Badge from '../../../components/ui/Badge';
 import Button from '../../../components/ui/Button';
 import DeadlineLabel from '../../../features/package-schedule/deadline-label';
@@ -31,8 +31,9 @@ function Metric({ label, value }) {
  * @param {string} props.corporateId
  * @param {(pkg: import('./use-corporate-packages').CorporatePackage) => void} props.onShare
  * @param {(pkg: import('./use-corporate-packages').CorporatePackage) => void} props.onExtendDeadline
+ * @param {(pkg: import('./use-corporate-packages').CorporatePackage) => void} [props.onDelete]
  */
-function CorporatePackageCard({ pkg, corporateId, onShare, onExtendDeadline }) {
+function CorporatePackageCard({ pkg, corporateId, onShare, onExtendDeadline, onDelete }) {
   const badge = STATUS_BADGE[pkg.status] ?? STATUS_BADGE.draft;
 
   return (
@@ -45,9 +46,22 @@ function CorporatePackageCard({ pkg, corporateId, onShare, onExtendDeadline }) {
           </p>
           <DeadlineLabel closeTime={pkg.close_time} className="mt-1" />
         </div>
-        <Badge variant={badge.variant} showDot className="shrink-0">
-          {badge.label}
-        </Badge>
+        <div className="flex items-start gap-1 shrink-0">
+          <Badge variant={badge.variant} showDot>
+            {badge.label}
+          </Badge>
+          {onDelete && pkg.status !== 'archived' && (
+            <button
+              type="button"
+              aria-label={`Delete ${pkg.title}`}
+              title={`Delete ${pkg.title}`}
+              onClick={() => onDelete(pkg)}
+              className="p-1.5 rounded-md text-neutral-400 transition-colors duration-150 hover:text-rose-500 hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+            >
+              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
       </header>
 
       <dl className="grid grid-cols-2 gap-4">

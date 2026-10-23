@@ -29,6 +29,13 @@ import {
   isAbortError,
   isPackageSaveAllowed,
 } from '../../features/suite-builder/package-draft-autosave';
+import {
+  clearSuiteDraft,
+  migrateSuiteDraft,
+  readSuiteDraft,
+  suiteDraftHasContent,
+  writeSuiteDraft,
+} from '../../features/suite-builder/suite-draft-cache';
 
 function moduleMinutes(mod) {
   const seconds = Number(mod.duration_seconds) || Number(mod.time_limit_minutes) * 60 || 0;
@@ -229,6 +236,23 @@ function ModuleChip({ mod, questions, editable, onRemove, onQuestionsChange, dra
   );
 }
 
+function applyCachedSuiteFields(draft, setters) {
+  if (!draft) return;
+  setters.setCorporateId(draft.corporateId || '');
+  setters.setTitle(draft.title || '');
+  setters.setDescription(draft.description || '');
+  setters.setTargetRole(draft.targetRole || '');
+  setters.setOpenTime(draft.openTime || '');
+  setters.setCloseTime(draft.closeTime || '');
+  setters.setCartIds(Array.isArray(draft.cartIds) ? draft.cartIds : []);
+  setters.setModuleOverrides(
+    draft.moduleOverrides && typeof draft.moduleOverrides === 'object'
+      ? draft.moduleOverrides
+      : {},
+  );
+  setters.setCustomQuestions(Array.isArray(draft.customQuestions) ? draft.customQuestions : []);
+}
+
 export default function SuiteBuilder() {
   const { packageId: routePackageId } = useParams();
   const [searchParams] = useSearchParams();
@@ -238,15 +262,48 @@ export default function SuiteBuilder() {
   const [modules, setModules] = useState([]);
   const [corporates, setCorporates] = useState([]);
   const [search, setSearch] = useState('');
-  const [corporateId, setCorporateId] = useState('');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [targetRole, setTargetRole] = useState('');
-  const [openTime, setOpenTime] = useState('');
-  const [closeTime, setCloseTime] = useState('');
-  const [cartIds, setCartIds] = useState([]);
-  const [moduleOverrides, setModuleOverrides] = useState({});
-  const [customQuestions, setCustomQuestions] = useState([]);
+  // Create flow: restore session draft once so remounts / tab discard keep in-progress work.
+  const [corporateId, setCorporateId] = useState(() => {
+    if (loadPackageId) return '';
+    return readSuiteDraft(null)?.corporateId || '';
+  });
+  const [title, setTitle] = useState(() => {
+    if (loadPackageId) return '';
+    return readSuiteDraft(null)?.title || '';
+  });
+  const [description, setDescription] = useState(() => {
+    if (loadPackageId) return '';
+    return readSuiteDraft(null)?.description || '';
+  });
+  const [targetRole, setTargetRole] = useState(() => {
+    if (loadPackageId) return '';
+    return readSuiteDraft(null)?.targetRole || '';
+  });
+  const [openTime, setOpenTime] = useState(() => {
+    if (loadPackageId) return '';
+    return readSuiteDraft(null)?.openTime || '';
+  });
+  const [closeTime, setCloseTime] = useState(() => {
+    if (loadPackageId) return '';
+    return readSuiteDraft(null)?.closeTime || '';
+  });
+  const [cartIds, setCartIds] = useState(() => {
+    if (loadPackageId) return [];
+    const draft = readSuiteDraft(null);
+    return Array.isArray(draft?.cartIds) ? draft.cartIds : [];
+  });
+  const [moduleOverrides, setModuleOverrides] = useState(() => {
+    if (loadPackageId) return {};
+    const draft = readSuiteDraft(null);
+    return draft?.moduleOverrides && typeof draft.moduleOverrides === 'object'
+      ? draft.moduleOverrides
+      : {};
+  });
+  const [customQuestions, setCustomQuestions] = useState(() => {
+    if (loadPackageId) return [];
+    const draft = readSuiteDraft(null);
+    return Array.isArray(draft?.customQuestions) ? draft.customQuestions : [];
+  });
   const [packageId, setPackageId] = useState(loadPackageId || null);
   const [status, setStatus] = useState('draft');
   const [saveState, setSaveState] = useState('idle');
@@ -264,9 +321,12 @@ export default function SuiteBuilder() {
   const [jdOverwrite, setJdOverwrite] = useState(null);
   const jdPdfInputRef = useRef(null);
   const skipSave = useRef(true);
+  const skipCacheWrite = useRef(true);
   const draftSave = useRef(createDraftSaveController());
   /** Once true, the editor is leaving after publish — block any residual saves. */
   const publishLeaving = useRef(false);
+  const hydratedPackageIdRef = useRef(null);
+  const formSnapshotRef = useRef({});
 
   useEffect(() => {
     let cancelled = false;
@@ -309,12 +369,15 @@ export default function SuiteBuilder() {
 
   useEffect(() => {
     if (!loadPackageId) return;
+    // Same package id in this mount: do not wipe local/session-restored form state.
+    if (hydratedPackageIdRef.current === loadPackageId) return undefined;
     let cancelled = false;
     (async () => {
       try {
         const pkg = await adminApi.getAdminPackage(loadPackageId);
         if (cancelled) return;
         skipSave.current = true;
+        skipCacheWrite.current = true;
         setPackageId(pkg.id);
         setCorporateId(pkg.corporate_id);
         setTitle(pkg.title || '');
@@ -356,6 +419,22 @@ export default function SuiteBuilder() {
           });
           return Array.from(map.values());
         });
+        // Prefer newer session draft (e.g. work typed before company/title autosave).
+        const sessionDraft = readSuiteDraft(loadPackageId);
+        if (suiteDraftHasContent(sessionDraft) && pkg.status !== 'published') {
+          applyCachedSuiteFields(sessionDraft, {
+            setCorporateId,
+            setTitle,
+            setDescription,
+            setTargetRole,
+            setOpenTime,
+            setCloseTime,
+            setCartIds,
+            setModuleOverrides,
+            setCustomQuestions,
+          });
+        }
+        hydratedPackageIdRef.current = loadPackageId;
         const upgraded = (pkg.modules || []).filter((m) => m.upgraded_from_version != null);
         if (upgraded.length > 0 && pkg.status !== 'published') {
           // Persist the resolved versions so the draft no longer points at stale ones.
@@ -378,7 +457,7 @@ export default function SuiteBuilder() {
     return () => {
       cancelled = true;
     };
-  }, [loadPackageId]);
+  }, [loadPackageId, toast]);
 
   const moduleById = useMemo(() => {
     const map = new Map();
@@ -467,6 +546,84 @@ export default function SuiteBuilder() {
     const controller = draftSave.current;
     return () => {
       controller.cancelAll();
+    };
+  }, []);
+
+  // Keep a sync snapshot for beforeunload / visibility flush (effects close over stale state).
+  formSnapshotRef.current = {
+    packageId: packageId || loadPackageId || null,
+    corporateId,
+    title,
+    description,
+    targetRole,
+    openTime,
+    closeTime,
+    cartIds,
+    moduleOverrides,
+    customQuestions,
+    status,
+  };
+
+  useEffect(() => {
+    if (skipCacheWrite.current) {
+      skipCacheWrite.current = false;
+      return undefined;
+    }
+    if (publishLeaving.current || status === 'published') return undefined;
+    const cacheKey = packageId || loadPackageId || null;
+    const timer = window.setTimeout(() => {
+      writeSuiteDraft(cacheKey, {
+        corporateId,
+        title,
+        description,
+        targetRole,
+        openTime,
+        closeTime,
+        cartIds,
+        moduleOverrides,
+        customQuestions,
+      });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [
+    corporateId,
+    title,
+    description,
+    targetRole,
+    openTime,
+    closeTime,
+    cartIds,
+    moduleOverrides,
+    customQuestions,
+    packageId,
+    loadPackageId,
+    status,
+  ]);
+
+  useEffect(() => {
+    const flush = () => {
+      const snap = formSnapshotRef.current;
+      if (publishLeaving.current || snap.status === 'published') return;
+      writeSuiteDraft(snap.packageId, {
+        corporateId: snap.corporateId,
+        title: snap.title,
+        description: snap.description,
+        targetRole: snap.targetRole,
+        openTime: snap.openTime,
+        closeTime: snap.closeTime,
+        cartIds: snap.cartIds,
+        moduleOverrides: snap.moduleOverrides,
+        customQuestions: snap.customQuestions,
+      });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
@@ -620,7 +777,20 @@ export default function SuiteBuilder() {
       if (saved.id !== packageId) setPackageId(saved.id);
       setSaveState('saved');
       if (!loadPackageId && saved.id) {
+        writeSuiteDraft(null, {
+          corporateId,
+          title,
+          description,
+          targetRole,
+          openTime,
+          closeTime,
+          cartIds,
+          moduleOverrides,
+          customQuestions,
+        });
+        migrateSuiteDraft(saved.id);
         skipSave.current = true;
+        skipCacheWrite.current = true;
         navigate(`/admin/packages/edit/${saved.id}`, { replace: true });
       }
       return saved;
@@ -720,6 +890,8 @@ export default function SuiteBuilder() {
       publishLeaving.current = true;
       draftSave.current.cancelAll();
       skipSave.current = true;
+      clearSuiteDraft(id);
+      clearSuiteDraft(null);
       setStatus('published');
       toast({
         title: 'Suite published',

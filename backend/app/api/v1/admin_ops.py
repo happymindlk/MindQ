@@ -22,6 +22,7 @@ from app.schemas.client_package import (
     CompanyUpdateRequest,
     HrInviteRequest,
     HrInviteResponse,
+    PackageDeleteResponse,
     PackageScheduleResponse,
     PackageScheduleUpdate,
 )
@@ -269,6 +270,31 @@ async def get_admin_package(
     """
     try:
         return await ClientPackageService.get_admin_package(db, package_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/packages/{package_id}", response_model=PackageDeleteResponse)
+async def delete_admin_package(
+    package_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: HRUserContext = Depends(get_current_ops_user),
+):
+    """Soft-archive a published suite or hard-delete an unpublished draft.
+
+    Published packages set ``is_active=False`` so candidate records remain.
+    Drafts are removed entirely. Archived packages leave the company package grid.
+
+    Args:
+        package_id: Client package UUID.
+        db: Async database session.
+        _: Authenticated ops user.
+
+    Returns:
+        ``archived`` or ``deleted`` outcome with the package id.
+    """
+    try:
+        return await ClientPackageService.soft_delete_package(db, package_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

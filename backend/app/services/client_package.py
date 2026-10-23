@@ -44,6 +44,7 @@ from app.schemas.client_package import (
     DraftPackageRequest,
     DraftPackageResponse,
     GlobalModuleResponse,
+    PackageDeleteResponse,
     PackagePreviewRequest,
     PackageScheduleResponse,
     PackageScheduleUpdate,
@@ -835,6 +836,46 @@ class ClientPackageService:
         await session.commit()
         await session.refresh(corporate)
         return _company_response(corporate)
+
+    @staticmethod
+    async def soft_delete_package(
+        session: AsyncSession, package_id: UUID
+    ) -> PackageDeleteResponse:
+        """Remove a suite from company views while preserving candidate history.
+
+        Published packages are soft-archived (``is_active=False``) so assessments,
+        candidates, and reports remain. Drafts are hard-deleted because they are
+        already stored with ``is_active=False`` and have no published invite surface.
+
+        Args:
+            session: Async database session.
+            package_id: Target package UUID.
+
+        Returns:
+            ``archived`` for published soft-deletes, ``deleted`` for draft removal.
+
+        Raises:
+            LookupError: Package missing, or already archived.
+        """
+        package = (
+            await session.execute(select(Package).where(Package.id == package_id))
+        ).scalar_one_or_none()
+        if package is None:
+            raise LookupError("Package not found")
+
+        status = (package.status or "").lower()
+        if status == "draft":
+            await session.execute(delete(Package).where(Package.id == package_id))
+            await session.commit()
+            return PackageDeleteResponse(id=package_id, status="deleted")
+
+        if package.is_active is False:
+            raise LookupError("Package not found")
+
+        package.is_active = False
+        await session.commit()
+        await session.refresh(package)
+        return PackageDeleteResponse(id=package.id, status="archived")
 
     @staticmethod
     async def set_company_logo(
