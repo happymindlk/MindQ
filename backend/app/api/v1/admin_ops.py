@@ -240,9 +240,15 @@ async def invite_hr(
     )
     if not corporate.contact_email:
         corporate.contact_email = body.email
-    allowed = list(corporate.allowed_hr_emails or [])
-    if body.email not in allowed:
-        corporate.allowed_hr_emails = [*allowed, body.email]
+    # Persist a fully normalized whitelist so OTP lookup is case-stable.
+    normalized = [
+        entry.strip().lower()
+        for entry in (corporate.allowed_hr_emails or [])
+        if entry and str(entry).strip()
+    ]
+    if body.email not in normalized:
+        normalized.append(body.email)
+    corporate.allowed_hr_emails = normalized
     await db.commit()
 
     return HrInviteResponse(

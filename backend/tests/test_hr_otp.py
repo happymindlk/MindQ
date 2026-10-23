@@ -50,11 +50,14 @@ def _membership(user_id, corporate_id, role: str = "hr"):
     )
 
 
-def _corporate(corporate_id, *, allowed_hr_emails=None, is_active=True):
+def _corporate(
+    corporate_id, *, allowed_hr_emails=None, contact_email=None, is_active=True
+):
     return SimpleNamespace(
         id=corporate_id,
         name="Acme",
         logo_url=None,
+        contact_email=contact_email,
         allowed_hr_emails=[EMAIL] if allowed_hr_emails is None else allowed_hr_emails,
         is_active=is_active,
     )
@@ -228,6 +231,110 @@ async def test_request_rejects_email_not_on_company_whitelist():
     assert exc.value.status_code == 403
     assert "not registered" in exc.value.detail
     assert db.added == []
+
+
+@pytest.mark.asyncio
+async def test_request_accepts_secondary_whitelisted_email():
+    """Secondary HR emails on allowed_hr_emails can request OTP."""
+    secondary = "mohamed@happymind.lk"
+    user_id, corporate_id = uuid4(), uuid4()
+    db = _FakeDb(
+        [
+            _Result(scalar=_membership(user_id, corporate_id)),
+            _Result(
+                scalar=_corporate(
+                    corporate_id,
+                    contact_email="hr@acme.test",
+                    allowed_hr_emails=["hr@acme.test", secondary],
+                )
+            ),
+            _Result(),
+            _Result(first=None),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+        ]
+    )
+    sent: dict = {}
+
+    async def _send(email, otp):
+        sent["email"] = email
+        sent["otp"] = otp
+
+    with (
+        patch("app.services.hr_otp.find_auth_user_id_by_email", return_value=user_id),
+        patch("app.services.hr_otp.send_hr_otp_email", new=_send),
+    ):
+        response = await request_hr_otp(db, f"  {secondary.upper()} ")
+
+    assert response.status == "otp_required"
+    assert sent["email"] == secondary
+    _, token_user, token_email = decode_hr_otp_token(response.temp_token)
+    assert token_user == user_id
+    assert token_email == secondary
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_request_accepts_contact_email_when_not_in_allowed_list():
+    """Primary contact_email grants access even if allowed_hr_emails is empty."""
+    user_id, corporate_id = uuid4(), uuid4()
+    db = _FakeDb(
+        [
+            _Result(scalar=_membership(user_id, corporate_id)),
+            _Result(
+                scalar=_corporate(
+                    corporate_id, contact_email=EMAIL, allowed_hr_emails=[]
+                )
+            ),
+            _Result(),
+            _Result(first=None),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+        ]
+    )
+    sent: dict = {}
+
+    async def _send(email, otp):
+        sent["email"] = email
+
+    with (
+        patch("app.services.hr_otp.find_auth_user_id_by_email", return_value=user_id),
+        patch("app.services.hr_otp.send_hr_otp_email", new=_send),
+    ):
+        response = await request_hr_otp(db, "  HR@Acme.Test ")
+
+    assert response.status == "otp_required"
+    assert sent["email"] == EMAIL
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
+async def test_request_accepts_mixed_case_whitelist_entry():
+    """Stored whitelist casing must not block a normalized login email."""
+    user_id, corporate_id = uuid4(), uuid4()
+    db = _FakeDb(
+        [
+            _Result(scalar=_membership(user_id, corporate_id)),
+            _Result(
+                scalar=_corporate(
+                    corporate_id, allowed_hr_emails=["  HR@Acme.Test "]
+                )
+            ),
+            _Result(),
+            _Result(first=None),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+        ]
+    )
+
+    with (
+        patch("app.services.hr_otp.find_auth_user_id_by_email", return_value=user_id),
+        patch("app.services.hr_otp.send_hr_otp_email", new=AsyncMock()),
+    ):
+        response = await request_hr_otp(db, EMAIL)
+
+    assert response.status == "otp_required"
+    assert db.committed is True
 
 
 @pytest.mark.asyncio

@@ -125,6 +125,9 @@ def _aware(value: datetime) -> datetime:
 def _assert_company_access(corporate: Corporate, email: str) -> None:
     """Require an active company whose HR whitelist contains ``email``.
 
+    Accepts the login email when it matches ``contact_email`` or appears in
+    ``allowed_hr_emails`` (both compared case-insensitively after strip).
+
     Args:
         corporate: Tenant the membership points at.
         email: Normalized login email.
@@ -134,8 +137,9 @@ def _assert_company_access(corporate: Corporate, email: str) -> None:
     """
     if corporate.is_active is False:
         raise HrOtpError(403, _INVALID_TARGET)
+    contact = (corporate.contact_email or "").strip().lower()
     allowed = {str(entry).strip().lower() for entry in (corporate.allowed_hr_emails or [])}
-    if email not in allowed:
+    if email != contact and email not in allowed:
         raise HrOtpError(403, _INVALID_TARGET)
 
 

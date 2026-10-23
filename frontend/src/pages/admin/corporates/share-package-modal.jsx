@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Check, Copy, Info, Mail } from 'lucide-react';
 import Modal from '../../../components/ui/Modal';
 import Input from '../../../components/ui/Input';
@@ -8,6 +8,29 @@ import { adminApi } from '../../../lib/adminApi';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@.]+$/;
 const COPIED_RESET_MS = 1800;
+const OTHER_VALUE = '__other__';
+
+/**
+ * Unique HR emails for a company: contact_email ∪ allowed_hr_emails.
+ * Case-insensitive dedupe; preserves first-seen casing for display.
+ *
+ * @param {{ contact_email?: string | null, allowed_hr_emails?: string[] } | null} corporate
+ * @returns {string[]}
+ */
+function buildHrEmails(corporate) {
+  const seen = new Set();
+  const emails = [];
+  for (const raw of [corporate?.contact_email, ...(corporate?.allowed_hr_emails || [])]) {
+    if (!raw || typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    emails.push(trimmed);
+  }
+  return emails;
+}
 
 /**
  * Read-only preview block with a copy-to-clipboard icon button.
@@ -61,22 +84,40 @@ function PreviewBox({ title, rows, copyLabel, copyText, copied, onCopy }) {
 export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
   const { toast } = useToast();
   const formId = useId();
+  const selectId = useId();
+  const customInputRef = useRef(null);
   const [recipient, setRecipient] = useState('');
+  const [selectValue, setSelectValue] = useState(OTHER_VALUE);
   const [fieldError, setFieldError] = useState(null);
   const [submitError, setSubmitError] = useState(null);
   const [isSending, setIsSending] = useState(false);
   const [copiedKey, setCopiedKey] = useState(null);
   const copiedTimerRef = useRef(null);
 
+  const hrEmails = useMemo(() => buildHrEmails(corporate), [corporate]);
+  const isOther = selectValue === OTHER_VALUE;
+
   useEffect(() => {
     if (!isOpen) return;
-    setRecipient(corporate?.contact_email ?? '');
+    const defaultEmail = corporate?.contact_email?.trim() || hrEmails[0] || '';
+    if (defaultEmail) {
+      setSelectValue(defaultEmail);
+      setRecipient(defaultEmail);
+    } else {
+      setSelectValue(OTHER_VALUE);
+      setRecipient('');
+    }
     setFieldError(null);
     setSubmitError(null);
     setCopiedKey(null);
-  }, [isOpen, corporate?.contact_email]);
+  }, [isOpen, corporate?.contact_email, hrEmails]);
 
   useEffect(() => () => clearTimeout(copiedTimerRef.current), []);
+
+  useEffect(() => {
+    if (!isOpen || !isOther) return;
+    customInputRef.current?.focus();
+  }, [isOpen, isOther]);
 
   const frontendOrigin = (
     import.meta.env.VITE_FRONTEND_URL || window.location.origin
@@ -90,11 +131,14 @@ export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
   // The HR link itself carries no tenant binding: whoever signs in lands in
   // the company their own HR membership + whitelist point at. Name that
   // company here so a mismatch is visible before sending.
+  const allowedSet = useMemo(() => {
+    const set = new Set(hrEmails.map((email) => email.toLowerCase()));
+    return set;
+  }, [hrEmails]);
   const recipientWhitelisted =
-    !corporate?.allowed_hr_emails?.length ||
-    corporate.allowed_hr_emails.some(
-      (email) => email.toLowerCase() === recipient.trim().toLowerCase(),
-    );
+    !recipient.trim() ||
+    allowedSet.size === 0 ||
+    allowedSet.has(recipient.trim().toLowerCase());
 
   const copy = async (key, text) => {
     try {
@@ -113,6 +157,17 @@ export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
 
   const handleClose = () => {
     if (!isSending) onClose();
+  };
+
+  const handleSelectChange = (event) => {
+    const value = event.target.value;
+    setSelectValue(value);
+    setFieldError(null);
+    if (value === OTHER_VALUE) {
+      setRecipient('');
+      return;
+    }
+    setRecipient(value);
   };
 
   const handleSubmit = async (event) => {
@@ -142,6 +197,15 @@ export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
     }
   };
 
+  const selectClassName = `
+    block w-full h-9 rounded-md bg-canvas border text-foreground text-sm
+    pl-3 pr-3
+    focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary
+    transition-colors duration-150 ease-out
+    border-slate-200 dark:border-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-700
+    disabled:opacity-50
+  `;
+
   return (
     <Modal
       isOpen={isOpen}
@@ -160,17 +224,47 @@ export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
       }
     >
       <form id={formId} onSubmit={handleSubmit} noValidate className="space-y-4">
-        <Input
-          label="Recipient email"
-          type="email"
-          icon={Mail}
-          value={recipient}
-          onChange={(event) => setRecipient(event.target.value)}
-          placeholder="hr@company.com"
-          error={fieldError}
-          disabled={isSending}
-          autoComplete="off"
-        />
+        <div className="w-full">
+          <label htmlFor={selectId} className="metric-label mb-1.5 block">
+            Recipient email
+          </label>
+          <select
+            id={selectId}
+            value={selectValue}
+            onChange={handleSelectChange}
+            disabled={isSending}
+            className={selectClassName}
+            aria-label="Recipient email"
+          >
+            {hrEmails.map((email) => (
+              <option key={email.toLowerCase()} value={email}>
+                {email}
+              </option>
+            ))}
+            <option value={OTHER_VALUE}>Other / Add custom email...</option>
+          </select>
+        </div>
+
+        {isOther && (
+          <Input
+            ref={customInputRef}
+            label="Custom email"
+            type="email"
+            icon={Mail}
+            value={recipient}
+            onChange={(event) => setRecipient(event.target.value)}
+            placeholder="hr@company.com"
+            error={fieldError}
+            disabled={isSending}
+            autoComplete="off"
+          />
+        )}
+
+        {!isOther && fieldError && (
+          <p className="text-xs text-danger" role="alert">
+            {fieldError}
+          </p>
+        )}
 
         <PreviewBox
           title="Candidate access"
