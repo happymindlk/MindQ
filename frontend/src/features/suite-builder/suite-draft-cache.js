@@ -3,7 +3,81 @@ const NEW_KEY = `${PREFIX}new`;
 const DRAFT_VERSION = 1;
 
 /**
- * sessionStorage key for an in-progress suite draft.
+ * Prefer localStorage so drafts survive tab close; fall back to sessionStorage
+ * for private-mode / quota failures and migrate any legacy session entries.
+ *
+ * @returns {Storage | null}
+ */
+function primaryStorage() {
+  try {
+    return localStorage;
+  } catch {
+    try {
+      return sessionStorage;
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * @param {string} key
+ * @returns {string | null}
+ */
+function readRaw(key) {
+  try {
+    const primary = primaryStorage();
+    const fromPrimary = primary?.getItem(key) ?? null;
+    if (fromPrimary != null) return fromPrimary;
+    // Migrate legacy sessionStorage drafts once.
+    const fromSession = sessionStorage.getItem(key);
+    if (fromSession != null && primary && primary !== sessionStorage) {
+      primary.setItem(key, fromSession);
+      sessionStorage.removeItem(key);
+    }
+    return fromSession;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {string} key
+ * @param {string} value
+ */
+function writeRaw(key, value) {
+  try {
+    const primary = primaryStorage();
+    primary?.setItem(key, value);
+    // Keep session in sync when both exist so older tabs still hydrate.
+    try {
+      if (primary !== sessionStorage) sessionStorage.setItem(key, value);
+    } catch {
+      // Ignore secondary storage failures.
+    }
+  } catch {
+    // Quota or private-mode failures must not block typing.
+  }
+}
+
+/**
+ * @param {string} key
+ */
+function removeRaw(key) {
+  try {
+    primaryStorage()?.removeItem(key);
+  } catch {
+    // Ignore.
+  }
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // Ignore.
+  }
+}
+
+/**
+ * Storage key for an in-progress suite draft.
  *
  * @param {string | null | undefined} packageId - Null/undefined → create flow key.
  * @returns {string}
@@ -35,7 +109,7 @@ export function suiteDraftKey(packageId) {
  */
 export function readSuiteDraft(packageId) {
   try {
-    const raw = sessionStorage.getItem(suiteDraftKey(packageId));
+    const raw = readRaw(suiteDraftKey(packageId));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
@@ -47,33 +121,29 @@ export function readSuiteDraft(packageId) {
 }
 
 /**
- * Persist suite form fields so remounts / tab discard can restore them.
+ * Persist suite form fields so remounts / tab switches can restore them.
  *
  * @param {string | null | undefined} packageId
  * @param {Omit<SuiteDraftPayload, 'v' | 'updatedAt'>} fields
  */
 export function writeSuiteDraft(packageId, fields) {
-  try {
-    const payload = {
-      v: DRAFT_VERSION,
-      updatedAt: Date.now(),
-      corporateId: fields.corporateId ?? '',
-      title: fields.title ?? '',
-      description: fields.description ?? '',
-      targetRole: fields.targetRole ?? '',
-      openTime: fields.openTime ?? '',
-      closeTime: fields.closeTime ?? '',
-      cartIds: Array.isArray(fields.cartIds) ? fields.cartIds : [],
-      moduleOverrides:
-        fields.moduleOverrides && typeof fields.moduleOverrides === 'object'
-          ? fields.moduleOverrides
-          : {},
-      customQuestions: Array.isArray(fields.customQuestions) ? fields.customQuestions : [],
-    };
-    sessionStorage.setItem(suiteDraftKey(packageId), JSON.stringify(payload));
-  } catch {
-    // Quota or private-mode failures must not block typing.
-  }
+  const payload = {
+    v: DRAFT_VERSION,
+    updatedAt: Date.now(),
+    corporateId: fields.corporateId ?? '',
+    title: fields.title ?? '',
+    description: fields.description ?? '',
+    targetRole: fields.targetRole ?? '',
+    openTime: fields.openTime ?? '',
+    closeTime: fields.closeTime ?? '',
+    cartIds: Array.isArray(fields.cartIds) ? fields.cartIds : [],
+    moduleOverrides:
+      fields.moduleOverrides && typeof fields.moduleOverrides === 'object'
+        ? fields.moduleOverrides
+        : {},
+    customQuestions: Array.isArray(fields.customQuestions) ? fields.customQuestions : [],
+  };
+  writeRaw(suiteDraftKey(packageId), JSON.stringify(payload));
 }
 
 /**
@@ -82,11 +152,7 @@ export function writeSuiteDraft(packageId, fields) {
  * @param {string | null | undefined} packageId
  */
 export function clearSuiteDraft(packageId) {
-  try {
-    sessionStorage.removeItem(suiteDraftKey(packageId));
-  } catch {
-    // Ignore storage failures on cleanup.
-  }
+  removeRaw(suiteDraftKey(packageId));
 }
 
 /**
@@ -97,10 +163,10 @@ export function clearSuiteDraft(packageId) {
 export function migrateSuiteDraft(packageId) {
   if (!packageId) return;
   try {
-    const raw = sessionStorage.getItem(NEW_KEY);
+    const raw = readRaw(NEW_KEY);
     if (!raw) return;
-    sessionStorage.setItem(suiteDraftKey(packageId), raw);
-    sessionStorage.removeItem(NEW_KEY);
+    writeRaw(suiteDraftKey(packageId), raw);
+    removeRaw(NEW_KEY);
   } catch {
     // Ignore storage failures on migrate.
   }

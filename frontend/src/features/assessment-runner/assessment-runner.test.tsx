@@ -84,6 +84,7 @@ function renderRunner(
     onSubmitted?: () => void;
     onTimeExpired?: () => void;
     onLocked?: (message: string) => void;
+    onExit?: () => void;
     initialAnswers?: Record<string, AnswerValue>;
   } = {},
 ) {
@@ -96,7 +97,7 @@ function renderRunner(
       onSubmitted={callbacks.onSubmitted ?? (() => undefined)}
       onTimeExpired={callbacks.onTimeExpired}
       onLocked={callbacks.onLocked ?? (() => undefined)}
-      onExit={() => undefined}
+      onExit={callbacks.onExit ?? (() => undefined)}
     />,
   );
 }
@@ -365,6 +366,27 @@ describe('AssessmentRunner optimistic navigation', () => {
     expect(screen.getByText('Second question')).toBeInTheDocument();
     expect(screen.getByText('Question 2 of 2')).toBeInTheDocument();
     expect(transport.autosave).toHaveBeenCalledTimes(1);
+    resolveSave?.();
+  });
+
+  it('exits without waiting for a pending autosave flush', async () => {
+    let resolveSave: (() => void) | undefined;
+    const transport = {
+      autosave: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSave = resolve;
+          }),
+      ),
+      submit: vi.fn(async () => undefined),
+    };
+    const onExit = vi.fn();
+    const user = userEvent.setup();
+    renderRunner(twoQuestionTest(), transport, 'live', { onExit });
+
+    await user.click(screen.getByRole('radio', { name: /Alpha/ }));
+    await user.click(screen.getByRole('button', { name: /Back to dashboard/i }));
+    expect(onExit).toHaveBeenCalledTimes(1);
     resolveSave?.();
   });
 

@@ -10,6 +10,7 @@ import {
 
 afterEach(() => {
   sessionStorage.clear();
+  localStorage.clear();
 });
 
 describe('suite-draft-cache', () => {
@@ -72,6 +73,27 @@ describe('suite-draft-cache', () => {
     });
     clearSuiteDraft('pkg-1');
     expect(readSuiteDraft('pkg-1')).toBeNull();
+  });
+
+  it('migrates a legacy sessionStorage draft into localStorage', () => {
+    sessionStorage.setItem(
+      suiteDraftKey(null),
+      JSON.stringify({
+        v: 1,
+        updatedAt: 1,
+        corporateId: 'c1',
+        title: 'From session',
+        description: '',
+        targetRole: '',
+        openTime: '',
+        closeTime: '',
+        cartIds: [],
+        moduleOverrides: {},
+        customQuestions: [],
+      }),
+    );
+    expect(readSuiteDraft(null)?.title).toBe('From session');
+    expect(localStorage.getItem(suiteDraftKey(null))).toContain('From session');
   });
 
   it('detects meaningful content', () => {

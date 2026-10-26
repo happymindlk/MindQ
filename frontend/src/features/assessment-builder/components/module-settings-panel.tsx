@@ -124,8 +124,8 @@ export function ModuleSettingsPanel({
           Timing &amp; Delivery
         </h3>
         {locked && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-300">
-            <Lock className="h-3 w-3" aria-hidden /> Locked
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-400">
+            <Lock className="h-3 w-3 text-[#7048E2] dark:text-[#AF60BB]" aria-hidden /> Locked
           </span>
         )}
       </header>
@@ -234,7 +234,7 @@ export function ModuleSettingsPanel({
                 {draft.topDisclaimerText !== DEFAULT_TOP_DISCLAIMER_TEXT && (
                   <button
                     type="button"
-                    className="mt-1 text-[11px] font-medium text-cyan-300 hover:text-cyan-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                    className="mt-1 text-[11px] font-medium text-[#7048E2] hover:text-[#5e3cc4] dark:text-[#AF60BB] dark:hover:text-[#c47ad0] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7048E2]"
                     onClick={() => guard(() => setDraft((d) => ({ ...d, topDisclaimerText: DEFAULT_TOP_DISCLAIMER_TEXT })))}
                   >
                     Reset to default
@@ -273,7 +273,7 @@ export function ModuleSettingsPanel({
                 {draft.confidentialityNoticeText !== DEFAULT_CONFIDENTIALITY_NOTICE_TEXT && (
                   <button
                     type="button"
-                    className="mt-1 text-[11px] font-medium text-cyan-300 hover:text-cyan-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                    className="mt-1 text-[11px] font-medium text-[#7048E2] hover:text-[#5e3cc4] dark:text-[#AF60BB] dark:hover:text-[#c47ad0] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7048E2]"
                     onClick={() =>
                       guard(() => setDraft((d) => ({ ...d, confidentialityNoticeText: DEFAULT_CONFIDENTIALITY_NOTICE_TEXT })))
                     }

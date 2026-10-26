@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Brain, Code2, Search } from 'lucide-react';
 import Button from '../../components/ui/Button';
@@ -7,6 +7,10 @@ import PageHeader from '../../components/ui/PageHeader';
 import Modal from '../../components/ui/Modal';
 import { AssessmentBuilderWorkspace } from '../../features/assessment-builder/components/assessment-builder-workspace';
 import { useModuleLibrary } from '../../features/assessment-builder/hooks/use-module-library';
+import {
+  builderDraftHasContent,
+  readBuilderDraft,
+} from '../../features/assessment-builder/lib/builder-draft-cache';
 
 const TABS = [
   { id: 'all', label: 'All', cta: '+ New Assessment' },
@@ -36,6 +40,16 @@ export default function AssessmentLibrary() {
   const [activeTab, setActiveTab] = useState('all');
   const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState(null);
+
+  // Re-open an in-progress create dialog after tab/route remounts.
+  useEffect(() => {
+    const cached = readBuilderDraft();
+    if (!builderDraftHasContent(cached) || !cached) return;
+    setCreateDraft({
+      kind: cached.kind,
+      category: cached.category ?? (cached.kind === 'psychometric' ? 'behavioral' : null),
+    });
+  }, []);
 
   const tabCounts = useMemo(() => {
     const counts = { all: library.modules.length, psychometric: 0, technical: 0 };

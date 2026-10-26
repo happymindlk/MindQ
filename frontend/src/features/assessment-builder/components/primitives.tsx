@@ -49,9 +49,9 @@ type ButtonVariant = 'primary' | 'violet' | 'ghost' | 'danger' | 'outline';
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    'bg-primary text-primary-fg hover:bg-primary-hover active:bg-primary-active focus-visible:ring-primary',
+    'bg-[#7048E2] text-white shadow-sm hover:bg-[#5e3cc4] active:bg-[#4f32a6] focus-visible:ring-[#7048E2] disabled:bg-[#7048E2]/60 disabled:text-white/80 disabled:opacity-100',
   violet:
-    'bg-[var(--color-accent-purple)] text-white hover:opacity-90 focus-visible:ring-[var(--color-accent-purple)]',
+    'bg-[var(--color-accent-purple)] text-white hover:bg-[#9a4fa6] focus-visible:ring-[var(--color-accent-purple)] disabled:opacity-60',
   ghost:
     'bg-transparent text-muted hover:bg-surface-raised hover:text-foreground focus-visible:ring-primary',
   outline:
@@ -80,7 +80,7 @@ export function NeonButton({
       type={type}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none ${sizing} ${BUTTON_VARIANTS[variant]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:shadow-none ${variant === 'primary' || variant === 'violet' ? '' : 'disabled:opacity-50'} ${sizing} ${BUTTON_VARIANTS[variant]} ${className}`}
       {...rest}
     >
       {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
@@ -120,13 +120,13 @@ export function Switch({
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50 ${
-          checked ? 'border-primary/60 bg-primary/30' : 'border-border bg-surface-raised'
+          checked ? 'border-[#7048E2] bg-[#7048E2]' : 'border-border bg-surface-raised'
         }`}
       >
         <span
           aria-hidden
           className={`inline-block h-4 w-4 rounded-full transition-transform ${
-            checked ? 'translate-x-6 bg-primary' : 'translate-x-1 bg-muted'
+            checked ? 'translate-x-6 bg-white' : 'translate-x-1 bg-muted'
           }`}
         />
       </button>

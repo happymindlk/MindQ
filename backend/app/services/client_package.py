@@ -1656,6 +1656,7 @@ class ClientPackageService:
                     title=pkg.title,
                     access_code=pkg.access_code,
                     target_role=pkg.target_role,
+                    close_time=getattr(pkg, "close_time", None),
                     candidate_path=f"/portal?code={pkg.access_code}",
                     total_invited=len(rows),
                     total_completed=sum(1 for r in rows if r.status == "completed"),
