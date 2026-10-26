@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import run_db_op_with_retry
 from app.models.candidate import Candidate
 from app.models.package import Package
 from app.models.assessment import Assessment
@@ -362,61 +363,69 @@ class CandidateService:
 
     @staticmethod
     async def get_candidate(session: AsyncSession, candidate_id: UUID) -> Candidate | None:
-        result = await session.execute(select(Candidate).where(Candidate.id == candidate_id))
-        return result.scalars().first()
+        async def _load() -> Candidate | None:
+            result = await session.execute(select(Candidate).where(Candidate.id == candidate_id))
+            return result.scalars().first()
+
+        return await run_db_op_with_retry(_load, session=session)
 
     @staticmethod
     async def get_dashboard(session: AsyncSession, candidate: Candidate) -> dict:
-        package = (
-            await session.execute(select(Package).where(Package.id == candidate.package_id))
-        ).scalars().first()
+        async def _load() -> dict:
+            package = (
+                await session.execute(select(Package).where(Package.id == candidate.package_id))
+            ).scalars().first()
 
-        assessments = (
-            await session.execute(
-                select(Assessment)
-                .where(Assessment.package_id == candidate.package_id)
-                .order_by(Assessment.position)
-            )
-        ).scalars().all()
+            assessments = (
+                await session.execute(
+                    select(Assessment)
+                    .where(Assessment.package_id == candidate.package_id)
+                    .order_by(Assessment.position)
+                )
+            ).scalars().all()
 
-        progresses = (
-            await session.execute(
-                select(CandidateProgress).where(CandidateProgress.candidate_id == candidate.id)
-            )
-        ).scalars().all()
-        progress_map = {p.assessment_id: p for p in progresses}
-        open_time = package.open_time if package else None
-        close_time = package.close_time if package else None
-        state = window_state(open_time, close_time, _utcnow())
+            progresses = (
+                await session.execute(
+                    select(CandidateProgress).where(
+                        CandidateProgress.candidate_id == candidate.id
+                    )
+                )
+            ).scalars().all()
+            progress_map = {p.assessment_id: p for p in progresses}
+            open_time = package.open_time if package else None
+            close_time = package.close_time if package else None
+            state = window_state(open_time, close_time, _utcnow())
 
-        tests = []
-        for a in assessments:
-            progress = progress_map.get(a.id)
-            status = (progress.status if progress else "NOT_STARTED").lower()
-            started = progress is not None and progress.started_at is not None
-            # Mirrors require_writable_assessment so the UI never offers a launch the API rejects.
-            launchable = status != "completed" and (
-                state == "open" or (state == "closed" and started)
-            )
-            tests.append(
-                {
-                    "id": str(a.id),
-                    "title": a.title,
-                    "description": a.description,
-                    "status": status,
-                    "launchable": launchable,
-                }
-            )
+            tests = []
+            for a in assessments:
+                progress = progress_map.get(a.id)
+                status = (progress.status if progress else "NOT_STARTED").lower()
+                started = progress is not None and progress.started_at is not None
+                # Mirrors require_writable_assessment so the UI never offers a launch the API rejects.
+                launchable = status != "completed" and (
+                    state == "open" or (state == "closed" and started)
+                )
+                tests.append(
+                    {
+                        "id": str(a.id),
+                        "title": a.title,
+                        "description": a.description,
+                        "status": status,
+                        "launchable": launchable,
+                    }
+                )
 
-        return {
-            "package_title": package.title if package else "",
-            "candidate_name": candidate.full_name,
-            "candidate_first_name": candidate.first_name,
-            "open_time": open_time.isoformat() if open_time else None,
-            "close_time": close_time.isoformat() if close_time else None,
-            "window_state": state,
-            "tests": tests,
-        }
+            return {
+                "package_title": package.title if package else "",
+                "candidate_name": candidate.full_name,
+                "candidate_first_name": candidate.first_name,
+                "open_time": open_time.isoformat() if open_time else None,
+                "close_time": close_time.isoformat() if close_time else None,
+                "window_state": state,
+                "tests": tests,
+            }
+
+        return await run_db_op_with_retry(_load, session=session)
 
     @staticmethod
     async def get_assessment_for_candidate(

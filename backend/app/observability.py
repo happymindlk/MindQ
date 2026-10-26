@@ -34,6 +34,9 @@ class JsonFormatter(logging.Formatter):
             "pg_hint",
             "statement",
             "connection_invalidated",
+            "error_class",
+            "attempt",
+            "delay_s",
         ):
             value = getattr(record, key, None)
             if value is not None:

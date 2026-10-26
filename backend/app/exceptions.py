@@ -1,6 +1,73 @@
 """Domain errors for the candidate assessment path."""
 
 
+def is_schema_drift_error(exc: BaseException) -> bool:
+    """True when the failure is a missing table/column, not a pooler glitch.
+
+    Prepared-statement drops also contain ``does not exist`` (SQLSTATE 26000);
+    those are transient under Supavisor transaction mode and must not be
+    classified as schema drift.
+
+    Args:
+        exc: SQLAlchemy or driver exception.
+
+    Returns:
+        True for undefined table/column (or equivalent text), else False.
+    """
+    text = str(exc)
+    low = text.lower()
+    orig = getattr(exc, "orig", None)
+    sqlstate = getattr(orig, "sqlstate", None) if orig is not None else None
+    if "prepared statement" in low or sqlstate == "26000":
+        return False
+    if sqlstate in ("42P01", "42703"):
+        return True
+    return (
+        "does not exist" in low
+        or "UndefinedColumn" in text
+        or "UndefinedTable" in text
+    )
+
+
+def is_transient_db_error(exc: BaseException) -> bool:
+    """True for disconnects, pooler timeouts, and prepared-statement drops.
+
+    Args:
+        exc: SQLAlchemy or driver exception.
+
+    Returns:
+        True when a short retry may succeed without a schema change.
+    """
+    if is_schema_drift_error(exc):
+        return False
+    text = str(exc).lower()
+    orig = getattr(exc, "orig", None)
+    sqlstate = getattr(orig, "sqlstate", None) if orig is not None else None
+    if getattr(exc, "connection_invalidated", False):
+        return True
+    if "prepared statement" in text or sqlstate == "26000":
+        return True
+    if sqlstate in ("57P01", "57P02", "57P03", "08006", "08001", "08003", "08004", "40001"):
+        return True
+    return any(
+        token in text
+        for token in (
+            "connection refused",
+            "connection reset",
+            "server closed the connection",
+            "timeout",
+            "too many connections",
+            "cannot connect",
+            "connection was closed",
+            "ssl connection has been closed",
+            "broken pipe",
+            "connectiondoesnotexisterror",
+            "interfacederror",
+            "operationalerror",
+        )
+    )
+
+
 def schema_drift_detail(exc: Exception) -> str:
     """Build a client-safe message for database errors caused by missing migrations.
 
@@ -11,8 +78,7 @@ def schema_drift_detail(exc: Exception) -> str:
         A migration hint when the error is an undefined column/table, otherwise a
         generic message (raw driver text is not echoed to clients).
     """
-    text = str(exc)
-    if "does not exist" in text.lower() or "UndefinedColumn" in text or "UndefinedTable" in text:
+    if is_schema_drift_error(exc):
         return (
             "Database schema is out of date. Apply pending migrations "
             "(`supabase migration up --local`, or `supabase db push` for a hosted "
