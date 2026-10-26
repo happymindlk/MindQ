@@ -158,13 +158,61 @@ def test_three_invalid_codes_lock_and_burn_the_code():
 
 @pytest.mark.asyncio
 async def test_request_rejects_unregistered_email_without_touching_db():
-    db = _FakeDb([])
+    # No Auth user and no company whitelist match → still 403.
+    db = _FakeDb([_Result(scalars=[])])
     with patch("app.services.hr_otp.find_auth_user_id_by_email", return_value=None):
         with pytest.raises(HrOtpError) as exc:
             await request_hr_otp(db, "  Ghost@Acme.Test ")
     assert exc.value.status_code == 403
     assert "not registered" in exc.value.detail
     assert db.added == []
+
+
+@pytest.mark.asyncio
+async def test_request_provisions_auth_for_whitelist_only_email():
+    """Admin-added allowed_hr_emails without Invite HR still get OTP access."""
+    secondary = "mohamed@happymind.lk"
+    user_id, corporate_id = uuid4(), uuid4()
+    corp = _corporate(
+        corporate_id,
+        contact_email="hr@acme.test",
+        allowed_hr_emails=["hr@acme.test", secondary],
+    )
+    membership = _membership(user_id, corporate_id)
+    db = _FakeDb(
+        [
+            _Result(scalars=[corp]),  # whitelist company lookup
+            _Result(scalar=membership),  # reload after upsert
+            _Result(),  # advisory lock
+            _Result(first=None),
+            _Result(scalars=[]),
+            _Result(scalars=[]),
+        ]
+    )
+    sent: dict = {}
+
+    async def _send(email, otp):
+        sent["email"] = email
+        sent["otp"] = otp
+
+    with (
+        patch("app.services.hr_otp.find_auth_user_id_by_email", return_value=None),
+        patch("app.services.hr_otp.ensure_auth_user", return_value=user_id) as ensure,
+        patch(
+            "app.services.hr_otp.upsert_hr_membership", new=AsyncMock()
+        ) as upsert,
+        patch("app.services.hr_otp.send_hr_otp_email", new=_send),
+    ):
+        response = await request_hr_otp(db, f"  {secondary.upper()} ")
+
+    assert response.status == "otp_required"
+    ensure.assert_called_once_with(secondary)
+    upsert.assert_awaited_once()
+    assert sent["email"] == secondary
+    _, token_user, token_email = decode_hr_otp_token(response.temp_token)
+    assert token_user == user_id
+    assert token_email == secondary
+    assert db.committed is True
 
 
 @pytest.mark.asyncio
