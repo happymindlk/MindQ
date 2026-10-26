@@ -31,8 +31,9 @@ describe('CloneVersionDialog', () => {
 });
 
 describe('ArchiveDialog', () => {
-  it('confirms immediately for unlinked modules and promises history stays intact', async () => {
+  it('requires typing DELETE even for unlinked modules and promises history stays intact', async () => {
     const onConfirm = vi.fn();
+    const user = userEvent.setup();
     render(
       <ArchiveDialog
         module={{ id: 'm1', title: 'Old SJT', version: 2, linkedPackageCount: 0 }}
@@ -42,12 +43,18 @@ describe('ArchiveDialog', () => {
         archiving={false}
       />,
     );
-    expect(screen.getByText(/Historical candidate responses, scores, and generated reports remain intact/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /archive module/i }));
+    expect(
+      screen.getByText(/Candidate responses, scores, and generated reports remain intact/),
+    ).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: /delete assessment/i });
+    expect(button).toBeDisabled();
+    await user.type(screen.getByLabelText(/to confirm/i), 'delete');
+    expect(button).toBeEnabled();
+    await user.click(button);
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('requires typing ARCHIVE when the module is linked to live packages', async () => {
+  it('requires typing DELETE when the module is linked to live packages', async () => {
     const onConfirm = vi.fn();
     const user = userEvent.setup();
     render(
@@ -59,9 +66,10 @@ describe('ArchiveDialog', () => {
         archiving={false}
       />,
     );
-    const button = screen.getByRole('button', { name: /archive module/i });
+    const button = screen.getByRole('button', { name: /delete assessment/i });
     expect(button).toBeDisabled();
-    await user.type(screen.getByLabelText(/to confirm/i), 'archive');
+    expect(screen.getByText(/3 live suites/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/to confirm/i), 'delete');
     expect(button).toBeEnabled();
     await user.click(button);
     expect(onConfirm).toHaveBeenCalledTimes(1);

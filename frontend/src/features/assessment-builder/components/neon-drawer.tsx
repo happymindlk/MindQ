@@ -26,15 +26,17 @@ export function NeonDrawer({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm dark:bg-black/60" />
         <Dialog.Content
-          className={`fixed inset-y-0 right-0 z-40 flex w-full ${widthClass} flex-col border-l border-cyan-500/30 bg-slate-950/95 text-slate-100 shadow-[0_0_40px_rgba(6,182,212,0.15)] backdrop-blur-xl focus:outline-none`}
+          className={`fixed inset-y-0 right-0 z-40 flex w-full ${widthClass} flex-col border-l border-border bg-surface text-foreground shadow-xl focus:outline-none`}
         >
-          <header className="flex items-start justify-between gap-4 border-b border-slate-800 px-6 py-4">
+          <header className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
             <div className="min-w-0 space-y-1">
-              <Dialog.Title className="truncate text-base font-semibold text-white">{title}</Dialog.Title>
+              <Dialog.Title className="truncate font-display text-base font-semibold text-foreground">
+                {title}
+              </Dialog.Title>
               {description ? (
-                <Dialog.Description className="text-xs text-slate-400">{description}</Dialog.Description>
+                <Dialog.Description className="text-xs text-muted">{description}</Dialog.Description>
               ) : (
                 <Dialog.Description className="sr-only">Details panel</Dialog.Description>
               )}
@@ -44,7 +46,7 @@ export function NeonDrawer({
               <button
                 type="button"
                 aria-label="Close panel"
-                className="rounded-md p-1 text-slate-400 hover:bg-slate-800 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                className="rounded-md p-1 text-muted hover:bg-surface-raised hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -52,7 +54,7 @@ export function NeonDrawer({
           </header>
           <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
           {footer && (
-            <footer className="flex flex-wrap justify-end gap-2 border-t border-slate-800 bg-slate-900/60 px-6 py-4">
+            <footer className="flex flex-wrap justify-end gap-2 border-t border-border bg-surface-raised/60 px-6 py-4">
               {footer}
             </footer>
           )}

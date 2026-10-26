@@ -1,6 +1,6 @@
 export const REPORT_TITLE = 'Assessment Report';
 
-export const REPORT_FILE_PREFIX = 'Mind Q Report';
+export const REPORT_FILE_PREFIX = 'MindQ Report';
 
 export const CATEGORY_ORDER = ['Cognitive', 'Personality', 'Behavioral', 'Technical'];
 

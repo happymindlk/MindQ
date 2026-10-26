@@ -43,10 +43,10 @@ def _app(hr: HRUserContext) -> FastAPI:
 @pytest.mark.parametrize(
     ("name", "ascii_part", "utf8_part"),
     [
-        ("Jane Doe", 'filename="Mind Q Report - Jane Doe.pdf"', "Mind%20Q%20Report%20-%20Jane%20Doe.pdf"),
-        ('A/B"C\r\nD', 'filename="Mind Q Report - A B C D.pdf"', "A%20B%20C%20D.pdf"),
-        ("நிலா", 'filename="Mind Q Report - Candidate.pdf"', "%E0%AE%A8"),
-        ("   ", 'filename="Mind Q Report - Candidate.pdf"', "Candidate.pdf"),
+        ("Jane Doe", 'filename="MindQ Report - Jane Doe.pdf"', "MindQ%20Report%20-%20Jane%20Doe.pdf"),
+        ('A/B"C\r\nD', 'filename="MindQ Report - A B C D.pdf"', "A%20B%20C%20D.pdf"),
+        ("நிலா", 'filename="MindQ Report - Candidate.pdf"', "%E0%AE%A8"),
+        ("   ", 'filename="MindQ Report - Candidate.pdf"', "Candidate.pdf"),
     ],
 )
 def test_report_content_disposition(name, ascii_part, utf8_part):
@@ -117,7 +117,7 @@ def test_report_allows_ops_other_tenant(home_corp, candidate_id):
     assert res.status_code == 200
     assert res.content == b"<html>ok</html>"
     assert res.headers["X-Report-Synthesis-Status"] == "skipped"
-    assert 'filename="Mind Q Report - Pat.html"' in res.headers["Content-Disposition"]
+    assert 'filename="MindQ Report - Pat.html"' in res.headers["Content-Disposition"]
     rendered = generate.call_args.kwargs["report"]
     assert rendered["candidate_full_name"] == "Pat"
     assert "overall_fit" not in rendered

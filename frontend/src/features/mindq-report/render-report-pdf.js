@@ -310,7 +310,7 @@ export function saveBlob(blob, filename) {
 }
 
 /**
- * Fetch report data and download `Mind Q Report - ${candidateFullName}.pdf`.
+ * Fetch report data and download `MindQ Report - ${candidateFullName}.pdf`.
  *
  * @param {() => Promise<Record<string, any>>} fetchReportData
  * @returns {Promise<void>}

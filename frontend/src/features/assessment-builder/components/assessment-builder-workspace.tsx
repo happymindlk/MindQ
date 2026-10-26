@@ -49,7 +49,10 @@ export function AssessmentBuilderWorkspace({
       try {
         const created = await createModule(input);
         onCreateDraftChange(null);
-        toast({ title: `Draft v${created.version} created`, variant: 'success' });
+        toast({
+          title: `"${created.title}" saved as draft v${created.version}`,
+          variant: 'success',
+        });
         setOpenId(created.id);
       } catch (err) {
         toast({ title: err instanceof Error ? err.message : 'Could not create this module.', variant: 'error' });
@@ -66,14 +69,14 @@ export function AssessmentBuilderWorkspace({
     try {
       await archiveModule(archiveTarget.id);
       toast({
-        title: `Archived “${archiveTarget.title}” v${archiveTarget.version}`,
+        title: `Deleted "${archiveTarget.title}" v${archiveTarget.version}`,
         description: 'Historical responses remain intact.',
         variant: 'success',
       });
       if (openId === archiveTarget.id) setOpenId(null);
       setArchiveId(null);
     } catch (err) {
-      toast({ title: err instanceof Error ? err.message : 'Could not archive this module.', variant: 'error' });
+      toast({ title: err instanceof Error ? err.message : 'Could not delete this assessment.', variant: 'error' });
     } finally {
       setArchiving(false);
     }

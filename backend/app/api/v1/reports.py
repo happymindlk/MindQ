@@ -16,12 +16,12 @@ from app.security import enforce_user_rate_limit, report_limiter
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-REPORT_FILE_PREFIX = "Mind Q Report"
+REPORT_FILE_PREFIX = "MindQ Report"
 _ILLEGAL_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
 
 
 def report_content_disposition(candidate_name: str | None, ext: str) -> str:
-    """Build ``Content-Disposition`` for ``Mind Q Report - {name}.{ext}``.
+    """Build ``Content-Disposition`` for ``MindQ Report - {name}.{ext}``.
 
     Args:
         candidate_name: Candidate full name (untrusted; may be non-Latin).

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { AlertTriangle, Archive, GitBranchPlus, Image as ImageIcon, Lock, Pencil, Plus, Rocket, Trash2 } from 'lucide-react';
+import { AlertTriangle, Archive, GitBranchPlus, Image as ImageIcon, Lock, Pencil, Plus, Upload, Trash2 } from 'lucide-react';
 import { ApiError } from '../../../lib/api-error';
 import type { StorageClient } from '../api/media-upload';
 import { useBuilderToast } from '../hooks/use-builder-toast';
@@ -61,10 +61,10 @@ function ModuleTitleEditor({ moduleId, title, locked, saving, onSave, onLockedEd
   return (
     <section
       aria-labelledby={`${moduleId}-title-heading`}
-      className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur-md"
+      className="space-y-3 rounded-xl border border-border bg-surface-raised p-4"
     >
       <header className="flex items-center justify-between gap-2">
-        <h3 id={`${moduleId}-title-heading`} className="text-sm font-semibold text-white">
+        <h3 id={`${moduleId}-title-heading`} className="font-display text-sm font-semibold text-foreground">
           Assessment title
         </h3>
         {locked && (
@@ -144,10 +144,10 @@ export function ModuleDescriptionEditor({
   return (
     <section
       aria-labelledby={`${moduleId}-description-heading`}
-      className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur-md"
+      className="space-y-3 rounded-xl border border-border bg-surface-raised p-4"
     >
       <header className="flex items-center justify-between gap-2">
-        <h3 id={`${moduleId}-description-heading`} className="text-sm font-semibold text-white">
+        <h3 id={`${moduleId}-description-heading`} className="font-display text-sm font-semibold text-foreground">
           Assessment description
         </h3>
         {locked && (
@@ -372,7 +372,7 @@ export function ModuleEditorDrawer({
           module && (
             <>
               <NeonButton variant="ghost" size="sm" onClick={() => onRequestArchive(module.id)}>
-                <Archive className="h-3.5 w-3.5" aria-hidden /> Archive
+                <Archive className="h-3.5 w-3.5" aria-hidden /> Delete
               </NeonButton>
               {locked ? (
                 <NeonButton variant="violet" size="sm" onClick={() => setCloneOpen(true)} loading={pending === 'clone'}>
@@ -386,7 +386,7 @@ export function ModuleEditorDrawer({
                   disabled={questions.length === 0}
                   title={questions.length === 0 ? 'Add at least one question before publishing' : undefined}
                 >
-                  <Rocket className="h-3.5 w-3.5" aria-hidden /> Publish v{module.version}
+                  <Upload className="h-3.5 w-3.5" aria-hidden /> Publish v{module.version}
                 </NeonButton>
               )}
             </>
@@ -395,9 +395,9 @@ export function ModuleEditorDrawer({
       >
         {detail.loading && !module && (
           <div className="space-y-3" aria-busy="true">
-            <div className="h-40 animate-pulse rounded-xl bg-slate-900" />
-            <div className="h-16 animate-pulse rounded-xl bg-slate-900" />
-            <div className="h-16 animate-pulse rounded-xl bg-slate-900" />
+            <div className="h-40 animate-pulse rounded-xl bg-surface-raised" />
+            <div className="h-16 animate-pulse rounded-xl bg-surface-raised" />
+            <div className="h-16 animate-pulse rounded-xl bg-surface-raised" />
           </div>
         )}
 
@@ -457,7 +457,7 @@ export function ModuleEditorDrawer({
 
             <section aria-labelledby="module-questions-title" className="space-y-3">
               <header className="flex items-center justify-between">
-                <h3 id="module-questions-title" className="text-sm font-semibold text-white">
+                <h3 id="module-questions-title" className="font-display text-sm font-semibold text-foreground">
                   Questions <span className="font-mono text-xs text-slate-500">{questions.length}</span>
                 </h3>
                 <NeonButton size="sm" variant="outline" onClick={() => openEditor(null)} disabled={pending === 'question'}>
@@ -477,7 +477,7 @@ export function ModuleEditorDrawer({
                     return (
                       <li
                         key={question.id}
-                        className="group grid grid-cols-[2rem_1fr_auto] items-start gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-3 transition-colors hover:border-slate-700"
+                        className="group grid grid-cols-[2rem_1fr_auto] items-start gap-3 rounded-xl border border-border bg-surface p-3 transition-colors hover:border-primary/40"
                       >
                         <span className="pt-0.5 font-mono text-xs tabular-nums text-slate-500">{String(index + 1).padStart(2, '0')}</span>
                         <div className="min-w-0 space-y-1.5">

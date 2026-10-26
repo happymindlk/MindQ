@@ -1,4 +1,4 @@
-﻿import JSZip from 'jszip';
+import JSZip from 'jszip';
 import { describe, expect, it, vi } from 'vitest';
 import { buildReportsZip } from './build-reports-zip';
 import { reportFilename } from './report-filename';
@@ -38,9 +38,9 @@ describe('buildReportsZip', () => {
     expect(succeeded).toBe(3);
     expect(failures).toEqual([]);
     expect(await listEntries(blob)).toEqual([
-      'Mind Q Report - Jane Doe (2).pdf',
-      'Mind Q Report - Jane Doe.pdf',
-      'Mind Q Report - Raj Kumar.pdf',
+      'MindQ Report - Jane Doe (2).pdf',
+      'MindQ Report - Jane Doe.pdf',
+      'MindQ Report - Raj Kumar.pdf',
     ]);
     expect(onProgress).toHaveBeenLastCalledWith({ done: 3, total: 3 });
   });
@@ -57,7 +57,7 @@ describe('buildReportsZip', () => {
 
     expect(succeeded).toBe(1);
     expect(failures).toEqual([{ name: 'Broken Candidate', message: 'Candidate not found' }]);
-    expect(await listEntries(blob)).toEqual(['Mind Q Report - Jane Doe.pdf']);
+    expect(await listEntries(blob)).toEqual(['MindQ Report - Jane Doe.pdf']);
   });
 
   it('fails when every report fails', async () => {

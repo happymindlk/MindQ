@@ -24,7 +24,7 @@ export function sanitizeFilenamePart(value, fallback = 'Candidate') {
 
 /**
  * @param {string | null | undefined} candidateName
- * @returns {string} `Mind Q Report - ${candidateFullName}.pdf`
+ * @returns {string} `MindQ Report - ${candidateFullName}.pdf`
  */
 export function reportFilename(candidateName) {
   return `${REPORT_FILE_PREFIX} - ${sanitizeFilenamePart(candidateName)}.pdf`;

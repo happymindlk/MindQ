@@ -408,7 +408,7 @@ def _report(**overrides):
 def test_report_html_renders_synthesis_without_fit_or_recommendation():
     html = ReportService.render_report_html(_report())
     assert "Assessment Report" in html
-    assert "Mind Q Report - " in html
+    assert "MindQ Report - " in html
     assert "Solid quantitative reasoning" in html
     assert "62.5%" in html
     assert "strong numerical reasoning" in html
