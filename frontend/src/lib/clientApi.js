@@ -60,7 +60,9 @@ export const clientApi = {
    */
   async requestOtp(email) {
     // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'410e50'},body:JSON.stringify({sessionId:'410e50',runId:'pre-fix',hypothesisId:'F',location:'clientApi.js:requestOtp',message:'hr_otp_send_start',data:{apiBase:API_BASE||'(same-origin)',emailDomain:(email||'').split('@')[1]||'',emailLen:(email||'').length},timestamp:Date.now()})}).catch(()=>{});
+    if (import.meta.env.MODE !== 'test') {
+      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'410e50'},body:JSON.stringify({sessionId:'410e50',runId:'pre-fix',hypothesisId:'F',location:'clientApi.js:requestOtp',message:'hr_otp_send_start',data:{apiBase:API_BASE||'(same-origin)',emailDomain:(email||'').split('@')[1]||'',emailLen:(email||'').length},timestamp:Date.now()})}).catch(()=>{});
+    }
     // #endregion
     const res = await fetch(`${API_BASE}/api/v1/hr/auth/otp/send`, {
       method: 'POST',
@@ -68,7 +70,9 @@ export const clientApi = {
       body: JSON.stringify({ email }),
     });
     // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'410e50'},body:JSON.stringify({sessionId:'410e50',runId:'pre-fix',hypothesisId:'F',location:'clientApi.js:requestOtp',message:'hr_otp_send_result',data:{apiBase:API_BASE||'(same-origin)',status:res.status,ok:res.ok},timestamp:Date.now()})}).catch(()=>{});
+    if (import.meta.env.MODE !== 'test') {
+      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'410e50'},body:JSON.stringify({sessionId:'410e50',runId:'pre-fix',hypothesisId:'F',location:'clientApi.js:requestOtp',message:'hr_otp_send_result',data:{apiBase:API_BASE||'(same-origin)',status:res.status,ok:res.ok},timestamp:Date.now()})}).catch(()=>{});
+    }
     // #endregion
     if (!res.ok) throw new Error(await readError(res, 'Could not send code'));
     const payload = await res.json();
