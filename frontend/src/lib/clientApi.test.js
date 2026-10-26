@@ -22,7 +22,11 @@ describe('clientApi.requestOtp', () => {
 
     await expect(clientApi.requestOtp('hr@acme.test')).resolves.toBe('temp-token-value');
 
-    const [url, init] = fetch.mock.calls[0];
+    const otpCall = fetch.mock.calls.find(([url]) =>
+      String(url).includes('/api/v1/hr/auth/otp/send'),
+    );
+    expect(otpCall).toBeTruthy();
+    const [url, init] = otpCall;
     expect(url).toMatch(/\/api\/v1\/hr\/auth\/otp\/send$/);
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body)).toEqual({ email: 'hr@acme.test' });

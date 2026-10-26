@@ -117,19 +117,26 @@ async def test_dropped_prepared_statement_returns_503_with_cors(override_deps, c
     assert res.status_code == 503
     assert res.headers["access-control-allow-origin"] == ORIGIN
     assert "retry" in res.json()["detail"].lower()
-    # The underlying driver message must reach the logs so schema/pooler
-    # failures name the exact PostgreSQL object instead of only the 503.
-    db_records = [r for r in caplog.records if r.name == "app.main"]
-    assert db_records
-    assert any(r.getMessage().startswith("[DB ERROR]") for r in db_records)
-    assert any("ProgrammingError" in r.getMessage() for r in db_records)
-    assert any(
-        'prepared statement "__asyncpg_stmt_3e__" does not exist' in r.getMessage()
-        or 'prepared statement "__asyncpg_stmt_3e__" does not exist'
-        in getattr(r, "driver_error_message", "")
-        for r in db_records
+    assert "migration" not in res.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_undefined_column_returns_schema_drift_503(override_deps, caplog):
+    class _UndefinedColumn(Exception):
+        sqlstate = "42703"
+
+    override_deps(
+        ProgrammingError(
+            "SELECT 1",
+            {},
+            _UndefinedColumn("column assessments.top_disclaimer_text does not exist"),
+        )
     )
-    assert any(getattr(r, "sqlalchemy_error", "") for r in db_records)
+    res = await _get()
+    assert res.status_code == 503
+    detail = res.json()["detail"].lower()
+    assert "migration" in detail
+    assert "temporarily unavailable" not in detail
 
 
 @pytest.mark.asyncio

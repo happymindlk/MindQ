@@ -39,26 +39,33 @@ from app.services.admin_otp import (
     send_block_reason,
 )
 from app.services.email import clean_recipient_email, send_hr_otp_email
-from app.services.supabase_admin import SupabaseAdminError, find_auth_user_id_by_email
+from app.services.hr_membership import hr_display_name, upsert_hr_membership
+from app.services.supabase_admin import (
+    SupabaseAdminError,
+    ensure_auth_user,
+    find_auth_user_id_by_email,
+)
 
 logger = logging.getLogger("app.hr_otp")
 
 # #region agent log
-_DEBUG_LOG_PATH = Path(__file__).resolve().parents[3] / "debug-a1ab83.log"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_DEBUG_LOG_PATH = _REPO_ROOT / "debug-410e50.log"
+_DEBUG_RUN_ID = "post-fix"
 
 
 def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
     """Append one NDJSON debug line for HR OTP gate diagnosis."""
+    payload = {
+        "sessionId": "410e50",
+        "runId": _DEBUG_RUN_ID,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
     try:
-        payload = {
-            "sessionId": "a1ab83",
-            "runId": "pre-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
         with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, default=str) + "\n")
     except Exception:
@@ -205,10 +212,118 @@ def _assert_company_access(corporate: Corporate, email: str) -> None:
     # #endregion
 
 
+async def _find_corporate_by_hr_email(
+    db: AsyncSession, email: str
+) -> Corporate | None:
+    """Return the active company that lists ``email`` as contact or allowed HR.
+
+    Args:
+        db: Async database session.
+        email: Normalized login email.
+
+    Returns:
+        Matching ``Corporate``, or None when no active tenant whitelists the email.
+    """
+    corporates = (
+        await db.execute(select(Corporate).where(Corporate.is_active.is_(True)))
+    ).scalars().all()
+    for corporate in corporates:
+        contact = (corporate.contact_email or "").strip().lower()
+        allowed = {
+            str(entry).strip().lower() for entry in (corporate.allowed_hr_emails or [])
+        }
+        if email == contact or email in allowed:
+            return corporate
+    return None
+
+
+async def _provision_whitelisted_hr(
+    db: AsyncSession,
+    email: str,
+    *,
+    existing_user_id: UUID | None = None,
+) -> tuple[HRUser, Corporate] | None:
+    """Create Auth + ``hr_users`` for a whitelist-only email (admin-added, not invited).
+
+    Args:
+        db: Async database session.
+        email: Normalized login email.
+        existing_user_id: Auth user id when the account already exists.
+
+    Returns:
+        ``(membership, corporate)`` when the email is on an active company whitelist;
+        None when it is not registered to any company.
+
+    Raises:
+        HrOtpError: 503 when Auth Admin cannot create/resolve the user.
+    """
+    corporate = await _find_corporate_by_hr_email(db, email)
+    if corporate is None:
+        # #region agent log
+        _agent_dbg(
+            "A",
+            "hr_otp.py:_provision_whitelisted_hr",
+            "provision_no_company",
+            {"email_domain": email.split("@")[-1] if "@" in email else ""},
+        )
+        # #endregion
+        return None
+    try:
+        user_id = existing_user_id or await run_in_threadpool(ensure_auth_user, email)
+    except SupabaseAdminError as exc:
+        # #region agent log
+        _agent_dbg(
+            "A",
+            "hr_otp.py:_provision_whitelisted_hr",
+            "provision_auth_failed",
+            {"error_type": type(exc).__name__, "corporate_id": str(corporate.id)},
+        )
+        # #endregion
+        raise HrOtpError(503, _AUTH_DOWN) from exc
+
+    await upsert_hr_membership(
+        db,
+        user_id=user_id,
+        corporate_id=corporate.id,
+        full_name=hr_display_name(email),
+    )
+    await db.flush()
+    membership = (
+        await db.execute(select(HRUser).where(HRUser.user_id == user_id))
+    ).scalar_one_or_none()
+    if membership is None:
+        # #region agent log
+        _agent_dbg(
+            "B",
+            "hr_otp.py:_provision_whitelisted_hr",
+            "provision_membership_missing",
+            {"user_id": str(user_id), "corporate_id": str(corporate.id)},
+        )
+        # #endregion
+        return None
+    # #region agent log
+    _agent_dbg(
+        "A",
+        "hr_otp.py:_provision_whitelisted_hr",
+        "provision_ok",
+        {
+            "user_id": str(user_id),
+            "corporate_id": str(corporate.id),
+            "had_existing_auth": existing_user_id is not None,
+        },
+    )
+    # #endregion
+    return membership, corporate
+
+
 async def _resolve_membership(
     db: AsyncSession, email: str
 ) -> tuple[HRUser, Corporate]:
     """Map a login email to its non-ops ``hr_users`` row and tenant.
+
+    Whitelisted emails added from admin (``contact_email`` / ``allowed_hr_emails``)
+    but not yet invited are auto-provisioned into Auth + ``hr_users`` on first OTP
+    request so portal login matches the admin whitelist.
 
     Args:
         db: Async database session.
@@ -246,11 +361,18 @@ async def _resolve_membership(
         _agent_dbg(
             "A",
             "hr_otp.py:_resolve_membership",
-            "reject_no_auth_user",
+            "no_auth_user_try_provision",
             {"email_domain": email.split("@")[-1] if "@" in email else ""},
         )
         # #endregion
-        raise HrOtpError(403, _INVALID_TARGET)
+        provisioned = await _provision_whitelisted_hr(db, email)
+        if provisioned is None:
+            raise HrOtpError(403, _INVALID_TARGET)
+        membership, corporate = provisioned
+        if is_ops_role(membership.role):
+            raise HrOtpError(403, _NOT_HR)
+        _assert_company_access(corporate, email)
+        return membership, corporate
 
     membership = (
         await db.execute(select(HRUser).where(HRUser.user_id == user_id))
@@ -260,11 +382,20 @@ async def _resolve_membership(
         _agent_dbg(
             "B",
             "hr_otp.py:_resolve_membership",
-            "reject_no_hr_membership",
+            "no_hr_membership_try_provision",
             {"user_id": str(user_id)},
         )
         # #endregion
-        raise HrOtpError(403, _INVALID_TARGET)
+        provisioned = await _provision_whitelisted_hr(
+            db, email, existing_user_id=user_id
+        )
+        if provisioned is None:
+            raise HrOtpError(403, _INVALID_TARGET)
+        membership, corporate = provisioned
+        if is_ops_role(membership.role):
+            raise HrOtpError(403, _NOT_HR)
+        _assert_company_access(corporate, email)
+        return membership, corporate
     if is_ops_role(membership.role):
         # #region agent log
         _agent_dbg(
@@ -284,12 +415,75 @@ async def _resolve_membership(
         _agent_dbg(
             "E",
             "hr_otp.py:_resolve_membership",
-            "reject_no_corporate",
+            "missing_corporate_try_rebind",
             {"corporate_id": str(membership.corporate_id)},
         )
         # #endregion
-        raise HrOtpError(403, _NO_COMPANY)
-    _assert_company_access(corporate, email)
+        provisioned = await _provision_whitelisted_hr(
+            db, email, existing_user_id=user_id
+        )
+        if provisioned is None:
+            raise HrOtpError(403, _NO_COMPANY)
+        membership, corporate = provisioned
+        if is_ops_role(membership.role):
+            raise HrOtpError(403, _NOT_HR)
+        _assert_company_access(corporate, email)
+        return membership, corporate
+
+    try:
+        _assert_company_access(corporate, email)
+    except HrOtpError as access_exc:
+        # Stale hr_users rows often point at a deactivated tenant while the same
+        # email remains on an active company's whitelist (admin re-home without
+        # Invite HR). Re-bind before treating the login as unregistered.
+        # #region agent log
+        _agent_dbg(
+            "E",
+            "hr_otp.py:_resolve_membership",
+            "access_fail_try_rebind",
+            {
+                "user_id": str(user_id),
+                "stale_corporate_id": str(corporate.id),
+                "stale_active": corporate.is_active is not False,
+                "detail_code": (
+                    "invalid_target"
+                    if access_exc.detail == _INVALID_TARGET
+                    else "other"
+                ),
+            },
+        )
+        # #endregion
+        provisioned = await _provision_whitelisted_hr(
+            db, email, existing_user_id=user_id
+        )
+        if provisioned is None:
+            logger.info(
+                "hr_otp_rejected",
+                extra={
+                    "event": "hr_otp_rejected",
+                    "reason": "inactive_or_whitelist",
+                    "email_domain": email.split("@")[-1] if "@" in email else "",
+                },
+            )
+            raise access_exc
+        membership, corporate = provisioned
+        if is_ops_role(membership.role):
+            raise HrOtpError(403, _NOT_HR)
+        _assert_company_access(corporate, email)
+        # #region agent log
+        _agent_dbg(
+            "E",
+            "hr_otp.py:_resolve_membership",
+            "rebind_ok",
+            {
+                "user_id": str(user_id),
+                "corporate_id": str(corporate.id),
+                "role": membership.role,
+            },
+        )
+        # #endregion
+        return membership, corporate
+
     # #region agent log
     _agent_dbg(
         "A",
@@ -361,9 +555,52 @@ async def request_hr_otp(db: AsyncSession, email: str) -> HrOtpChallengeResponse
             send cap, 503 mail or identity resolver down.
     """
     normalized_email = clean_recipient_email(email).lower()
+    # #region agent log
+    _agent_dbg(
+        "A",
+        "hr_otp.py:request_hr_otp",
+        "send_start",
+        {
+            "email_domain": normalized_email.split("@")[-1] if "@" in normalized_email else "",
+            "email_len": len(normalized_email),
+            "raw_len": len(str(email or "")),
+            "normalized_ok": bool(normalized_email and "@" in normalized_email),
+        },
+    )
+    # #endregion
     if not normalized_email or "@" not in normalized_email:
+        # #region agent log
+        _agent_dbg(
+            "A",
+            "hr_otp.py:request_hr_otp",
+            "reject_bad_email",
+            {"reason": "unusable_email"},
+        )
+        # #endregion
         raise HrOtpError(400, _INVALID_TARGET)
-    membership, _corporate = await _resolve_membership(db, normalized_email)
+    try:
+        membership, _corporate = await _resolve_membership(db, normalized_email)
+    except HrOtpError as exc:
+        # #region agent log
+        _agent_dbg(
+            "A",
+            "hr_otp.py:request_hr_otp",
+            "reject_resolve",
+            {
+                "status_code": exc.status_code,
+                "detail_code": (
+                    "invalid_target"
+                    if exc.detail == _INVALID_TARGET
+                    else "not_hr"
+                    if exc.detail == _NOT_HR
+                    else "no_company"
+                    if exc.detail == _NO_COMPANY
+                    else "other"
+                ),
+            },
+        )
+        # #endregion
+        raise
 
     now = datetime.now(timezone.utc)
     # Serialize the send-cap check + insert per user, as in admin/candidate OTP.

@@ -13,6 +13,7 @@ from app.api.v1.invites import router as invites_router
 from app.api.v1.router import api_router
 from app.config import settings
 from app.database import engine
+from app.exceptions import is_schema_drift_error, is_transient_db_error, schema_drift_detail
 from app.observability import configure_logging
 from app.security import SecurityHeadersMiddleware, assert_production_ready
 
@@ -202,7 +203,7 @@ def _cors_error_headers(request: Request) -> dict[str, str]:
 @app.exception_handler(DBAPIError)
 @app.exception_handler(SQLAlchemyError)
 async def database_error_handler(request: Request, exc: SQLAlchemyError):
-    """Map driver / pooler failures to a retryable 503 instead of a 500.
+    """Map driver / pooler / schema failures to a 503 with a useful detail.
 
     Registered for both ``DBAPIError`` (the usual driver wrap) and its
     ``SQLAlchemyError`` base so non-DBAPI SQLAlchemy failures (pool,
@@ -210,6 +211,10 @@ async def database_error_handler(request: Request, exc: SQLAlchemyError):
     than falling through to the generic 500 handler. FastAPI's MRO lookup
     still prefers this handler for ``DBAPIError`` subclasses such as
     ``ProgrammingError`` (e.g. an undefined column from a stale schema).
+
+    Schema drift returns an actionable migration hint. Transient pooler /
+    disconnect errors keep the retry wording (acquire-path retries happen in
+    ``get_db`` before this handler).
 
     Args:
         request: Incoming request.
@@ -220,16 +225,27 @@ async def database_error_handler(request: Request, exc: SQLAlchemyError):
     """
     request_id = getattr(request.state, "request_id", None)
     orig = getattr(exc, "orig", None)
+    schema_drift = is_schema_drift_error(exc)
+    transient = is_transient_db_error(exc)
+    error_class = (
+        "schema_drift" if schema_drift else ("transient" if transient else "other")
+    )
+    detail = (
+        schema_drift_detail(exc)
+        if schema_drift
+        else "Database temporarily unavailable. Please retry."
+    )
     # The type names and raw driver text go in the message itself, not only
     # `extra`: the DEBUG text formatter ignores `extra`, so schema mismatches
     # must be diagnosable from a plain uvicorn.log line. Statement parameters
     # are deliberately excluded.
     logger.error(
-        f"[DB ERROR] {type(exc).__name__}: {exc} "
+        f"[DB ERROR] class={error_class} {type(exc).__name__}: {exc} "
         f"| driver={type(orig).__name__ if orig else None}: {orig}",
         exc_info=exc,
         extra={
             "event": "database_error",
+            "error_class": error_class,
             "request_id": request_id,
             "path": request.url.path,
             "method": request.method,
@@ -249,74 +265,52 @@ async def database_error_handler(request: Request, exc: SQLAlchemyError):
         import time
         from pathlib import Path
 
-        exc_text = str(exc).lower()
-        orig_text = str(orig).lower() if orig else ""
-        combined = f"{exc_text} {orig_text}"
         sqlstate = getattr(orig, "sqlstate", None)
-        is_schema = (
-            "does not exist" in combined
-            or "undefinedcolumn" in combined
-            or "undefinedtable" in combined
-            or sqlstate in ("42P01", "42703")
-        )
-        is_prepared = (
-            "prepared statement" in combined
-            or sqlstate == "26000"
-        )
-        is_transient = (
-            getattr(exc, "connection_invalidated", False)
-            or sqlstate in ("57P01", "57P02", "57P03", "08006", "08001", "08003", "08004")
-            or any(
-                token in combined
-                for token in (
-                    "connection refused",
-                    "connection reset",
-                    "server closed the connection",
-                    "timeout",
-                    "too many connections",
-                    "cannot connect",
-                    "connection was closed",
-                    "ssl connection has been closed",
-                    "broken pipe",
-                )
-            )
-        )
-        Path(__file__).resolve().parents[2].joinpath("debug-f4446e.log").open(
-            "a", encoding="utf-8"
-        ).write(
-            json.dumps(
-                {
-                    "sessionId": "f4446e",
-                    "hypothesisId": "B" if is_schema else ("C" if is_prepared else ("A" if is_transient else "E")),
-                    "location": "main.py:database_error_handler",
-                    "message": "mapped_sqlalchemy_to_503",
-                    "data": {
-                        "path": request.url.path,
-                        "method": request.method,
-                        "request_id": request_id,
-                        "exc_type": type(exc).__name__,
-                        "driver_type": type(orig).__name__ if orig else None,
-                        "driver_message": str(orig)[:500] if orig else None,
-                        "sqlalchemy_message": str(exc)[:500],
-                        "sqlstate": sqlstate,
-                        "connection_invalidated": getattr(exc, "connection_invalidated", None),
-                        "class_schema": is_schema,
-                        "class_prepared": is_prepared,
-                        "class_transient": is_transient,
-                        "statement": (getattr(exc, "statement", None) or "")[:200] or None,
-                    },
-                    "timestamp": int(time.time() * 1000),
+        line = json.dumps(
+            {
+                "sessionId": "f4446e",
+                "runId": "post-fix",
+                "hypothesisId": "B" if schema_drift else ("A" if transient else "E"),
+                "location": "main.py:database_error_handler",
+                "message": "mapped_sqlalchemy_to_503",
+                "data": {
+                    "path": request.url.path,
+                    "method": request.method,
+                    "request_id": request_id,
+                    "exc_type": type(exc).__name__,
+                    "driver_type": type(orig).__name__ if orig else None,
+                    "driver_message": str(orig)[:500] if orig else None,
+                    "sqlalchemy_message": str(exc)[:500],
+                    "sqlstate": sqlstate,
+                    "connection_invalidated": getattr(exc, "connection_invalidated", None),
+                    "class_schema": schema_drift,
+                    "class_transient": transient,
+                    "error_class": error_class,
+                    "detail": detail[:200],
+                    "statement": (getattr(exc, "statement", None) or "")[:200] or None,
                 },
-                default=str,
-            )
-            + "\n"
-        )
+                "timestamp": int(time.time() * 1000),
+            },
+            default=str,
+        ) + "\n"
+        for path in (
+            Path(__file__).resolve().parents[2] / "debug-f4446e.log",
+            Path("/app/data/debug-f4446e.log"),
+            Path("/tmp/debug-f4446e.log"),
+        ):
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a", encoding="utf-8") as fh:
+                    fh.write(line)
+                break
+            except OSError:
+                continue
     except OSError:
         pass
     # #endregion
     return JSONResponse(
         status_code=503,
-        content={"detail": "Database temporarily unavailable. Please retry.", "request_id": request_id},
+        content={"detail": detail, "request_id": request_id},
     )
 
 
