@@ -522,11 +522,11 @@ def render_package_share_html(
     candidate_link = html.escape(candidate_portal_link(access_code, origin=origin))
     hr_link = html.escape(hr_portal_login_link(origin=origin))
     section = "margin:0 0 20px;padding:16px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;"
-    label = "font-size:11px;font-weight:700;letter-spacing:0.08em;color:#0078D4;margin:0 0 10px;"
+    label = "font-size:11px;font-weight:700;letter-spacing:0.08em;color:#7048E2;margin:0 0 10px;"
     section_body = "font-size:13px;line-height:1.55;color:#4B5563;margin:0 0 12px;"
     mono = "font-family:ui-monospace,Consolas,monospace;"
     button = (
-        "display:inline-block;padding:10px 16px;background:#0078D4;color:#FFFFFF;"
+        "display:inline-block;padding:10px 16px;background:#7048E2;color:#FFFFFF;"
         "text-decoration:none;border-radius:8px;font-weight:700;font-size:13px;"
     )
     body_html = f"""
@@ -541,7 +541,7 @@ def render_package_share_html(
         <p style="{section_body}">Candidates open this link and enter the PIN with their name and email.</p>
         <p style="font-size:12px;color:#4B5563;margin:0 0 4px;">Test link</p>
         <p style="{mono}font-size:13px;color:#1F2937;margin:0 0 12px;word-break:break-all;">
-          <a href="{candidate_link}" style="color:#0078D4;">{candidate_link}</a>
+          <a href="{candidate_link}" style="color:#7048E2;">{candidate_link}</a>
         </p>
         <p style="font-size:12px;color:#4B5563;margin:0 0 4px;">PIN</p>
         <p style="{mono}font-size:18px;color:#1F2937;letter-spacing:0.06em;margin:0;">{code}</p>

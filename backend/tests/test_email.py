@@ -352,10 +352,10 @@ def test_all_email_templates_use_the_light_theme():
             assert marker not in html_content, (name, marker)
 
 
-def test_template_buttons_use_corporate_blue():
+def test_template_buttons_use_brand_indigo():
     templates = _all_templates()
-    assert "#0078D4" in templates["invite"]
-    assert "#0078D4" in templates["package_share"]
+    assert "#7048E2" in templates["invite"]
+    assert "#7048E2" in templates["package_share"]
 
 
 def test_universal_otp_is_prominent_escaped_and_time_boxed():

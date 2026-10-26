@@ -143,6 +143,8 @@ async def invite_candidate(
         candidate.access_code,
         link,
     )
+    # Mocks / partial package objects may omit close_time; never AttributeError here.
+    close_time = getattr(package, "close_time", None) if package else None
     background_tasks.add_task(
         _dispatch_candidate_invite,
         candidate_email=candidate.email,
@@ -151,7 +153,7 @@ async def invite_candidate(
         package_title=package.title if package else "your assessment",
         corporate_name=corporate.name if corporate else None,
         origin=origin,
-        close_time=package.close_time if package else None,
+        close_time=close_time,
     )
 
     return CandidateInviteResponse(
