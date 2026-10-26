@@ -418,20 +418,21 @@ def test_report_html_renders_synthesis_without_fit_or_recommendation():
     assert "MCQ Score" not in html
     assert "Assess Pulse" not in html
     assert "AI " not in html
-    assert "auto-generated Mind Queue report" in html
+    assert "auto-generated MindQ report" in html
     assert "MindQ (Pvt.) Ltd." in html
-    assert "Mind Queue Private Limited" not in html
+    assert "Mind Queue" not in html
     assert "not an indication of whether the candidate is a good fit" in html
     assert "This is merely an analysis of an assessment." in html
     assert "Strong quantitative pillar overall." in html
 
 
-def test_report_html_shows_na_for_categories_without_assessments():
+def test_report_html_omits_unassessed_category_cards():
     html = ReportService.render_report_html(_report(category_averages={"Cognitive": 80.0}))
     assert "80.0%" in html
-    assert html.count("N/A") == 3
-    for category in ("Cognitive", "Personality", "Behavioral", "Technical"):
-        assert category in html
+    assert "Cognitive" in html
+    assert "N/A" not in html
+    for category in ("Personality", "Behavioral", "Technical"):
+        assert category not in html
 
 
 def test_report_html_skipped_synthesis():

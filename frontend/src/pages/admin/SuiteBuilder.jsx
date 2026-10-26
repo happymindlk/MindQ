@@ -262,46 +262,38 @@ export default function SuiteBuilder() {
   const [modules, setModules] = useState([]);
   const [corporates, setCorporates] = useState([]);
   const [search, setSearch] = useState('');
-  // Create flow: restore session draft once so remounts / tab discard keep in-progress work.
-  const [corporateId, setCorporateId] = useState(() => {
-    if (loadPackageId) return '';
-    return readSuiteDraft(null)?.corporateId || '';
-  });
-  const [title, setTitle] = useState(() => {
-    if (loadPackageId) return '';
-    return readSuiteDraft(null)?.title || '';
-  });
-  const [description, setDescription] = useState(() => {
-    if (loadPackageId) return '';
-    return readSuiteDraft(null)?.description || '';
-  });
-  const [targetRole, setTargetRole] = useState(() => {
-    if (loadPackageId) return '';
-    return readSuiteDraft(null)?.targetRole || '';
-  });
-  const [openTime, setOpenTime] = useState(() => {
-    if (loadPackageId) return '';
-    return readSuiteDraft(null)?.openTime || '';
-  });
-  const [closeTime, setCloseTime] = useState(() => {
-    if (loadPackageId) return '';
-    return readSuiteDraft(null)?.closeTime || '';
-  });
+  // Seed from session draft for create *and* edit routes so create→edit remount
+  // keeps in-progress fields until the API hydrate completes.
+  const [corporateId, setCorporateId] = useState(
+    () => readSuiteDraft(loadPackageId || null)?.corporateId || '',
+  );
+  const [title, setTitle] = useState(
+    () => readSuiteDraft(loadPackageId || null)?.title || '',
+  );
+  const [description, setDescription] = useState(
+    () => readSuiteDraft(loadPackageId || null)?.description || '',
+  );
+  const [targetRole, setTargetRole] = useState(
+    () => readSuiteDraft(loadPackageId || null)?.targetRole || '',
+  );
+  const [openTime, setOpenTime] = useState(
+    () => readSuiteDraft(loadPackageId || null)?.openTime || '',
+  );
+  const [closeTime, setCloseTime] = useState(
+    () => readSuiteDraft(loadPackageId || null)?.closeTime || '',
+  );
   const [cartIds, setCartIds] = useState(() => {
-    if (loadPackageId) return [];
-    const draft = readSuiteDraft(null);
+    const draft = readSuiteDraft(loadPackageId || null);
     return Array.isArray(draft?.cartIds) ? draft.cartIds : [];
   });
   const [moduleOverrides, setModuleOverrides] = useState(() => {
-    if (loadPackageId) return {};
-    const draft = readSuiteDraft(null);
+    const draft = readSuiteDraft(loadPackageId || null);
     return draft?.moduleOverrides && typeof draft.moduleOverrides === 'object'
       ? draft.moduleOverrides
       : {};
   });
   const [customQuestions, setCustomQuestions] = useState(() => {
-    if (loadPackageId) return [];
-    const draft = readSuiteDraft(null);
+    const draft = readSuiteDraft(loadPackageId || null);
     return Array.isArray(draft?.customQuestions) ? draft.customQuestions : [];
   });
   const [packageId, setPackageId] = useState(loadPackageId || null);

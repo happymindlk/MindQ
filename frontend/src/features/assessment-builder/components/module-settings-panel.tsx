@@ -69,25 +69,20 @@ export function ModuleSettingsPanel({
     confidentialityNoticeText,
   }));
 
+  // Re-seed local draft only when switching modules. Syncing on every settings
+  // prop change wiped in-progress edits while the parent re-rendered.
   useEffect(() => {
     setDraft({
-      ...splitDuration(durationSeconds),
-      timerMode,
-      shuffle: shuffleQuestions,
-      showTopDisclaimer,
-      topDisclaimerText,
-      showConfidentialityNotice,
-      confidentialityNoticeText,
+      ...splitDuration(settings.durationSeconds),
+      timerMode: settings.timerMode,
+      shuffle: settings.shuffleQuestions,
+      showTopDisclaimer: settings.showTopDisclaimer ?? false,
+      topDisclaimerText: settings.topDisclaimerText ?? DEFAULT_TOP_DISCLAIMER_TEXT,
+      showConfidentialityNotice: settings.showConfidentialityNotice ?? false,
+      confidentialityNoticeText:
+        settings.confidentialityNoticeText ?? DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
     });
-  }, [
-    durationSeconds,
-    timerMode,
-    shuffleQuestions,
-    showTopDisclaimer,
-    topDisclaimerText,
-    showConfidentialityNotice,
-    confidentialityNoticeText,
-  ]);
+  }, [moduleId]); // eslint-disable-line react-hooks/exhaustive-deps -- intentional: module identity only
 
   const totalSeconds = draft.minutes * 60 + draft.seconds;
   const untimed = totalSeconds === 0;

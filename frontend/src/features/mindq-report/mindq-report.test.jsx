@@ -5,7 +5,7 @@ import MindQReport from './mindq-report';
 import { FIT_DISCLAIMER, FOOTER_NOTICE, REPORT_TITLE } from './report-copy';
 
 const SPEC_FOOTER =
-  'This is an auto-generated Mind Queue report. This cannot be reproduced, edited or redistributed without the written consent of MindQ (Pvt.) Ltd.';
+  'This is an auto-generated MindQ report. This cannot be reproduced, edited or redistributed without the written consent of MindQ (Pvt.) Ltd.';
 
 const SPEC_FIT_DISCLAIMER =
   'This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.';
@@ -86,15 +86,17 @@ describe('MindQReport', () => {
     expect(within(footer).getByText(SPEC_FIT_DISCLAIMER)).toBeInTheDocument();
   });
 
-  it('always renders four category cards and shows N/A for unassessed categories', () => {
+  it('renders only assessed category cards and omits N/A placeholders', () => {
     render(<MindQReport data={BASE} />);
     const cards = screen.getByRole('region', { name: 'Category scores' });
     const labels = [...cards.querySelectorAll('.mq-dash-label')].map((el) => el.textContent);
-    expect(labels).toEqual(['Cognitive', 'Personality', 'Behavioral', 'Technical']);
+    expect(labels).toEqual(['Cognitive', 'Personality']);
     expect(within(cards).getByText('82.5%')).toBeInTheDocument();
     expect(within(cards).getByText('64%')).toBeInTheDocument();
-    expect(within(cards).getAllByText('N/A')).toHaveLength(2);
-    expect(within(cards).getAllByText('Not assessed')).toHaveLength(2);
+    expect(within(cards).queryByText('N/A')).not.toBeInTheDocument();
+    expect(within(cards).queryByText('Not assessed')).not.toBeInTheDocument();
+    expect(within(cards).queryByText('Technical')).not.toBeInTheDocument();
+    expect(within(cards).queryByText('Behavioral')).not.toBeInTheDocument();
   });
 
   it('never renders AI, fit, MCQ, or recommendation copy even if the payload carries them', () => {
@@ -253,6 +255,7 @@ describe('MindQReport', () => {
       />,
     );
     expect(screen.getByText('Competency scores are not available yet.')).toBeInTheDocument();
-    expect(screen.getAllByText('N/A')).toHaveLength(4);
+    expect(screen.queryByRole('region', { name: 'Category scores' })).not.toBeInTheDocument();
+    expect(screen.queryByText('N/A')).not.toBeInTheDocument();
   });
 });

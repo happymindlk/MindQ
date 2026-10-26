@@ -11,7 +11,7 @@ export const REPORT_CSS = `
   padding: 32px 32px 24px;
   background: #ffffff;
   color: #111827;
-  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: "Poppins", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   font-size: 13px;
   line-height: 1.5;
   text-align: left;
@@ -38,9 +38,13 @@ export const REPORT_CSS = `
 }
 .mq-eyebrow {
   margin-bottom: 4px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
-  color: #4f46e5; font-weight: 700;
+  color: #7048E2; font-weight: 700;
+  font-family: "Clash Display", "Poppins", "Segoe UI", sans-serif;
 }
-.mq-title { margin-bottom: 16px !important; font-size: 26px; font-weight: 700; color: #111827; line-height: 1.2; }
+.mq-title {
+  margin-bottom: 16px !important; font-size: 26px; font-weight: 700; color: #111827; line-height: 1.2;
+  font-family: "Clash Display", "Poppins", "Segoe UI", sans-serif;
+}
 .mq-meta-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px 24px; margin: 0; }
 .mq-meta-grid dt {
   margin: 0; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7280;
@@ -56,21 +60,28 @@ export const REPORT_CSS = `
 .mq-card h2, .mq-sr-col h2, .mq-section-title {
   margin-bottom: 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
   color: #111827; font-weight: 700; border-bottom: 1px solid #d1d5db; padding-bottom: 8px;
+  font-family: "Clash Display", "Poppins", "Segoe UI", sans-serif;
 }
 .mq-section-title { margin-bottom: 16px; }
 
-.mq-dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+.mq-dashboard {
+  display: grid;
+  grid-template-columns: repeat(var(--mq-dash-cols, 3), minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
 .mq-dash-card {
-  border: 1px solid #e5e7eb; border-top: 3px solid #4f46e5; border-radius: 8px; padding: 16px;
+  border: 1px solid #e5e7eb; border-top: 3px solid #7048E2; border-radius: 8px; padding: 16px;
   background: #f9fafb; min-height: 96px;
 }
-.mq-dash-card-na { border-top-color: #d1d5db; }
-.mq-dash-card-na .mq-dash-value { color: #9ca3af; }
 .mq-dash-label {
   margin-bottom: 8px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280;
+  font-family: "Clash Display", "Poppins", "Segoe UI", sans-serif;
 }
-.mq-dash-value { font-size: 28px; font-weight: 700; color: #111827; font-variant-numeric: tabular-nums; }
-.mq-dash-muted { margin-top: 4px !important; font-size: 11px; color: #6b7280; }
+.mq-dash-value {
+  font-size: 28px; font-weight: 700; color: #111827; font-variant-numeric: tabular-nums;
+  font-family: "Clash Display", "Poppins", "Segoe UI", sans-serif;
+}
 
 .mq-summary { white-space: pre-wrap; color: #1f2937; }
 .mq-fallback { color: #6b7280; font-style: italic; }
@@ -79,10 +90,14 @@ export const REPORT_CSS = `
 .mq-group-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 8px;
 }
-.mq-group-head h3 { font-size: 15px; font-weight: 700; color: #111827; }
+.mq-group-head h3 {
+  font-size: 15px; font-weight: 700; color: #111827;
+  font-family: "Clash Display", "Poppins", "Segoe UI", sans-serif;
+}
 .mq-avg {
   display: inline-flex; align-items: baseline; gap: 8px; font-size: 18px; font-weight: 700;
-  color: #4338ca; font-variant-numeric: tabular-nums;
+  color: #7048E2; font-variant-numeric: tabular-nums;
+  font-family: "Clash Display", "Poppins", "Segoe UI", sans-serif;
 }
 .mq-avg-label {
   font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; font-weight: 600;
@@ -100,7 +115,7 @@ export const REPORT_CSS = `
 }
 .mq-score-summary { margin-top: 4px !important; font-size: 12.5px; color: #4b5563; }
 .mq-bar-track { height: 8px; border-radius: 999px; background: #e5e7eb; overflow: hidden; }
-.mq-bar-fill { height: 100%; border-radius: 999px; background: #4f46e5; }
+.mq-bar-fill { height: 100%; border-radius: 999px; background: #7048E2; }
 .mq-strengths-risks { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 .mq-sr-col { border-radius: 8px; padding: 16px; border: 1px solid #e5e7eb; }
 .mq-sr-strengths { background: #f0fdf4; border-color: #86efac; }
@@ -112,8 +127,8 @@ export const REPORT_CSS = `
 .mq-q-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .mq-q-index { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; }
 .mq-score-badge {
-  display: inline-block; padding: 4px 8px; border-radius: 999px; background: #eef2ff;
-  color: #4338ca; font-weight: 700; font-size: 12px;
+  display: inline-block; padding: 4px 8px; border-radius: 999px; background: #f3eefc;
+  color: #7048E2; font-weight: 700; font-size: 12px;
 }
 .mq-q-prompt { margin-bottom: 8px !important; font-size: 15px; font-weight: 700; color: #111827; }
 .mq-chip {
@@ -132,8 +147,8 @@ export const REPORT_CSS = `
   margin: 0; white-space: pre-wrap; word-break: break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: #111827;
 }
-.mq-eval-box { border: 1px solid #e0e7ff; background: #f5f7ff; border-radius: 6px; padding: 8px 12px; }
-.mq-eval-label { color: #4338ca; font-weight: 700; }
+.mq-eval-box { border: 1px solid #e4daf8; background: #f7f4fd; border-radius: 6px; padding: 8px 12px; }
+.mq-eval-label { color: #7048E2; font-weight: 700; }
 .mq-eval-text { white-space: pre-wrap; color: #111827; }
 .mq-scorecard { margin: 8px 0 0; padding-left: 18px; }
 .mq-scorecard li { margin-bottom: 4px; color: #1f2937; }

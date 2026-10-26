@@ -180,7 +180,7 @@ function toViewModel(data) {
     scoreCards: CATEGORY_ORDER.map((category) => ({
       category,
       average: averages[category] ?? null,
-    })),
+    })).filter((card) => card.average != null),
     summary,
     synthesisStatus: typeof data.synthesis_status === 'string' ? data.synthesis_status : 'pending',
     strengths: asList(data.strengths),
@@ -282,18 +282,20 @@ export default function MindQReport({ data, logoSrc }) {
               </dl>
             </header>
 
-            <section className="mq-dashboard" aria-label="Category scores">
-              {vm.scoreCards.map(({ category, average }) => (
-                <div
-                  key={category}
-                  className={`mq-dash-card${average == null ? ' mq-dash-card-na' : ''}`}
-                >
-                  <p className="mq-dash-label">{category}</p>
-                  <p className="mq-dash-value">{formatScore(average)}</p>
-                  {average == null && <p className="mq-dash-muted">Not assessed</p>}
-                </div>
-              ))}
-            </section>
+            {vm.scoreCards.length > 0 && (
+              <section
+                className="mq-dashboard"
+                aria-label="Category scores"
+                style={{ '--mq-dash-cols': String(vm.scoreCards.length) }}
+              >
+                {vm.scoreCards.map(({ category, average }) => (
+                  <div key={category} className="mq-dash-card">
+                    <p className="mq-dash-label">{category}</p>
+                    <p className="mq-dash-value">{formatScore(average)}</p>
+                  </div>
+                ))}
+              </section>
+            )}
 
             <section className="mq-card">
               <h2>Executive Summary</h2>

@@ -297,11 +297,15 @@ export default function CandidateReport() {
       <section className="rounded-lg border border-slate-200 dark:border-neutral-800 bg-surface px-4 py-4">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
-            <p className="metric-label">Average score</p>
-            <p className="mt-1 text-3xl font-semibold tracking-tight tabular-data text-foreground">
-              {average != null ? `${Math.round(average)}%` : '—'}
-            </p>
-            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400 tabular-data">
+            {average != null ? (
+              <>
+                <p className="metric-label font-display">Average score</p>
+                <p className="mt-1 text-3xl font-semibold tracking-tight tabular-data text-foreground font-display">
+                  {`${Math.round(average)}%`}
+                </p>
+              </>
+            ) : null}
+            <p className={`text-xs text-neutral-500 dark:text-neutral-400 tabular-data ${average != null ? 'mt-1' : ''}`}>
               {candidate.completed_assessments}/{candidate.total_assessments} assessments
             </p>
           </div>
@@ -354,13 +358,15 @@ export default function CandidateReport() {
                 className="rounded-lg border border-slate-200 dark:border-neutral-800 bg-surface overflow-hidden"
               >
                 <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 dark:border-neutral-800">
-                  <h3 className="text-sm font-medium text-foreground">{section.title}</h3>
-                  <span className="tabular-data text-xs text-neutral-500 dark:text-neutral-400">
-                    {section.score != null ? `${section.score}%` : '—'}
-                  </span>
+                  <h3 className="text-sm font-medium text-foreground font-display">{section.title}</h3>
+                  {section.score != null && (
+                    <span className="tabular-data text-xs text-primary font-display">
+                      {`${section.score}%`}
+                    </span>
+                  )}
                 </div>
                 {section.notes && (
-                  <div className="mx-3 mt-3 mb-1 border-l-2 border-violet-500 pl-3 py-0.5">
+                  <div className="mx-3 mt-3 mb-1 border-l-2 border-primary pl-3 py-0.5">
                     <p className="metric-label mb-1">Assessment notes</p>
                     <p className="text-sm text-foreground/90">{section.notes}</p>
                   </div>
