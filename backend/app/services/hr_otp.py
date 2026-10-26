@@ -10,8 +10,11 @@ backend ``client_hr`` JWT (``issue_client_token``).
 """
 from __future__ import annotations
 
+import json
 import logging
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import jwt
@@ -39,6 +42,30 @@ from app.services.email import clean_recipient_email, send_hr_otp_email
 from app.services.supabase_admin import SupabaseAdminError, find_auth_user_id_by_email
 
 logger = logging.getLogger("app.hr_otp")
+
+# #region agent log
+_DEBUG_LOG_PATH = Path(__file__).resolve().parents[3] / "debug-a1ab83.log"
+
+
+def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    """Append one NDJSON debug line for HR OTP gate diagnosis."""
+    try:
+        payload = {
+            "sessionId": "a1ab83",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+
+
+# #endregion
 
 HR_OTP_AUDIENCE = "mindq-hr-otp"
 HR_OTP_TYPE = "hr_otp"
@@ -136,11 +163,46 @@ def _assert_company_access(corporate: Corporate, email: str) -> None:
         HrOtpError: 403 with the generic unregistered detail (no tenant leak).
     """
     if corporate.is_active is False:
+        # #region agent log
+        _agent_dbg(
+            "E",
+            "hr_otp.py:_assert_company_access",
+            "reject_inactive_company",
+            {"corporate_id": str(corporate.id)},
+        )
+        # #endregion
         raise HrOtpError(403, _INVALID_TARGET)
     contact = (corporate.contact_email or "").strip().lower()
     allowed = {str(entry).strip().lower() for entry in (corporate.allowed_hr_emails or [])}
     if email != contact and email not in allowed:
+        # #region agent log
+        _agent_dbg(
+            "D",
+            "hr_otp.py:_assert_company_access",
+            "reject_whitelist_miss",
+            {
+                "email_domain": email.split("@")[-1] if "@" in email else "",
+                "email_len": len(email),
+                "contact_match": email == contact,
+                "allowed_count": len(allowed),
+                "in_allowed": email in allowed,
+                "corporate_id": str(corporate.id),
+            },
+        )
+        # #endregion
         raise HrOtpError(403, _INVALID_TARGET)
+    # #region agent log
+    _agent_dbg(
+        "D",
+        "hr_otp.py:_assert_company_access",
+        "whitelist_ok",
+        {
+            "via_contact": email == contact,
+            "via_allowed": email in allowed,
+            "corporate_id": str(corporate.id),
+        },
+    )
+    # #endregion
 
 
 async def _resolve_membership(
@@ -159,27 +221,83 @@ async def _resolve_membership(
         HrOtpError: 403 unregistered / ops account / missing tenant,
             503 when the Auth Admin resolver is unavailable.
     """
+    # #region agent log
+    _agent_dbg(
+        "A",
+        "hr_otp.py:_resolve_membership",
+        "resolve_start",
+        {"email_domain": email.split("@")[-1] if "@" in email else "", "email_len": len(email)},
+    )
+    # #endregion
     try:
         user_id = await run_in_threadpool(find_auth_user_id_by_email, email)
     except SupabaseAdminError as exc:
+        # #region agent log
+        _agent_dbg(
+            "A",
+            "hr_otp.py:_resolve_membership",
+            "auth_admin_unavailable",
+            {"error_type": type(exc).__name__},
+        )
+        # #endregion
         raise HrOtpError(503, _AUTH_DOWN) from exc
     if user_id is None:
+        # #region agent log
+        _agent_dbg(
+            "A",
+            "hr_otp.py:_resolve_membership",
+            "reject_no_auth_user",
+            {"email_domain": email.split("@")[-1] if "@" in email else ""},
+        )
+        # #endregion
         raise HrOtpError(403, _INVALID_TARGET)
 
     membership = (
         await db.execute(select(HRUser).where(HRUser.user_id == user_id))
     ).scalar_one_or_none()
     if membership is None:
+        # #region agent log
+        _agent_dbg(
+            "B",
+            "hr_otp.py:_resolve_membership",
+            "reject_no_hr_membership",
+            {"user_id": str(user_id)},
+        )
+        # #endregion
         raise HrOtpError(403, _INVALID_TARGET)
     if is_ops_role(membership.role):
+        # #region agent log
+        _agent_dbg(
+            "C",
+            "hr_otp.py:_resolve_membership",
+            "reject_ops_role",
+            {"role": membership.role},
+        )
+        # #endregion
         raise HrOtpError(403, _NOT_HR)
 
     corporate = (
         await db.execute(select(Corporate).where(Corporate.id == membership.corporate_id))
     ).scalar_one_or_none()
     if corporate is None:
+        # #region agent log
+        _agent_dbg(
+            "E",
+            "hr_otp.py:_resolve_membership",
+            "reject_no_corporate",
+            {"corporate_id": str(membership.corporate_id)},
+        )
+        # #endregion
         raise HrOtpError(403, _NO_COMPANY)
     _assert_company_access(corporate, email)
+    # #region agent log
+    _agent_dbg(
+        "A",
+        "hr_otp.py:_resolve_membership",
+        "resolve_ok",
+        {"user_id": str(user_id), "corporate_id": str(corporate.id), "role": membership.role},
+    )
+    # #endregion
     return membership, corporate
 
 
