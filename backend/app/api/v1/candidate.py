@@ -53,7 +53,99 @@ def _raise_integrity(exc: Exception) -> NoReturn:
 async def get_dashboard(
     candidate: Candidate = Depends(get_current_candidate), db: AsyncSession = Depends(get_db)
 ):
-    return await CandidateService.get_dashboard(db, candidate)
+    # #region agent log
+    try:
+        import json
+        import time
+        from pathlib import Path
+
+        Path(__file__).resolve().parents[4].joinpath("debug-f4446e.log").open(
+            "a", encoding="utf-8"
+        ).write(
+            json.dumps(
+                {
+                    "sessionId": "f4446e",
+                    "hypothesisId": "E",
+                    "location": "candidate.py:get_dashboard:entry",
+                    "message": "dashboard_handler_entered",
+                    "data": {
+                        "candidate_id": str(candidate.id),
+                        "package_id": str(candidate.package_id),
+                    },
+                    "timestamp": int(time.time() * 1000),
+                },
+                default=str,
+            )
+            + "\n"
+        )
+    except OSError:
+        pass
+    # #endregion
+    try:
+        result = await CandidateService.get_dashboard(db, candidate)
+    except Exception as exc:
+        # #region agent log
+        try:
+            import json
+            import time
+            from pathlib import Path
+
+            orig = getattr(exc, "orig", None)
+            Path(__file__).resolve().parents[4].joinpath("debug-f4446e.log").open(
+                "a", encoding="utf-8"
+            ).write(
+                json.dumps(
+                    {
+                        "sessionId": "f4446e",
+                        "hypothesisId": "E",
+                        "location": "candidate.py:get_dashboard:error",
+                        "message": "dashboard_query_failed",
+                        "data": {
+                            "exc_type": type(exc).__name__,
+                            "exc": str(exc)[:500],
+                            "driver_type": type(orig).__name__ if orig else None,
+                            "driver": str(orig)[:500] if orig else None,
+                            "sqlstate": getattr(orig, "sqlstate", None),
+                        },
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    default=str,
+                )
+                + "\n"
+            )
+        except OSError:
+            pass
+        # #endregion
+        raise
+    # #region agent log
+    try:
+        import json
+        import time
+        from pathlib import Path
+
+        Path(__file__).resolve().parents[4].joinpath("debug-f4446e.log").open(
+            "a", encoding="utf-8"
+        ).write(
+            json.dumps(
+                {
+                    "sessionId": "f4446e",
+                    "hypothesisId": "E",
+                    "location": "candidate.py:get_dashboard:exit",
+                    "message": "dashboard_ok",
+                    "data": {
+                        "test_count": len(result.get("tests", [])) if isinstance(result, dict) else None,
+                        "window_state": result.get("window_state") if isinstance(result, dict) else None,
+                    },
+                    "timestamp": int(time.time() * 1000),
+                },
+                default=str,
+            )
+            + "\n"
+        )
+    except OSError:
+        pass
+    # #endregion
+    return result
 
 
 @router.get("/test/{assessment_id}", response_model=CandidateTestResponse)

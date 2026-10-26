@@ -243,6 +243,77 @@ async def database_error_handler(request: Request, exc: SQLAlchemyError):
             "statement": getattr(exc, "statement", None),
         },
     )
+    # #region agent log
+    try:
+        import json
+        import time
+        from pathlib import Path
+
+        exc_text = str(exc).lower()
+        orig_text = str(orig).lower() if orig else ""
+        combined = f"{exc_text} {orig_text}"
+        sqlstate = getattr(orig, "sqlstate", None)
+        is_schema = (
+            "does not exist" in combined
+            or "undefinedcolumn" in combined
+            or "undefinedtable" in combined
+            or sqlstate in ("42P01", "42703")
+        )
+        is_prepared = (
+            "prepared statement" in combined
+            or sqlstate == "26000"
+        )
+        is_transient = (
+            getattr(exc, "connection_invalidated", False)
+            or sqlstate in ("57P01", "57P02", "57P03", "08006", "08001", "08003", "08004")
+            or any(
+                token in combined
+                for token in (
+                    "connection refused",
+                    "connection reset",
+                    "server closed the connection",
+                    "timeout",
+                    "too many connections",
+                    "cannot connect",
+                    "connection was closed",
+                    "ssl connection has been closed",
+                    "broken pipe",
+                )
+            )
+        )
+        Path(__file__).resolve().parents[2].joinpath("debug-f4446e.log").open(
+            "a", encoding="utf-8"
+        ).write(
+            json.dumps(
+                {
+                    "sessionId": "f4446e",
+                    "hypothesisId": "B" if is_schema else ("C" if is_prepared else ("A" if is_transient else "E")),
+                    "location": "main.py:database_error_handler",
+                    "message": "mapped_sqlalchemy_to_503",
+                    "data": {
+                        "path": request.url.path,
+                        "method": request.method,
+                        "request_id": request_id,
+                        "exc_type": type(exc).__name__,
+                        "driver_type": type(orig).__name__ if orig else None,
+                        "driver_message": str(orig)[:500] if orig else None,
+                        "sqlalchemy_message": str(exc)[:500],
+                        "sqlstate": sqlstate,
+                        "connection_invalidated": getattr(exc, "connection_invalidated", None),
+                        "class_schema": is_schema,
+                        "class_prepared": is_prepared,
+                        "class_transient": is_transient,
+                        "statement": (getattr(exc, "statement", None) or "")[:200] or None,
+                    },
+                    "timestamp": int(time.time() * 1000),
+                },
+                default=str,
+            )
+            + "\n"
+        )
+    except OSError:
+        pass
+    # #endregion
     return JSONResponse(
         status_code=503,
         content={"detail": "Database temporarily unavailable. Please retry.", "request_id": request_id},
