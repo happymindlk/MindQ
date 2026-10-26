@@ -51,7 +51,7 @@ logger = logging.getLogger("app.hr_otp")
 # #region agent log
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEBUG_LOG_PATH = _REPO_ROOT / "debug-410e50.log"
-_DEBUG_RUN_ID = "pre-fix"
+_DEBUG_RUN_ID = "post-fix"
 
 
 def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
@@ -415,12 +415,75 @@ async def _resolve_membership(
         _agent_dbg(
             "E",
             "hr_otp.py:_resolve_membership",
-            "reject_no_corporate",
+            "missing_corporate_try_rebind",
             {"corporate_id": str(membership.corporate_id)},
         )
         # #endregion
-        raise HrOtpError(403, _NO_COMPANY)
-    _assert_company_access(corporate, email)
+        provisioned = await _provision_whitelisted_hr(
+            db, email, existing_user_id=user_id
+        )
+        if provisioned is None:
+            raise HrOtpError(403, _NO_COMPANY)
+        membership, corporate = provisioned
+        if is_ops_role(membership.role):
+            raise HrOtpError(403, _NOT_HR)
+        _assert_company_access(corporate, email)
+        return membership, corporate
+
+    try:
+        _assert_company_access(corporate, email)
+    except HrOtpError as access_exc:
+        # Stale hr_users rows often point at a deactivated tenant while the same
+        # email remains on an active company's whitelist (admin re-home without
+        # Invite HR). Re-bind before treating the login as unregistered.
+        # #region agent log
+        _agent_dbg(
+            "E",
+            "hr_otp.py:_resolve_membership",
+            "access_fail_try_rebind",
+            {
+                "user_id": str(user_id),
+                "stale_corporate_id": str(corporate.id),
+                "stale_active": corporate.is_active is not False,
+                "detail_code": (
+                    "invalid_target"
+                    if access_exc.detail == _INVALID_TARGET
+                    else "other"
+                ),
+            },
+        )
+        # #endregion
+        provisioned = await _provision_whitelisted_hr(
+            db, email, existing_user_id=user_id
+        )
+        if provisioned is None:
+            logger.info(
+                "hr_otp_rejected",
+                extra={
+                    "event": "hr_otp_rejected",
+                    "reason": "inactive_or_whitelist",
+                    "email_domain": email.split("@")[-1] if "@" in email else "",
+                },
+            )
+            raise access_exc
+        membership, corporate = provisioned
+        if is_ops_role(membership.role):
+            raise HrOtpError(403, _NOT_HR)
+        _assert_company_access(corporate, email)
+        # #region agent log
+        _agent_dbg(
+            "E",
+            "hr_otp.py:_resolve_membership",
+            "rebind_ok",
+            {
+                "user_id": str(user_id),
+                "corporate_id": str(corporate.id),
+                "role": membership.role,
+            },
+        )
+        # #endregion
+        return membership, corporate
+
     # #region agent log
     _agent_dbg(
         "A",
