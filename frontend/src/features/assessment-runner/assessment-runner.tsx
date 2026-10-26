@@ -279,7 +279,7 @@ export function AssessmentRunner({
             </span>
           ) : (
             <span className="rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 font-semibold text-warning">
-              Preview — nothing is saved
+              Preview - nothing is saved
             </span>
           )}
         </div>
@@ -359,7 +359,7 @@ export function AssessmentRunner({
               type="button"
               onClick={() => handleNext()}
               disabled={!canAdvance || timeUp}
-              className="inline-flex h-10 items-center gap-1 rounded-md border-0 bg-primary px-4 text-sm font-medium text-primary-fg shadow-none hover:bg-primary-hover active:bg-primary-active focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary"
+              className="inline-flex h-10 items-center gap-1 rounded-md border-0 bg-[#7048E2] px-4 text-sm font-medium text-white shadow-none transition-colors duration-150 hover:bg-[#5e3cc4] active:bg-[#4f32a6] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7048E2] focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#7048E2]"
             >
               {index === questions.length - 1 ? 'Submit test' : 'Next question'}
               {index < questions.length - 1 && <ChevronRight className="h-4 w-4" aria-hidden />}

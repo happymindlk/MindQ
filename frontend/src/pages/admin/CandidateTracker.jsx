@@ -140,106 +140,118 @@ export default function CandidateTracker() {
     [toast],
   );
 
+  const showScoreColumn = useMemo(
+    () => filtered.some((row) => row.avg_score != null),
+    [filtered],
+  );
+
   const columns = useMemo(
-    () => [
-      {
-        id: 'full_name',
-        header: 'Candidate',
-        accessor: (row) => row.full_name,
-        cell: (row) => (
-          <div>
-            <div className="font-medium text-foreground text-sm">{row.full_name}</div>
-            <div className="text-xs text-muted mt-0.5">{maskEmail(row.email)}</div>
-            <div className="text-xs text-muted mt-0.5 tabular-data">{maskAccessCode(row.access_code)}</div>
-          </div>
-        ),
-      },
-      {
-        id: 'package_title',
-        header: 'Suite',
-        accessor: (row) => row.package_title,
-        cell: (row) => <span className="text-foreground/90">{row.package_title}</span>,
-      },
-      {
-        id: 'status',
-        header: 'Status',
-        accessor: (row) => candidateStatus(row),
-        cell: (row) => statusBadge(candidateStatus(row)),
-      },
-      {
-        id: 'progress',
-        header: 'Progress',
-        tabular: true,
-        accessor: (row) => Number(row.completed_assessments) || 0,
-        cell: (row) => (
-          <span className="tabular-data text-foreground">
-            {row.completed_assessments}/{row.total_assessments}
-          </span>
-        ),
-      },
-      {
-        id: 'avg_score',
-        header: 'Score',
-        tabular: true,
-        accessor: (row) => (row.avg_score != null ? Number(row.avg_score) : -1),
-        cell: (row) => (
-          <span className="tabular-data text-foreground">
-            {row.avg_score != null ? `${row.avg_score}%` : '—'}
-          </span>
-        ),
-      },
-      {
-        id: 'report',
-        header: 'Report',
-        accessor: (row) => (row.evaluated ? 1 : 0),
-        cell: (row) => {
-          if (row.evaluated) {
-            return <Badge variant="completed">Ready</Badge>;
-          }
-          if (candidateStatus(row) === 'completed') {
-            return <Badge variant="scoring">Scoring</Badge>;
-          }
-          return <span className="text-neutral-400">—</span>;
-        },
-      },
-      {
-        id: 'actions',
-        header: 'Actions',
-        sortable: false,
-        align: 'right',
-        cell: (row) => {
-          const status = candidateStatus(row);
-          return (
-            <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-              {status === 'completed' ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleDownloadReport(row.id)}
-                  isLoading={downloadingId === row.id}
-                  title="Download assessment report"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Download Report
-                </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => handleNudge(row.id)}
-                  isLoading={nudgingId === row.id}
-                  title="Send reminder email"
-                >
-                  <Bell className="w-3.5 h-3.5" />
-                  Send Reminder
-                </Button>
-              )}
+    () => {
+      const cols = [
+        {
+          id: 'full_name',
+          header: 'Candidate',
+          accessor: (row) => row.full_name,
+          cell: (row) => (
+            <div>
+              <div className="font-medium text-foreground text-sm">{row.full_name}</div>
+              <div className="text-xs text-muted mt-0.5">{maskEmail(row.email)}</div>
+              <div className="text-xs text-muted mt-0.5 tabular-data">{maskAccessCode(row.access_code)}</div>
             </div>
-          );
+          ),
         },
-      },
-    ],
-    [downloadingId, nudgingId, handleDownloadReport, handleNudge],
+        {
+          id: 'package_title',
+          header: 'Suite',
+          accessor: (row) => row.package_title,
+          cell: (row) => <span className="text-foreground/90">{row.package_title}</span>,
+        },
+        {
+          id: 'status',
+          header: 'Status',
+          accessor: (row) => candidateStatus(row),
+          cell: (row) => statusBadge(candidateStatus(row)),
+        },
+        {
+          id: 'progress',
+          header: 'Progress',
+          tabular: true,
+          accessor: (row) => Number(row.completed_assessments) || 0,
+          cell: (row) => (
+            <span className="tabular-data text-foreground">
+              {row.completed_assessments}/{row.total_assessments}
+            </span>
+          ),
+        },
+      ];
+      if (showScoreColumn) {
+        cols.push({
+          id: 'avg_score',
+          header: 'Score',
+          tabular: true,
+          accessor: (row) => (row.avg_score != null ? Number(row.avg_score) : -1),
+          cell: (row) => (
+            <span className="tabular-data text-foreground">
+              {row.avg_score != null ? `${row.avg_score}%` : '-'}
+            </span>
+          ),
+        });
+      }
+      cols.push(
+        {
+          id: 'report',
+          header: 'Report',
+          accessor: (row) => (row.evaluated ? 1 : 0),
+          cell: (row) => {
+            if (row.evaluated) {
+              return <Badge variant="completed">Ready</Badge>;
+            }
+            if (candidateStatus(row) === 'completed') {
+              return <Badge variant="scoring">Scoring</Badge>;
+            }
+            return <span className="text-neutral-400">-</span>;
+          },
+        },
+        {
+          id: 'actions',
+          header: 'Actions',
+          sortable: false,
+          align: 'right',
+          cell: (row) => {
+            const status = candidateStatus(row);
+            return (
+              <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                {status === 'completed' ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleDownloadReport(row.id)}
+                    isLoading={downloadingId === row.id}
+                    title="Download assessment report"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download Report
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleNudge(row.id)}
+                    isLoading={nudgingId === row.id}
+                    title="Send reminder email"
+                  >
+                    <Bell className="w-3.5 h-3.5" />
+                    Send Reminder
+                  </Button>
+                )}
+              </div>
+            );
+          },
+        },
+      );
+      return cols;
+    },
+    [downloadingId, nudgingId, handleDownloadReport, handleNudge, showScoreColumn],
   );
 
   return (

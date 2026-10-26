@@ -1,5 +1,6 @@
 """HR candidate invitation: persist a pending candidate and queue SES mail."""
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -32,6 +33,7 @@ async def _dispatch_candidate_invite(
     package_title: str,
     corporate_name: str | None,
     origin: str,
+    close_time: datetime | None = None,
 ) -> None:
     """BackgroundTasks worker for one candidate invite; never raises silently.
 
@@ -42,6 +44,7 @@ async def _dispatch_candidate_invite(
         package_title: Assessment package title.
         corporate_name: Hiring company shown in the email, if known.
         origin: Absolute frontend origin for the assessment link.
+        close_time: Package assessment window end (UTC), if enforced.
     """
     clean_email = clean_recipient_email(candidate_email)
     link = _assessment_invite_link(access_code, origin=origin)
@@ -59,6 +62,7 @@ async def _dispatch_candidate_invite(
             package_title,
             corporate_name,
             origin=origin,
+            close_time=close_time,
         )
     except Exception:  # noqa: BLE001 - background task: log, never propagate
         logger.exception(
@@ -147,6 +151,7 @@ async def invite_candidate(
         package_title=package.title if package else "your assessment",
         corporate_name=corporate.name if corporate else None,
         origin=origin,
+        close_time=package.close_time if package else None,
     )
 
     return CandidateInviteResponse(

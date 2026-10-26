@@ -436,10 +436,19 @@ export default function AssessmentHistory() {
                               )}
                               {!loadingCandidates[pkg.id] && filteredCands.length > 0 && (
                                 <ul className="rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 divide-y divide-slate-200 dark:divide-slate-800 overflow-hidden">
-                                  <li className="grid grid-cols-[1.4fr_0.8fr_0.5fr_0.5fr_0.7fr_0.4fr] gap-2 px-3 py-1.5 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-950/60">
+                                  {(() => {
+                                    const showScore = filteredCands.some(
+                                      (c) => (c.technical_score ?? c.avg_score) != null,
+                                    );
+                                    const gridCols = showScore
+                                      ? 'grid-cols-[1.4fr_0.8fr_0.5fr_0.5fr_0.7fr_0.4fr]'
+                                      : 'grid-cols-[1.4fr_0.8fr_0.5fr_0.7fr_0.4fr]';
+                                    return (
+                                      <>
+                                  <li className={`grid ${gridCols} gap-2 px-3 py-1.5 text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-950/60`}>
                                     <span>Name / Email</span>
                                     <span>Progress</span>
-                                    <span>Score</span>
+                                    {showScore && <span>Score</span>}
                                     <span>Status</span>
                                     <span>Completed</span>
                                     <span className="text-right">Report</span>
@@ -451,7 +460,7 @@ export default function AssessmentHistory() {
                                     const completed = status === 'completed';
                                     return (
                                       <li key={cand.id}>
-                                        <div className="grid grid-cols-[1.4fr_0.8fr_0.5fr_0.5fr_0.7fr_0.4fr] gap-2 px-3 py-2 hover:bg-slate-100/70 dark:hover:bg-slate-900/80 transition-colors">
+                                        <div className={`grid ${gridCols} gap-2 px-3 py-2 hover:bg-slate-100/70 dark:hover:bg-slate-900/80 transition-colors`}>
                                           <button
                                             type="button"
                                             onClick={() =>
@@ -470,9 +479,11 @@ export default function AssessmentHistory() {
                                             {cand.completed_assessments}/
                                             {cand.total_assessments}
                                           </span>
-                                          <span className="text-xs text-slate-900 dark:text-slate-100 tabular-nums self-center">
-                                            {score != null ? `${score}%` : '—'}
-                                          </span>
+                                          {showScore && (
+                                            <span className="text-xs text-slate-900 dark:text-slate-100 tabular-nums self-center">
+                                              {score != null ? `${score}%` : '-'}
+                                            </span>
+                                          )}
                                           <span className="self-center">
                                             <StatusBadge status={status} />
                                           </span>
@@ -497,6 +508,9 @@ export default function AssessmentHistory() {
                                       </li>
                                     );
                                   })}
+                                      </>
+                                    );
+                                  })()}
                                 </ul>
                               )}
                             </div>

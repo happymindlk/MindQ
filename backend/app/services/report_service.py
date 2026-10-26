@@ -110,22 +110,25 @@ def _safe_logo(url: str | None) -> str:
 
 
 def _ordered_category_averages(averages: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """All four category cards in display order; unassessed ones carry ``None``.
+    """Assessed category cards only, in display order.
+
+    Unassessed categories (missing or null average) are omitted so the report
+    does not render N/A placeholder cards.
 
     Args:
         averages: ``category_averages`` from the MindQ Report payload.
 
     Returns:
-        ``[{"category": str, "average": float | None}]`` in display order.
+        ``[{"category": str, "average": float}]`` for assessed categories only.
     """
     source = averages or {}
-    return [
-        {
-            "category": name,
-            "average": float(source[name]) if source.get(name) is not None else None,
-        }
-        for name in CATEGORY_DISPLAY_ORDER
-    ]
+    cards: list[dict[str, Any]] = []
+    for name in CATEGORY_DISPLAY_ORDER:
+        raw = source.get(name)
+        if raw is None:
+            continue
+        cards.append({"category": name, "average": float(raw)})
+    return cards
 
 
 class ReportService:

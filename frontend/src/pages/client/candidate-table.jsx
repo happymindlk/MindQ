@@ -11,6 +11,7 @@ function formatScore(score) {
 /** @param {{ candidates: Array<object> }} props */
 function CandidateTable({ candidates }) {
   const navigate = useNavigate();
+  const showScore = candidates.some((c) => c.raw_score != null);
 
   if (candidates.length === 0) {
     return (
@@ -32,7 +33,9 @@ function CandidateTable({ candidates }) {
             <th scope="col" className="px-4 py-2 font-medium">Candidate Name</th>
             <th scope="col" className="px-4 py-2 font-medium">Email</th>
             <th scope="col" className="px-4 py-2 font-medium">Status</th>
-            <th scope="col" className="px-4 py-2 text-right font-medium">Score</th>
+            {showScore && (
+              <th scope="col" className="px-4 py-2 text-right font-medium">Score</th>
+            )}
             <th scope="col" className="px-4 py-2 text-right font-medium">
               <span className="sr-only">Action</span>
             </th>
@@ -50,16 +53,18 @@ function CandidateTable({ candidates }) {
                 <td className="px-4 py-2.5">
                   <ClientStatusBadge status={c.status} />
                 </td>
-                <td className="px-4 py-2.5 text-right font-mono tabular-nums text-foreground">
-                  {formatScore(c.raw_score)}
-                </td>
+                {showScore && (
+                  <td className="px-4 py-2.5 text-right font-mono tabular-nums text-foreground">
+                    {formatScore(c.raw_score)}
+                  </td>
+                )}
                 <td className="px-4 py-2.5 text-right">
                   <button
                     type="button"
                     disabled={!ready}
                     onClick={() => navigate(c.report_path || `/client/candidates/${c.candidate_id}`)}
                     title={ready ? 'Open MindQ Report' : 'Available once the candidate completes all assessments'}
-                    className="inline-flex h-7 items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 text-xs font-medium text-white transition-colors hover:bg-indigo-700 active:bg-indigo-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:bg-surface-raised disabled:text-muted"
+                    className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-fg transition-colors hover:bg-primary-hover active:bg-primary-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:bg-surface-raised disabled:text-muted"
                   >
                     <FileText className="h-3.5 w-3.5" aria-hidden="true" />
                     View Report

@@ -61,40 +61,50 @@ export default function PublicTrack() {
     load();
   }, [load]);
 
+  const showScoreColumn = useMemo(
+    () => (data?.candidates || []).some((row) => row.avg_score != null),
+    [data?.candidates],
+  );
+
   const columns = useMemo(
-    () => [
-      {
-        id: 'full_name',
-        header: 'Candidate',
-        accessor: (row) => row.full_name,
-        cell: (row) => <span className="font-medium text-foreground">{row.full_name}</span>,
-      },
-      {
-        id: 'status',
-        header: 'Status',
-        accessor: (row) => row.status,
-        cell: (row) => statusBadge(row.status),
-      },
-      {
-        id: 'progress',
-        header: 'Progress',
-        tabular: true,
-        accessor: (row) => row.progress,
-        cell: (row) => <span className="tabular-data text-foreground">{row.progress}</span>,
-      },
-      {
-        id: 'avg_score',
-        header: 'Score',
-        tabular: true,
-        accessor: (row) => (row.avg_score != null ? Number(row.avg_score) : -1),
-        cell: (row) => (
-          <span className="tabular-data text-foreground">
-            {row.avg_score != null ? `${row.avg_score}%` : '—'}
-          </span>
-        ),
-      },
-    ],
-    [],
+    () => {
+      const cols = [
+        {
+          id: 'full_name',
+          header: 'Candidate',
+          accessor: (row) => row.full_name,
+          cell: (row) => <span className="font-medium text-foreground">{row.full_name}</span>,
+        },
+        {
+          id: 'status',
+          header: 'Status',
+          accessor: (row) => row.status,
+          cell: (row) => statusBadge(row.status),
+        },
+        {
+          id: 'progress',
+          header: 'Progress',
+          tabular: true,
+          accessor: (row) => row.progress,
+          cell: (row) => <span className="tabular-data text-foreground">{row.progress}</span>,
+        },
+      ];
+      if (showScoreColumn) {
+        cols.push({
+          id: 'avg_score',
+          header: 'Score',
+          tabular: true,
+          accessor: (row) => (row.avg_score != null ? Number(row.avg_score) : -1),
+          cell: (row) => (
+            <span className="tabular-data text-foreground">
+              {row.avg_score != null ? `${row.avg_score}%` : '-'}
+            </span>
+          ),
+        });
+      }
+      return cols;
+    },
+    [showScoreColumn],
   );
 
   return (

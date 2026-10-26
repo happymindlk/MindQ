@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from app.services.email import (
     _assessment_invite_link,
@@ -60,6 +61,7 @@ class EmailService:
         *,
         raise_on_error: bool = False,
         origin: str | None = None,
+        close_time: datetime | None = None,
     ) -> bool:
         """Send assessment invite with portal magic link and guidelines.
 
@@ -71,6 +73,7 @@ class EmailService:
             corporate_name: Hiring company shown in the email body.
             raise_on_error: When True, propagate SES failures.
             origin: Optional frontend origin for assessment links.
+            close_time: Package assessment window end (UTC), if enforced.
 
         Returns:
             True when SES accepted the message; False when unconfigured or failed.
@@ -93,6 +96,7 @@ class EmailService:
             access_code=access_code,
             corporate_name=company,
             origin=origin,
+            close_time=close_time,
         )
         try:
             result = await send_transactional_email_async(

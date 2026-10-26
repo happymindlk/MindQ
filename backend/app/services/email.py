@@ -10,6 +10,7 @@ import functools
 import html
 import logging
 import re
+from datetime import datetime, timezone
 from email.utils import parseaddr
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -18,6 +19,26 @@ from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 
 from app.config import settings
+
+
+def format_deadline_timestamp(close_time: datetime | None) -> str:
+    """Format a package close time for invite emails.
+
+    Args:
+        close_time: Assessment window end in UTC (or naive treated as UTC).
+
+    Returns:
+        Human-readable deadline string, or ``No fixed deadline`` when unset.
+    """
+    if close_time is None:
+        return "No fixed deadline"
+    when = close_time
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    else:
+        when = when.astimezone(timezone.utc)
+    # %d / %I are zero-padded; drop the padding for readability.
+    return when.strftime("%B %d, %Y at %I:%M %p UTC").replace(" 0", " ")
 
 logger = logging.getLogger("app.email")
 
@@ -151,7 +172,7 @@ _HEADING_STYLE = "font-size:22px;margin:0 0 12px;color:#1F2937;"
 _BODY_STYLE = "font-size:14px;line-height:1.55;color:#4B5563;"
 _MUTED_STYLE = "font-size:12px;color:#6B7280;"
 _BUTTON_STYLE = (
-    "display:inline-block;padding:12px 20px;background:#0078D4;color:#FFFFFF;"
+    "display:inline-block;padding:12px 20px;background:#7048E2;color:#FFFFFF;"
     "text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;"
 )
 _CODE_BOX_STYLE = (
@@ -368,13 +389,32 @@ def render_candidate_invite_html(
     access_code: str,
     corporate_name: str | None = None,
     origin: str | None = None,
+    close_time: datetime | None = None,
 ) -> str:
-    """HTML for the candidate assessment invite / magic-link email."""
+    """HTML for the candidate assessment invite / magic-link email.
+
+    Args:
+        candidate_name: Candidate display name.
+        package_title: Assessment package title.
+        access_code: Portal access code.
+        corporate_name: Hiring company shown in the body.
+        origin: Optional frontend origin for the assessment link.
+        close_time: Package assessment window end (UTC), if enforced.
+
+    Returns:
+        Full HTML email document string.
+    """
     name = html.escape(candidate_name or "there")
     title = html.escape(package_title or "your assessment")
     company = html.escape((corporate_name or "").strip() or "Your hiring team")
     code = html.escape(access_code)
     link = html.escape(_assessment_invite_link(access_code, origin=origin))
+    deadline_timestamp = html.escape(format_deadline_timestamp(close_time))
+    deadline_line = (
+        f'<p style="{_BODY_STYLE}margin:0 0 20px;">'
+        f"<strong style=\"color:#1F2937;\">Deadline:</strong> {deadline_timestamp}"
+        f"</p>"
+    )
     body = f"""
       <h1 style="{_HEADING_STYLE}">You're invited to complete an assessment</h1>
       <p style="{_BODY_STYLE}margin:0 0 20px;">
@@ -382,6 +422,7 @@ def render_candidate_invite_html(
         <strong style="color:#1F2937;">{name}</strong> to complete
         <strong style="color:#1F2937;">{title}</strong>.
       </p>
+      {deadline_line}
       <p style="{_BODY_STYLE}margin:0 0 8px;">Your access code:</p>
       <div style="{_CODE_BOX_STYLE}">
         {code}
@@ -393,7 +434,7 @@ def render_candidate_invite_html(
         <p style="font-size:13px;line-height:1.5;color:#4B5563;margin:0 0 8px;"><strong style="color:#1F2937;">Guidelines</strong></p>
         <ul style="margin:0;padding-left:18px;color:#4B5563;font-size:13px;line-height:1.55;">
           <li>Find a quiet place with a stable internet connection.</li>
-          <li>Your answers autosave — you can leave and return with the same code.</li>
+          <li>Your answers autosave - you can leave and return with the same code.</li>
           <li>Complete each section in one sitting when possible.</li>
         </ul>
       </div>

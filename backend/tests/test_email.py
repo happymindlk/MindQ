@@ -3,9 +3,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from datetime import datetime, timezone
+
 from app.services.email import (
     _source_address,
     clean_recipient_email,
+    format_deadline_timestamp,
     render_candidate_invite_html,
     render_candidate_nudge_html,
     render_hr_completion_html,
@@ -179,6 +182,26 @@ async def test_invite_email_includes_guidelines(monkeypatch):
     assert "Guidelines" in captured["html"]
     assert "Start assessment" in captured["html"]
     assert "https://mindq.pages.dev/assessment?code=AP-TEST-1" in captured["html"]
+    assert "No fixed deadline" in captured["html"]
+
+
+def test_format_deadline_timestamp_and_invite_html():
+    assert format_deadline_timestamp(None) == "No fixed deadline"
+    deadline = datetime(2026, 10, 30, 23, 59, tzinfo=timezone.utc)
+    stamp = format_deadline_timestamp(deadline)
+    assert "October" in stamp
+    assert "2026" in stamp
+    assert "UTC" in stamp
+    html = render_candidate_invite_html(
+        candidate_name="Pat",
+        package_title="Backend Pack",
+        access_code="HM-1",
+        corporate_name="Acme",
+        close_time=deadline,
+    )
+    assert "Deadline:" in html
+    assert stamp in html
+    assert "No fixed deadline" not in html
 
 
 @pytest.mark.asyncio

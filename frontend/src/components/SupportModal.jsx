@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from 'react';
-import { CheckCircle2, LifeBuoy } from 'lucide-react';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
 import { API_ORIGIN } from '../lib/api-origin';
@@ -14,6 +13,46 @@ const API_BASE = `${API_ORIGIN}/api/v1`;
 const NETWORK_ERROR_MESSAGE =
   `Couldn't reach our support team. Check your connection, or email us at ${SUPPORT_EMAIL}.`;
 
+function LifeBuoyIcon({ className }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="4" />
+      <path d="m4.93 4.93 4.24 4.24" />
+      <path d="m14.83 9.17 4.24-4.24" />
+      <path d="m14.83 14.83 4.24 4.24" />
+      <path d="m9.17 14.83-4.24 4.24" />
+    </svg>
+  );
+}
+
+function CheckIcon({ className }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <path d="m9 11 3 3L22 4" />
+    </svg>
+  );
+}
+
 export default function SupportModal() {
   const [open, setOpen] = useState(false);
   const [details, setDetails] = useState('');
@@ -21,7 +60,7 @@ export default function SupportModal() {
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const mailtoHref = useMemo(() => (open ? buildSupportMailto(readSupportContext()) : ''), [open ]);
+  const mailtoHref = useMemo(() => (open ? buildSupportMailto(readSupportContext()) : ''), [open]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -67,14 +106,17 @@ export default function SupportModal() {
           setError(null);
         }}
         className="
-          fixed bottom-4 right-4 z-50 flex items-center gap-2 h-10 px-3 rounded-md border-0
-          bg-primary text-primary-fg text-sm font-medium shadow-none
+          fixed bottom-4 right-4 z-50 flex items-center gap-2 h-10 px-3 rounded-md
+          border border-primary/20 bg-primary text-primary-fg text-sm font-medium
+          shadow-md shadow-primary/20
           hover:bg-primary-hover active:bg-primary-active
           focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas
+          dark:border-primary/40 dark:shadow-black/40
+          transition-colors duration-150
         "
         aria-label="Technical Support"
       >
-        <LifeBuoy className="w-4 h-4" aria-hidden="true" />
+        <LifeBuoyIcon className="w-4 h-4" />
         <span className="hidden sm:inline">Technical Support</span>
       </button>
 
@@ -87,7 +129,7 @@ export default function SupportModal() {
       >
         {sent ? (
           <div role="status" className="flex flex-col items-center gap-2 py-6 text-center">
-            <CheckCircle2 className="h-10 w-10 text-success" aria-hidden="true" />
+            <CheckIcon className="h-10 w-10 text-success" />
             <p className="text-sm font-medium text-foreground">Thanks! Our team will look into this.</p>
           </div>
         ) : (

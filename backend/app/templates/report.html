@@ -8,7 +8,7 @@
             size: A4;
             margin: 18mm 16mm 20mm 16mm;
             @bottom-center {
-                content: "Confidential — MindQ";
+                content: "Confidential - MindQ";
                 font-size: 8pt;
                 color: #64748b;
             }
@@ -27,7 +27,7 @@
         .brand-fallback {
             font-size: 14pt;
             font-weight: 700;
-            color: #6b4ce8;
+            color: #7048E2;
             letter-spacing: -0.02em;
         }
         .corp-name { font-size: 9pt; color: #64748b; margin-top: 2px; }
@@ -193,7 +193,7 @@
                 {% for item in category_averages %}
                 <td>
                     <div class="metric-label">{{ item.category }}</div>
-                    <div class="metric-value">{% if item.average is not none %}{{ '%.1f' | format(item.average) }}%{% else %}N/A{% endif %}</div>
+                    <div class="metric-value">{{ '%.1f' | format(item.average) }}%</div>
                 </td>
                 {% endfor %}
             </tr>
@@ -284,7 +284,7 @@
     <div class="footer">
         <span class="mq-badge">MindQ</span>
         <p class="muted" style="margin-top: 8px;">
-            This is an auto-generated Mind Queue report. This cannot be reproduced, edited or redistributed without the written consent of MindQ (Pvt.) Ltd.
+            This is an auto-generated MindQ report. This cannot be reproduced, edited or redistributed without the written consent of MindQ (Pvt.) Ltd.
         </p>
         <p class="disclaimer">
             This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.
