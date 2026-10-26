@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Brain, Code2, Plus, Sparkles, Users } from 'lucide-react';
+import { Brain, ClipboardList, Code2, Plus, Users } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ASSESSMENT_CATEGORIES, CATEGORY_LABELS } from '../types/module';
 import type { AssessmentCategory, AssessmentModule, ModuleKind } from '../types/module';
@@ -36,7 +36,7 @@ const SECTION_META: Record<SectionKey, Omit<SectionDef, 'key'>> = {
   personality: {
     label: CATEGORY_LABELS.personality,
     blurb: 'IPIP / HEXACO style Likert inventories. Usually untimed and shuffled.',
-    icon: <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-300" aria-hidden />,
+    icon: <ClipboardList className="h-4 w-4 text-emerald-600 dark:text-emerald-300" aria-hidden />,
     kind: 'psychometric',
     category: 'personality',
   },

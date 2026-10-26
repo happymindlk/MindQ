@@ -92,7 +92,7 @@ export default function AssessmentLibrary() {
       <div
         role="tablist"
         aria-label="Filter templates by category"
-        className="flex items-center gap-1 border-b border-neutral-800"
+        className="flex items-center gap-1 border-b border-border"
       >
         {TABS.map((tab) => {
           const selected = tab.id === activeTab;
@@ -106,11 +106,11 @@ export default function AssessmentLibrary() {
               className={`-mb-px inline-flex items-center gap-2 px-3 py-2 text-sm border-b-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-t-md ${
                 selected
                   ? 'border-primary text-foreground font-semibold'
-                  : 'border-transparent text-neutral-400 hover:text-foreground'
+                  : 'border-transparent text-muted hover:text-foreground'
               }`}
             >
               {tab.label}
-              <span className="font-mono tabular-nums text-[11px] text-neutral-500">
+              <span className="font-mono tabular-nums text-[11px] text-muted">
                 {tabCounts[tab.id] ?? 0}
               </span>
             </button>
@@ -130,7 +130,6 @@ export default function AssessmentLibrary() {
         isOpen={typePickerOpen}
         onClose={() => setTypePickerOpen(false)}
         title="New Assessment"
-        contentClassName="bg-neutral-900 border border-neutral-800 text-neutral-100"
       >
         <div className="grid gap-2 sm:grid-cols-2">
           {CATEGORY_OPTIONS.map(({ id, label, description, icon: Icon }) => (
@@ -138,11 +137,11 @@ export default function AssessmentLibrary() {
               key={id}
               type="button"
               onClick={() => openCreate(id)}
-              className="flex flex-col items-start gap-2 rounded-lg border border-neutral-800 bg-canvas p-4 text-left transition-colors hover:border-primary hover:bg-surface-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="flex flex-col items-start gap-2 rounded-lg border border-border bg-surface p-4 text-left transition-colors hover:border-primary hover:bg-surface-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <Icon className="w-5 h-5 text-primary" aria-hidden />
               <span className="text-sm font-semibold text-foreground">{label}</span>
-              <span className="text-xs text-neutral-400 leading-relaxed">{description}</span>
+              <span className="text-xs text-muted leading-relaxed">{description}</span>
             </button>
           ))}
         </div>

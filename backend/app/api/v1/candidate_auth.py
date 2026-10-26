@@ -122,7 +122,7 @@ async def verify_candidate_otp(
             candidate.access_code,
             package.title if package else "your assessment",
             origin=resolve_frontend_origin(request),
-            close_time=package.close_time if package else None,
+            close_time=getattr(package, "close_time", None) if package else None,
         )
     candidate.token = issue_candidate_token(candidate)
     logger.info(

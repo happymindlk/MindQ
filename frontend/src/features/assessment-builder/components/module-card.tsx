@@ -125,10 +125,10 @@ function ModuleCardImpl({ module, active = false, onOpen, onArchive, trailing, c
           type="button"
           onClick={() => onArchive(module.id)}
           className="absolute bottom-3 right-3 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-slate-500 transition-colors hover:bg-rose-500/10 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
-          aria-label={`Archive ${module.title}`}
+          aria-label={`Delete ${module.title}`}
         >
           <Archive className="h-3.5 w-3.5" aria-hidden />
-          Archive
+          Delete
         </button>
       )}
     </article>

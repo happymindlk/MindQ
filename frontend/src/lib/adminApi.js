@@ -134,7 +134,7 @@ export const adminApi = {
     const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
     a.download = encodedName
       ? decodeURIComponent(encodedName)
-      : `Mind Q Report - ${candidateId}.${isHtml ? 'html' : 'pdf'}`;
+      : `MindQ Report - ${candidateId}.${isHtml ? 'html' : 'pdf'}`;
     a.click();
     window.URL.revokeObjectURL(url);
     return { isHtml, synthesisStatus };

@@ -57,11 +57,14 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
     setShuffle(d.shuffle);
   };
 
-  const submit = () => {
-    if (!title.trim()) return;
-    void onCreate({
-      title,
-      description,
+  const submit = async () => {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle || creating) return;
+    // Persist the user-entered title exactly (trimmed) so technical drafts
+    // never land as an empty / default label in the Standard Library.
+    await onCreate({
+      title: trimmedTitle,
+      description: description.trim(),
       moduleKind: draft.kind,
       assessmentCategory: draft.kind === 'psychometric' ? category : null,
       settings: {
@@ -88,7 +91,7 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
           <NeonButton variant="ghost" onClick={() => onOpenChange(false)} disabled={creating}>
             Cancel
           </NeonButton>
-          <NeonButton onClick={submit} disabled={!title.trim()} loading={creating}>
+          <NeonButton onClick={() => void submit()} disabled={!title.trim() || creating} loading={creating}>
             Create draft
           </NeonButton>
         </>
@@ -98,7 +101,7 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
         className="space-y-4"
         onSubmit={(e) => {
           e.preventDefault();
-          submit();
+          void submit();
         }}
       >
         <div>
@@ -115,7 +118,7 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
         </div>
         {draft.kind === 'psychometric' && (
           <fieldset>
-            <legend className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">Category</legend>
+            <legend className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Category</legend>
             <div className="grid grid-cols-3 gap-2">
               {ASSESSMENT_CATEGORIES.map((c) => (
                 <button
@@ -123,10 +126,10 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
                   type="button"
                   aria-pressed={category === c}
                   onClick={() => applyCategory(c)}
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                  className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
                     category === c
-                      ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-100 shadow-[0_0_12px_rgba(6,182,212,0.25)]'
-                      : 'border-slate-700 text-slate-300 hover:border-slate-600'
+                      ? 'border-primary/50 bg-primary/10 text-primary-text'
+                      : 'border-border text-muted hover:border-primary/40 hover:text-foreground'
                   }`}
                 >
                   {CATEGORY_LABELS[c]}
@@ -176,7 +179,7 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
         </div>
         <Switch id="new-module-shuffle" checked={shuffle} onChange={setShuffle} label="Randomize Question Order" />
         {draft.kind === 'psychometric' && (
-          <div className="space-y-4 border-t border-slate-800 pt-4">
+          <div className="space-y-4 border-t border-border pt-4">
             <div className="space-y-3">
               <Switch
                 id="new-module-top-disclaimer"

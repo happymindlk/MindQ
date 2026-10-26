@@ -117,10 +117,10 @@ export function ModuleSettingsPanel({
   return (
     <section
       aria-labelledby={`${moduleId}-settings-title`}
-      className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/80 p-4 backdrop-blur-md"
+      className="space-y-4 rounded-xl border border-border bg-surface-raised p-4"
     >
       <header className="flex items-center justify-between gap-2">
-        <h3 id={`${moduleId}-settings-title`} className="text-sm font-semibold text-white">
+        <h3 id={`${moduleId}-settings-title`} className="font-display text-sm font-semibold text-foreground">
           Timing &amp; Delivery
         </h3>
         {locked && (
@@ -202,8 +202,8 @@ export function ModuleSettingsPanel({
       />
 
       {moduleKind === 'psychometric' && (
-        <div className="space-y-4 border-t border-slate-800 pt-4">
-          <h4 className="text-sm font-semibold text-white">Candidate notices</h4>
+        <div className="space-y-4 border-t border-border pt-4">
+          <h4 className="text-sm font-semibold text-foreground">Candidate notices</h4>
 
           <div className="space-y-3">
             <Switch
