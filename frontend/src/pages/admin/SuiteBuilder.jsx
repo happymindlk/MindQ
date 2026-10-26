@@ -122,9 +122,53 @@ function CompanySelect({ corporates, value, disabled, onChange }) {
   );
 }
 
+const MODULE_EDIT_FLUSH_MS = 120;
+
 function ModuleChip({ mod, questions, editable, onRemove, onQuestionsChange, dragHandle }) {
   const [open, setOpen] = useState(false);
-  const items = Array.isArray(questions) ? questions : [];
+  const propsItems = Array.isArray(questions) ? questions : [];
+  // Local draft so keystrokes do not re-render the entire suite tree.
+  const [localItems, setLocalItems] = useState(propsItems);
+  const localRef = useRef(localItems);
+  const flushTimerRef = useRef(null);
+  const propsSig = `${mod.id}:${propsItems.length}:${propsItems.map((q) => q.id).join(',')}`;
+
+  useEffect(() => {
+    setLocalItems(propsItems);
+    localRef.current = propsItems;
+  }, [propsSig]);
+
+  useEffect(
+    () => () => {
+      if (flushTimerRef.current != null) window.clearTimeout(flushTimerRef.current);
+    },
+    [],
+  );
+
+  const flushToParent = useCallback(() => {
+    if (!onQuestionsChange) return;
+    onQuestionsChange(mod.id, localRef.current);
+  }, [mod.id, onQuestionsChange]);
+
+  const scheduleFlush = useCallback(() => {
+    if (!onQuestionsChange) return;
+    if (flushTimerRef.current != null) window.clearTimeout(flushTimerRef.current);
+    flushTimerRef.current = window.setTimeout(() => {
+      flushTimerRef.current = null;
+      flushToParent();
+    }, MODULE_EDIT_FLUSH_MS);
+  }, [flushToParent, onQuestionsChange]);
+
+  const updateLocal = useCallback(
+    (next) => {
+      localRef.current = next;
+      setLocalItems(next);
+      scheduleFlush();
+    },
+    [scheduleFlush],
+  );
+
+  const items = localItems;
   const canExpand = items.length > 0;
 
   return (
@@ -191,7 +235,6 @@ function ModuleChip({ mod, questions, editable, onRemove, onQuestionsChange, dra
                   className={`${fieldClass} resize-y min-h-[40px] text-xs`}
                   value={prompt}
                   onChange={(e) => {
-                    if (!onQuestionsChange) return;
                     const next = items.map((row, i) => {
                       if (i !== index) return row;
                       const updated = { ...row };
@@ -202,8 +245,9 @@ function ModuleChip({ mod, questions, editable, onRemove, onQuestionsChange, dra
                       }
                       return updated;
                     });
-                    onQuestionsChange(mod.id, next);
+                    updateLocal(next);
                   }}
+                  onBlur={flushToParent}
                 />
                 {Array.isArray(q.options) && q.options.length > 0 && (
                   <div className="grid grid-cols-1 gap-1">
@@ -214,15 +258,15 @@ function ModuleChip({ mod, questions, editable, onRemove, onQuestionsChange, dra
                         className={`${fieldClass} h-7 text-xs`}
                         value={opt ?? ''}
                         onChange={(e) => {
-                          if (!onQuestionsChange) return;
                           const next = items.map((row, i) => {
                             if (i !== index) return row;
                             const opts = [...(row.options || [])];
                             opts[oi] = e.target.value;
                             return { ...row, options: opts };
                           });
-                          onQuestionsChange(mod.id, next);
+                          updateLocal(next);
                         }}
+                        onBlur={flushToParent}
                       />
                     ))}
                   </div>
@@ -641,11 +685,18 @@ export default function SuiteBuilder() {
       if (packageId) {
         try {
           const result = await adminApi.addTemplateToPackage(packageId, mod.id);
+          // Only adopt server questions when the user has not started editing this module.
           if (Array.isArray(result.questions)) {
-            setModuleOverrides((prev) => ({
-              ...prev,
-              [mod.id]: structuredClone(result.questions),
-            }));
+            setModuleOverrides((prev) => {
+              const current = prev[mod.id];
+              const untouched =
+                !current ||
+                (Array.isArray(mod.questions) &&
+                  current.length === mod.questions.length &&
+                  current.every((q, i) => (q.prompt || q.text) === (mod.questions[i]?.prompt || mod.questions[i]?.text)));
+              if (!untouched) return prev;
+              return { ...prev, [mod.id]: result.questions };
+            });
           }
         } catch (err) {
           // Already attached is fine; other errors surface to the user.
@@ -699,23 +750,27 @@ export default function SuiteBuilder() {
     [openTime, closeTime],
   );
 
+  // Read the latest form via formSnapshotRef so this callback identity stays
+  // stable; field edits schedule via a separate effect without recreating persist.
   const persist = useCallback(async () => {
+    const snap = formSnapshotRef.current;
+    const windowError = scheduleWindowError(snap.openTime, snap.closeTime);
     if (
       publishLeaving.current ||
-      !isPackageSaveAllowed({ status, isLocked: locked }) ||
-      !corporateId ||
-      !title.trim() ||
-      scheduleError
+      !isPackageSaveAllowed({ status: snap.status, isLocked: locked }) ||
+      !snap.corporateId ||
+      !String(snap.title || '').trim() ||
+      windowError
     ) {
       return null;
     }
     setSaveState('saving');
     const signal = draftSave.current.beginRequest();
     const schedulePayload = {
-      open_time: fromSriLankaInputValue(openTime),
-      close_time: fromSriLankaInputValue(closeTime),
+      open_time: fromSriLankaInputValue(snap.openTime),
+      close_time: fromSriLankaInputValue(snap.closeTime),
     };
-    const customPayload = customQuestions
+    const customPayload = (snap.customQuestions || [])
       .filter((q) => String(q.prompt || '').trim())
       .map((q) => ({
         id: q.id || undefined,
@@ -727,23 +782,24 @@ export default function SuiteBuilder() {
         weight: Number(q.weight) || 3,
       }));
     const overridesPayload = {};
-    cartIds.forEach((id) => {
-      if (Array.isArray(moduleOverrides[id])) {
-        overridesPayload[id] = moduleOverrides[id];
+    (snap.cartIds || []).forEach((id) => {
+      if (Array.isArray(snap.moduleOverrides?.[id])) {
+        overridesPayload[id] = snap.moduleOverrides[id];
       }
     });
+    const pkgId = packageId;
     try {
       let saved;
-      if (packageId) {
+      if (pkgId) {
         saved = await adminApi.updateAdminPackage(
-          packageId,
+          pkgId,
           {
-            title: title.trim(),
-            description,
+            title: String(snap.title).trim(),
+            description: snap.description,
             ...schedulePayload,
-            target_role: targetRole.trim() || null,
-            corporate_id: corporateId,
-            module_ids: cartIds,
+            target_role: String(snap.targetRole || '').trim() || null,
+            corporate_id: snap.corporateId,
+            module_ids: snap.cartIds,
             custom_questions: customPayload,
             module_question_overrides: overridesPayload,
           },
@@ -752,12 +808,12 @@ export default function SuiteBuilder() {
       } else {
         saved = await adminApi.saveDraftPackage(
           {
-            corporate_id: corporateId,
-            title: title.trim(),
-            description,
+            corporate_id: snap.corporateId,
+            title: String(snap.title).trim(),
+            description: snap.description,
             ...schedulePayload,
-            target_role: targetRole.trim() || null,
-            module_ids: cartIds,
+            target_role: String(snap.targetRole || '').trim() || null,
+            module_ids: snap.cartIds,
             custom_questions: customPayload,
             module_question_overrides: overridesPayload,
           },
@@ -766,19 +822,19 @@ export default function SuiteBuilder() {
         );
       }
       if (publishLeaving.current) return null;
-      if (saved.id !== packageId) setPackageId(saved.id);
+      if (saved.id !== pkgId) setPackageId(saved.id);
       setSaveState('saved');
       if (!loadPackageId && saved.id) {
         writeSuiteDraft(null, {
-          corporateId,
-          title,
-          description,
-          targetRole,
-          openTime,
-          closeTime,
-          cartIds,
-          moduleOverrides,
-          customQuestions,
+          corporateId: snap.corporateId,
+          title: snap.title,
+          description: snap.description,
+          targetRole: snap.targetRole,
+          openTime: snap.openTime,
+          closeTime: snap.closeTime,
+          cartIds: snap.cartIds,
+          moduleOverrides: snap.moduleOverrides,
+          customQuestions: snap.customQuestions,
         });
         migrateSuiteDraft(saved.id);
         skipSave.current = true;
@@ -792,23 +848,7 @@ export default function SuiteBuilder() {
       setSaveState('error');
       throw err;
     }
-  }, [
-    corporateId,
-    title,
-    description,
-    openTime,
-    closeTime,
-    scheduleError,
-    targetRole,
-    cartIds,
-    customQuestions,
-    moduleOverrides,
-    status,
-    locked,
-    packageId,
-    loadPackageId,
-    navigate,
-  ]);
+  }, [locked, packageId, loadPackageId, navigate]);
 
   useEffect(() => {
     if (skipSave.current) {
@@ -827,7 +867,21 @@ export default function SuiteBuilder() {
       // Only clear the debounce timer here — abort in-flight on publish/unmount.
       controller.clearScheduled();
     };
-  }, [persist, status, locked]);
+  }, [
+    persist,
+    status,
+    locked,
+    corporateId,
+    title,
+    description,
+    targetRole,
+    openTime,
+    closeTime,
+    cartIds,
+    moduleOverrides,
+    customQuestions,
+    packageId,
+  ]);
 
   const onComposerAdd = useCallback(
     (moduleId, nextIds) => {
@@ -922,6 +976,34 @@ export default function SuiteBuilder() {
     }
   };
 
+  const onDiscardDraft = () => {
+    if (locked) return;
+    const ok = window.confirm(
+      'Discard this unsaved suite draft? Title, modules, and schedule changes will be cleared from this browser.',
+    );
+    if (!ok) return;
+    draftSave.current.cancelAll();
+    skipSave.current = true;
+    skipCacheWrite.current = true;
+    clearSuiteDraft(packageId || loadPackageId || null);
+    clearSuiteDraft(null);
+    setCorporateId('');
+    setTitle('');
+    setDescription('');
+    setTargetRole('');
+    setOpenTime('');
+    setCloseTime('');
+    setCartIds([]);
+    setModuleOverrides({});
+    setCustomQuestions([]);
+    setSaveState('idle');
+    setPublishError(null);
+    toast({ title: 'Draft discarded', variant: 'success' });
+    if (packageId || loadPackageId) {
+      navigate('/admin/packages/create', { replace: true });
+    }
+  };
+
   const reviewUrl = share?.review_path
     ? `${window.location.origin}${share.review_path}`
     : '';
@@ -966,6 +1048,11 @@ export default function SuiteBuilder() {
               isLoading={isUpdating}
             >
               Update Draft
+            </Button>
+          )}
+          {!locked && (
+            <Button size="sm" variant="ghost" onClick={onDiscardDraft}>
+              Discard Draft
             </Button>
           )}
           <Button

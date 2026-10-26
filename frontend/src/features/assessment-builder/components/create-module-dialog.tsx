@@ -1,4 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import {
+  clearBuilderDraft,
+  readBuilderDraft,
+  writeBuilderDraft,
+} from '../lib/builder-draft-cache';
 import {
   ASSESSMENT_CATEGORIES,
   CATEGORY_LABELS,
@@ -30,22 +35,64 @@ interface CreateModuleDialogProps {
 
 /** Mount with a `key` per draft so defaults re-derive from the chosen category. */
 export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: CreateModuleDialogProps) {
-  const initialCategory: AssessmentCategory | null =
-    draft?.kind === 'psychometric' ? draft.category ?? 'behavioral' : null;
-  const defaults = initialCategory ? CATEGORY_DEFAULTS[initialCategory] : { minutes: 20, timerMode: 'flexible' as const, shuffle: false };
+  const cached = draft ? readBuilderDraft() : null;
+  const hydrate = cached && draft && cached.kind === draft.kind ? cached : null;
 
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const initialCategory: AssessmentCategory | null =
+    (hydrate?.category as AssessmentCategory | null) ??
+    (draft?.kind === 'psychometric' ? draft.category ?? 'behavioral' : null);
+  const defaults = initialCategory
+    ? CATEGORY_DEFAULTS[initialCategory]
+    : { minutes: 20, timerMode: 'flexible' as const, shuffle: false };
+
+  const [title, setTitle] = useState(hydrate?.title ?? '');
+  const [description, setDescription] = useState(hydrate?.description ?? '');
   const [category, setCategory] = useState<AssessmentCategory | null>(initialCategory);
-  const [minutes, setMinutes] = useState(defaults.minutes);
-  const [timerMode, setTimerMode] = useState<TimerMode>(defaults.timerMode);
-  const [shuffle, setShuffle] = useState(defaults.shuffle);
-  const [showTopDisclaimer, setShowTopDisclaimer] = useState(false);
-  const [topDisclaimerText, setTopDisclaimerText] = useState(DEFAULT_TOP_DISCLAIMER_TEXT);
-  const [showConfidentialityNotice, setShowConfidentialityNotice] = useState(true);
-  const [confidentialityNoticeText, setConfidentialityNoticeText] = useState(
-    DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+  const [minutes, setMinutes] = useState(hydrate?.minutes ?? defaults.minutes);
+  const [timerMode, setTimerMode] = useState<TimerMode>(hydrate?.timerMode ?? defaults.timerMode);
+  const [shuffle, setShuffle] = useState(hydrate?.shuffle ?? defaults.shuffle);
+  const [showTopDisclaimer, setShowTopDisclaimer] = useState(hydrate?.showTopDisclaimer ?? false);
+  const [topDisclaimerText, setTopDisclaimerText] = useState(
+    hydrate?.topDisclaimerText ?? DEFAULT_TOP_DISCLAIMER_TEXT,
   );
+  const [showConfidentialityNotice, setShowConfidentialityNotice] = useState(
+    hydrate?.showConfidentialityNotice ?? true,
+  );
+  const [confidentialityNoticeText, setConfidentialityNoticeText] = useState(
+    hydrate?.confidentialityNoticeText ?? DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
+  );
+
+  useEffect(() => {
+    if (!draft) return undefined;
+    const timer = window.setTimeout(() => {
+      writeBuilderDraft({
+        kind: draft.kind,
+        category,
+        title,
+        description,
+        minutes,
+        timerMode,
+        shuffle,
+        showTopDisclaimer,
+        topDisclaimerText,
+        showConfidentialityNotice,
+        confidentialityNoticeText,
+      });
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [
+    draft,
+    category,
+    title,
+    description,
+    minutes,
+    timerMode,
+    shuffle,
+    showTopDisclaimer,
+    topDisclaimerText,
+    showConfidentialityNotice,
+    confidentialityNoticeText,
+  ]);
 
   if (!draft) return null;
 
@@ -55,6 +102,11 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
     setMinutes(d.minutes);
     setTimerMode(d.timerMode);
     setShuffle(d.shuffle);
+  };
+
+  const discard = () => {
+    clearBuilderDraft();
+    onOpenChange(false);
   };
 
   const submit = async () => {
@@ -78,6 +130,7 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
           confidentialityNoticeText.trim() || DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
       },
     });
+    clearBuilderDraft();
   };
 
   return (
@@ -88,6 +141,9 @@ export function CreateModuleDialog({ draft, onOpenChange, onCreate, creating }: 
       description="Modules start as v1 drafts. Publish to lock and offer them to assessment suites."
       footer={
         <>
+          <NeonButton variant="ghost" onClick={discard} disabled={creating}>
+            Discard Draft
+          </NeonButton>
           <NeonButton variant="ghost" onClick={() => onOpenChange(false)} disabled={creating}>
             Cancel
           </NeonButton>

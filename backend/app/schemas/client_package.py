@@ -304,6 +304,7 @@ class ClientDashboardPackage(BaseModel):
     title: str
     access_code: str
     target_role: str | None = None
+    close_time: datetime | None = None
     candidate_path: str
     total_invited: int = 0
     total_completed: int = 0

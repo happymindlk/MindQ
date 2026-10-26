@@ -306,11 +306,22 @@ async def test_get_client_dashboard_groups_and_scopes_by_tenant():
     cand_done, cand_new = uuid4(), uuid4()
 
     corporate = SimpleNamespace(id=corp_id, name="Acme", logo_url=None)
+    deadline = datetime(2026, 10, 30, 23, 59, tzinfo=timezone.utc)
     packages = [
         SimpleNamespace(
-            id=pkg_full, title="Backend", access_code="ABC123", target_role="Engineer"
+            id=pkg_full,
+            title="Backend",
+            access_code="ABC123",
+            target_role="Engineer",
+            close_time=deadline,
         ),
-        SimpleNamespace(id=pkg_empty, title="Design", access_code="XYZ789", target_role=None),
+        SimpleNamespace(
+            id=pkg_empty,
+            title="Design",
+            access_code="XYZ789",
+            target_role=None,
+            close_time=None,
+        ),
     ]
     candidates = [
         SimpleNamespace(
@@ -346,6 +357,7 @@ async def test_get_client_dashboard_groups_and_scopes_by_tenant():
     full = by_id[pkg_full]
     assert full.total_invited == 2
     assert full.total_completed == 1
+    assert full.close_time == deadline
     assert full.candidate_path == "/portal?code=ABC123"
     rows = {c.candidate_id: c for c in full.candidates}
     assert rows[cand_done].status == "completed"
@@ -356,6 +368,7 @@ async def test_get_client_dashboard_groups_and_scopes_by_tenant():
 
     empty = by_id[pkg_empty]
     assert empty.total_invited == 0
+    assert empty.close_time is None
     assert empty.candidates == []
 
 

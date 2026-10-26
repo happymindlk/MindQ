@@ -238,7 +238,10 @@ export function AssessmentRunner({
       <div className="flex items-center justify-between gap-3">
         <button
           type="button"
-          onClick={() => void flushDirty().then(onExit)}
+          onClick={() => {
+            flushDirtyInBackground();
+            onExit();
+          }}
           className="flex items-center rounded text-xs text-muted transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary"
         >
           <ChevronLeft className="mr-0.5 h-4 w-4" /> {exitLabel}

@@ -68,8 +68,8 @@ function ModuleTitleEditor({ moduleId, title, locked, saving, onSave, onLockedEd
           Assessment title
         </h3>
         {locked && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-300">
-            <Lock className="h-3 w-3" aria-hidden /> Locked
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-400">
+            <Lock className="h-3 w-3 text-[#7048E2] dark:text-[#AF60BB]" aria-hidden /> Locked
           </span>
         )}
       </header>
@@ -93,7 +93,7 @@ function ModuleTitleEditor({ moduleId, title, locked, saving, onSave, onLockedEd
           }}
           aria-describedby={`${moduleId}-title-help`}
         />
-        <p id={`${moduleId}-title-help`} className="mt-1 text-[11px] text-slate-500">
+        <p id={`${moduleId}-title-help`} className="mt-1 text-[11px] text-slate-600 dark:text-slate-400">
           {locked
             ? 'Published versions keep their title. Clone as a new version, rename the draft, then publish it.'
             : 'Renaming applies to this draft version only.'}
@@ -151,8 +151,8 @@ export function ModuleDescriptionEditor({
           Assessment description
         </h3>
         {locked && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-300">
-            <Lock className="h-3 w-3" aria-hidden /> Locked
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-400">
+            <Lock className="h-3 w-3 text-[#7048E2] dark:text-[#AF60BB]" aria-hidden /> Locked
           </span>
         )}
       </header>
@@ -177,7 +177,7 @@ export function ModuleDescriptionEditor({
           }}
           aria-describedby={`${moduleId}-description-help`}
         />
-        <p id={`${moduleId}-description-help`} className="mt-1 text-[11px] text-slate-500">
+        <p id={`${moduleId}-description-help`} className="mt-1 text-[11px] text-slate-600 dark:text-slate-400">
           {locked
             ? 'Published versions keep their description. Clone as a new version, edit the draft, then publish it.'
             : 'Leave blank to clear the description. Editing applies to this draft version only.'}
@@ -415,11 +415,13 @@ export function ModuleEditorDrawer({
         {module && settings && (
           <div className="space-y-6">
             {locked && (
-              <div className="flex items-start gap-3 rounded-xl border border-cyan-500/40 bg-cyan-500/5 p-4 shadow-[0_0_12px_rgba(6,182,212,0.15)]">
-                <Lock className="mt-0.5 h-4 w-4 shrink-0 text-cyan-300" aria-hidden />
+              <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+                <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[#7048E2] dark:text-[#AF60BB]" aria-hidden />
                 <div className="space-y-1 text-sm">
-                  <p className="font-semibold text-cyan-100">Live Test Safety Gate</p>
-                  <p className="text-slate-300">
+                  <p className="font-display font-semibold text-slate-900 dark:text-slate-100">
+                    Live Test Safety Gate
+                  </p>
+                  <p className="text-slate-700 dark:text-slate-300">
                     {module.status === 'published' ? 'This version is published.' : 'This version is linked to a live suite.'}{' '}
                     Questions, keys, and timing are read-only to protect collected scores.
                   </p>
