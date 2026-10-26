@@ -89,13 +89,18 @@ export default function TestDashboard() {
       <PageHeader title={`Hello, ${candidate_name}`} />
 
       <div className="rounded-lg border border-border bg-surface px-4 py-3">
-        <h3 className="text-sm font-semibold text-foreground">Before you start</h3>
+        <h3 className="text-sm font-semibold text-foreground">Before You Begin</h3>
         <ul className="mt-2 text-xs text-muted space-y-1.5 list-disc list-inside leading-relaxed">
           <li>Ensure you have a stable internet connection.</li>
-          <li>Find a quiet place where you won&apos;t be interrupted.</li>
+          <li>Choose a quiet place where you can concentrate without interruptions.</li>
           <li>
             Each assessment is timed and the timer keeps running if you leave the page, so finish
             it in one sitting.
+          </li>
+          <li>
+            Answer each question honestly and based on your own abilities, preferences, or typical
+            behaviour. There are no right or wrong answers for questions that assess your personality
+            or behavioural preferences.
           </li>
         </ul>
       </div>
@@ -126,21 +131,6 @@ export default function TestDashboard() {
           ))}
         </div>
       )}
-
-      <div className="rounded-lg border border-border bg-surface px-4 py-3">
-        <h3 className="text-sm font-semibold text-foreground">Before You Begin</h3>
-        <div className="mt-2 space-y-2 text-xs text-muted leading-relaxed">
-          <p>
-            Choose a quiet place where you can concentrate without interruptions and ensure you have
-            a stable internet connection before starting.
-          </p>
-          <p>
-            Answer each question honestly and based on your own abilities, preferences, or typical
-            behaviour. There are no right or wrong answers for questions that assess your personality
-            or behavioural preferences.
-          </p>
-        </div>
-      </div>
     </div>
   );
 }

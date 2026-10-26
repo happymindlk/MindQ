@@ -67,9 +67,9 @@ export default function SupportModal() {
           setError(null);
         }}
         className="
-          fixed bottom-4 right-4 z-50 flex items-center gap-2 h-10 px-3 rounded-md
-          bg-primary text-primary-fg text-sm font-medium
-          hover:bg-primary-hover
+          fixed bottom-4 right-4 z-50 flex items-center gap-2 h-10 px-3 rounded-md border-0
+          bg-primary text-primary-fg text-sm font-medium shadow-none
+          hover:bg-primary-hover active:bg-primary-active
           focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas
         "
         aria-label="Technical Support"

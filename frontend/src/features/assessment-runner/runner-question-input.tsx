@@ -129,7 +129,7 @@ export function RunnerQuestionInput(props: RunnerQuestionInputProps) {
             disabled={disabled}
             value={typeof value === 'string' ? value : value == null ? '' : String(value)}
             onChange={(e) => onChange(e.target.value)}
-            className="w-full rounded-md border border-border bg-canvas px-4 py-3 font-mono text-base text-slate-900 dark:text-slate-100 placeholder:text-muted focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-60"
+            className="w-full select-text rounded-md border border-border bg-canvas px-4 py-3 font-mono text-base text-slate-900 dark:text-slate-100 placeholder:text-muted focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-60"
             placeholder="Type a single answer"
           />
         </div>
@@ -139,7 +139,7 @@ export function RunnerQuestionInput(props: RunnerQuestionInputProps) {
       return (
         <div className="mt-6">
           <textarea
-            className="h-48 w-full resize-none rounded-md border border-border bg-canvas p-4 text-base leading-relaxed text-slate-900 dark:text-slate-100 placeholder:text-muted focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-60"
+            className="h-48 w-full select-text resize-none rounded-md border border-border bg-canvas p-4 text-base leading-relaxed text-slate-900 dark:text-slate-100 placeholder:text-muted focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-60"
             placeholder="Type your answer here…"
             disabled={disabled}
             value={typeof value === 'string' ? value : ''}

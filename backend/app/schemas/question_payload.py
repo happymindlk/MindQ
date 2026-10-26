@@ -127,6 +127,37 @@ def _validate_media_url(value: str | None) -> str | None:
     return url
 
 
+def rewrite_local_media_url(value: str | None) -> str | None:
+    """Rewrite localhost assessment-media URLs to the configured Supabase origin.
+
+    Seeded/local admin uploads often persist ``http://127.0.0.1:54321/...`` paths that
+    candidates cannot fetch from deployed portals. Map those hosts onto
+    ``settings.SUPABASE_URL`` while leaving already-remote URLs untouched.
+
+    Args:
+        value: Raw ``media_url`` from stored question JSON.
+
+    Returns:
+        A candidate-reachable URL, or None when blank.
+    """
+    if value is None:
+        return None
+    url = str(value).strip()
+    if not url:
+        return None
+    parsed = urlparse(url)
+    media_marker = f"/storage/v1/object/public/{MEDIA_BUCKET}/"
+    if parsed.hostname not in ("127.0.0.1", "localhost") or media_marker not in parsed.path:
+        return url
+    base = (settings.SUPABASE_URL or "").rstrip("/")
+    if not base:
+        return url
+    suffix = parsed.path
+    if parsed.query:
+        suffix = f"{suffix}?{parsed.query}"
+    return f"{base}{suffix}"
+
+
 class _QuestionBase(BaseModel):
     """Fields shared by every builder question type."""
 

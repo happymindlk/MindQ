@@ -119,6 +119,20 @@ def test_media_url_accepts_project_bucket():
     assert payload.to_storage()["media_url"].endswith("/a.png")
 
 
+def test_rewrite_local_media_url_maps_localhost_to_configured_origin(monkeypatch):
+    from app.schemas.question_payload import rewrite_local_media_url
+
+    monkeypatch.setattr(
+        "app.schemas.question_payload.settings.SUPABASE_URL",
+        "https://proj.supabase.co",
+    )
+    local = "http://127.0.0.1:54321" + MEDIA_PATH
+    assert rewrite_local_media_url(local) == "https://proj.supabase.co" + MEDIA_PATH
+    remote = "https://proj.supabase.co" + MEDIA_PATH
+    assert rewrite_local_media_url(remote) == remote
+    assert rewrite_local_media_url(None) is None
+
+
 def test_unknown_fields_are_forbidden():
     with pytest.raises(ValidationError):
         question_payload_adapter.validate_python(

@@ -80,7 +80,7 @@ describe('TestDashboard deadline', () => {
     expect(navigate).toHaveBeenCalledWith('/portal/test/t2');
   });
 
-  it('orders guidelines: Before you start between greeting and counter, Before You Begin below the tests', async () => {
+  it('places a single Before You Begin card between greeting and counter', async () => {
     vi.mocked(api.candidate.getDashboard).mockResolvedValue({
       candidate_name: 'Ada Lovelace',
       open_time: null,
@@ -91,20 +91,22 @@ describe('TestDashboard deadline', () => {
     renderDashboard();
 
     const greeting = await screen.findByText(/hello, ada lovelace/i);
-    const beforeYouStart = screen.getByText('Before you start');
+    const beforeYouBegin = screen.getByText('Before You Begin');
     const counter = screen.getByText(/you have 2 tests remaining in your assessment suite\./i);
     const firstTest = screen.getByText('Cognitive');
-    const beforeYouBegin = screen.getByText('Before You Begin');
 
-    expect(greeting.compareDocumentPosition(beforeYouStart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(beforeYouStart.compareDocumentPosition(counter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(greeting.compareDocumentPosition(beforeYouBegin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(beforeYouBegin.compareDocumentPosition(counter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(counter.compareDocumentPosition(firstTest) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(firstTest.compareDocumentPosition(beforeYouBegin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Before you start')).not.toBeInTheDocument();
     expect(
       screen.getByText(/choose a quiet place where you can concentrate without interruptions/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/answer each question honestly and based on your own abilities/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/each assessment is timed and the timer keeps running if you leave the page/i),
     ).toBeInTheDocument();
   });
 

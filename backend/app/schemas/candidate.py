@@ -3,6 +3,8 @@ from datetime import datetime
 from typing import Annotated, Any, Literal, Optional
 from pydantic import BaseModel, EmailStr, ConfigDict, Field, StringConstraints, field_validator
 
+from app.schemas.question_payload import rewrite_local_media_url
+
 
 # Keep in sync with ``client_package.ANSWER_KEYS`` — candidate portal defense in depth.
 _ANSWER_KEY_ALIASES = (
@@ -39,6 +41,8 @@ def strip_answer_keys(questions: list[Any] | None) -> list[dict[str, Any]]:
         item = dict(raw)
         for key in _ANSWER_KEY_ALIASES:
             item.pop(key, None)
+        if "media_url" in item:
+            item["media_url"] = rewrite_local_media_url(item.get("media_url"))
         sanitized.append(item)
     return sanitized
 
