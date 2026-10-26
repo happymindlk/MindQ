@@ -50,18 +50,14 @@ logger = logging.getLogger("app.hr_otp")
 
 # #region agent log
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEBUG_LOG_PATHS = (
-    _REPO_ROOT / "debug-a1ab83.log",
-    _REPO_ROOT / ".cursor" / "debug-a1ab83.log",
-    Path.cwd() / "debug-a1ab83.log",
-)
-_DEBUG_RUN_ID = "post-fix"
+_DEBUG_LOG_PATH = _REPO_ROOT / "debug-410e50.log"
+_DEBUG_RUN_ID = "pre-fix"
 
 
 def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict) -> None:
     """Append one NDJSON debug line for HR OTP gate diagnosis."""
     payload = {
-        "sessionId": "a1ab83",
+        "sessionId": "410e50",
         "runId": _DEBUG_RUN_ID,
         "hypothesisId": hypothesis_id,
         "location": location,
@@ -69,15 +65,11 @@ def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict) -> N
         "data": data,
         "timestamp": int(time.time() * 1000),
     }
-    line = json.dumps(payload, default=str) + "\n"
-    for path in _DEBUG_LOG_PATHS:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(line)
-            break
-        except Exception:
-            continue
+    try:
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
 
 
 # #endregion
@@ -500,9 +492,52 @@ async def request_hr_otp(db: AsyncSession, email: str) -> HrOtpChallengeResponse
             send cap, 503 mail or identity resolver down.
     """
     normalized_email = clean_recipient_email(email).lower()
+    # #region agent log
+    _agent_dbg(
+        "A",
+        "hr_otp.py:request_hr_otp",
+        "send_start",
+        {
+            "email_domain": normalized_email.split("@")[-1] if "@" in normalized_email else "",
+            "email_len": len(normalized_email),
+            "raw_len": len(str(email or "")),
+            "normalized_ok": bool(normalized_email and "@" in normalized_email),
+        },
+    )
+    # #endregion
     if not normalized_email or "@" not in normalized_email:
+        # #region agent log
+        _agent_dbg(
+            "A",
+            "hr_otp.py:request_hr_otp",
+            "reject_bad_email",
+            {"reason": "unusable_email"},
+        )
+        # #endregion
         raise HrOtpError(400, _INVALID_TARGET)
-    membership, _corporate = await _resolve_membership(db, normalized_email)
+    try:
+        membership, _corporate = await _resolve_membership(db, normalized_email)
+    except HrOtpError as exc:
+        # #region agent log
+        _agent_dbg(
+            "A",
+            "hr_otp.py:request_hr_otp",
+            "reject_resolve",
+            {
+                "status_code": exc.status_code,
+                "detail_code": (
+                    "invalid_target"
+                    if exc.detail == _INVALID_TARGET
+                    else "not_hr"
+                    if exc.detail == _NOT_HR
+                    else "no_company"
+                    if exc.detail == _NO_COMPANY
+                    else "other"
+                ),
+            },
+        )
+        # #endregion
+        raise
 
     now = datetime.now(timezone.utc)
     # Serialize the send-cap check + insert per user, as in admin/candidate OTP.
