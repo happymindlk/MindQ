@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ClipboardEvent, MouseEvent, ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Loader2, Timer } from 'lucide-react';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import { MarkdownText } from '../assessment-builder/components/markdown-preview';
 import type { AnswerValue, ResponseSavePayload, ResponseSubmitPayload } from '../assessment-builder/types/telemetry';
+import { resolveAssessmentMediaUrl } from '../../lib/resolve-assessment-media-url';
 import { RunnerQuestionInput } from './runner-question-input';
 import { buildResponses, hasContent, isAnswered, isAttemptLocked, isTimeExpired } from './runner-logic';
 import { formatClock, timerTone, useModuleTimer } from './use-module-timer';
 import { useQuestionTelemetry } from './use-question-telemetry';
+
+function blockClipboard(event: ClipboardEvent | MouseEvent) {
+  event.preventDefault();
+}
 
 export interface RunnerTransport {
   autosave: (payload: ResponseSavePayload) => Promise<void>;
@@ -226,6 +231,7 @@ export function AssessmentRunner({
   const strict = test.timer_mode === 'strict';
   const tone = remaining !== null && test.duration_seconds ? timerTone(remaining, test.duration_seconds) : 'safe';
   const warning = tone === 'urgent' && remaining !== null && remaining > 0;
+  const mediaSrc = resolveAssessmentMediaUrl(current.media_url);
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4 py-6">
@@ -291,7 +297,13 @@ export function AssessmentRunner({
         </div>
       </div>
 
-      <section className="flex min-h-[320px] flex-col rounded-lg border border-border bg-surface p-4 sm:p-5" aria-labelledby={`q-${current.id}`}>
+      <section
+        className="flex min-h-[320px] flex-col rounded-lg border border-border bg-surface p-4 select-none sm:p-5"
+        aria-labelledby={`q-${current.id}`}
+        onCopy={blockClipboard}
+        onCut={blockClipboard}
+        onContextMenu={blockClipboard}
+      >
         <div className="flex-1">
           {test.show_top_disclaimer && test.top_disclaimer_text?.trim() && (
             <p
@@ -312,12 +324,12 @@ export function AssessmentRunner({
           <div id={`q-${current.id}`} className="text-lg font-medium leading-relaxed text-slate-900 dark:text-slate-100">
             <MarkdownText source={current.text} />
           </div>
-          {current.media_url && (
+          {mediaSrc && (
             <figure className="mt-4 overflow-hidden rounded-md border border-border bg-canvas">
               <img
-                src={current.media_url}
+                src={mediaSrc}
                 alt={`Figure for question ${index + 1}`}
-                className="mx-auto max-h-80 w-auto object-contain"
+                className="pointer-events-none mx-auto max-h-80 w-auto object-contain"
                 draggable={false}
               />
             </figure>
@@ -347,10 +359,10 @@ export function AssessmentRunner({
               type="button"
               onClick={() => handleNext()}
               disabled={!canAdvance || timeUp}
-              className="inline-flex h-10 items-center gap-1 rounded-md bg-primary px-4 text-sm font-medium text-primary-fg hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center gap-1 rounded-md border-0 bg-primary px-4 text-sm font-medium text-primary-fg shadow-none hover:bg-primary-hover active:bg-primary-active focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary"
             >
               {index === questions.length - 1 ? 'Submit test' : 'Next question'}
-              {index < questions.length - 1 && <ChevronRight className="h-4 w-4" />}
+              {index < questions.length - 1 && <ChevronRight className="h-4 w-4" aria-hidden />}
             </button>
           </div>
           {!canAdvance && !timeUp && (

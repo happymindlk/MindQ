@@ -3,9 +3,9 @@ import { Loader2 } from 'lucide-react';
 
 const variants = {
   primary:
-    'bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 focus-visible:ring-indigo-500',
+    'bg-primary text-primary-fg hover:bg-primary-hover active:bg-primary-active focus-visible:ring-primary',
   accent:
-    'bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 focus-visible:ring-indigo-500',
+    'bg-primary text-primary-fg hover:bg-primary-hover active:bg-primary-active focus-visible:ring-primary',
   secondary:
     'bg-surface-raised text-foreground border border-border hover:bg-surface focus-visible:ring-primary',
   danger:

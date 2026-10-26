@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import {
   DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
@@ -305,6 +305,42 @@ describe('AssessmentRunner strict expiry', () => {
     const onSubmitted = vi.fn();
     renderRunner(expiredTest(), transport, 'preview', { onSubmitted });
     await waitFor(() => expect(onSubmitted).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('AssessmentRunner content protection', () => {
+  it('disables text selection and blocks copy/cut/context menu on the question card', () => {
+    const { container } = renderRunner(test());
+    const section = container.querySelector('section');
+    expect(section).toBeTruthy();
+    expect(section!.className).toContain('select-none');
+
+    for (const type of ['copy', 'cut', 'contextMenu'] as const) {
+      const event = createEvent[type](section!);
+      fireEvent(section!, event);
+      expect(event.defaultPrevented).toBe(true);
+    }
+  });
+});
+
+describe('AssessmentRunner media URLs', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('rewrites localhost assessment-media URLs for the figure img src', () => {
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://proj.supabase.co');
+    renderRunner(
+      test({
+        media_url:
+          'http://127.0.0.1:54321/storage/v1/object/public/assessment-media/modules/m1/figure.png',
+      }),
+    );
+    const img = screen.getByRole('img', { name: /figure for question 1/i });
+    expect(img).toHaveAttribute(
+      'src',
+      'https://proj.supabase.co/storage/v1/object/public/assessment-media/modules/m1/figure.png',
+    );
   });
 });
 
