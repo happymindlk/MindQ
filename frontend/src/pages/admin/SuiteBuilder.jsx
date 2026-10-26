@@ -136,7 +136,7 @@ function ModuleChip({ mod, questions, editable, onRemove, onQuestionsChange, dra
   useEffect(() => {
     setLocalItems(propsItems);
     localRef.current = propsItems;
-  }, [propsSig]); // eslint-disable-line react-hooks/exhaustive-deps -- sync when server/parent identity changes
+  }, [propsSig]);
 
   useEffect(
     () => () => {

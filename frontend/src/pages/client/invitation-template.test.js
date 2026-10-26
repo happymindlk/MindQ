@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildInvitationTemplate } from './candidate-share-banner';
+import { buildInvitationTemplate } from './invitation-template';
 
 describe('buildInvitationTemplate', () => {
   it('injects a dynamic deadline timestamp', () => {
