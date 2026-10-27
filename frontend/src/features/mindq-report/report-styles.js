@@ -39,11 +39,11 @@ export const REPORT_CSS = `
 .mq-eyebrow {
   margin-bottom: 4px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
   color: #7048E2; font-weight: 700;
-  font-family: "Clash Display", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-title {
   margin-bottom: 16px !important; font-size: 26px; font-weight: 700; color: #111827; line-height: 1.2;
-  font-family: "Clash Display", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-meta-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px 24px; margin: 0; }
 .mq-meta-grid dt {
@@ -60,7 +60,7 @@ export const REPORT_CSS = `
 .mq-card h2, .mq-sr-col h2, .mq-section-title {
   margin-bottom: 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
   color: #111827; font-weight: 700; border-bottom: 1px solid #d1d5db; padding-bottom: 8px;
-  font-family: "Clash Display", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-section-title { margin-bottom: 16px; }
 
@@ -76,11 +76,11 @@ export const REPORT_CSS = `
 }
 .mq-dash-label {
   margin-bottom: 8px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280;
-  font-family: "Clash Display", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-dash-value {
   font-size: 28px; font-weight: 700; color: #111827; font-variant-numeric: tabular-nums;
-  font-family: "Clash Display", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
 }
 
 .mq-summary { white-space: pre-wrap; color: #1f2937; }
@@ -92,12 +92,12 @@ export const REPORT_CSS = `
 }
 .mq-group-head h3 {
   font-size: 15px; font-weight: 700; color: #111827;
-  font-family: "Clash Display", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-avg {
   display: inline-flex; align-items: baseline; gap: 8px; font-size: 18px; font-weight: 700;
   color: #7048E2; font-variant-numeric: tabular-nums;
-  font-family: "Clash Display", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-avg-label {
   font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; font-weight: 600;

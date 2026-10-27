@@ -31,14 +31,14 @@ export default function AdminLogin() {
         <BrandLogo collapsed={false} className="h-10 w-auto mx-auto mb-6 object-contain" />
 
         <Card variant="elevated" className="p-8">
-          <h1 className="text-xl font-semibold text-foreground mb-1">
+          <h1 className="mb-6 text-center font-display text-2xl font-bold tracking-normal text-slate-900 dark:text-slate-100">
             {login.step === 'otp' ? 'Verification code' : 'Admin Portal'}
           </h1>
-          <p id="admin-otp-instructions" className="text-muted text-sm mb-6">
-            {login.step === 'otp'
-              ? 'Enter the 6-digit verification code sent to your registered email address.'
-              : 'Enter your credentials to access the administrative console.'}
-          </p>
+          {login.step === 'otp' && (
+            <p id="admin-otp-instructions" className="mb-6 text-center text-sm text-muted">
+              Enter the 6-digit verification code sent to your registered email address.
+            </p>
+          )}
 
           {!isSupabaseConfigured && (
             <div className="text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 mb-5">

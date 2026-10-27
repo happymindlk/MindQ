@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     # Header set by the edge proxy with the verified client IP (e.g. CF-Connecting-IP).
     # Only honoured when TRUSTED_PROXY_HOPS > 0.
     CLIENT_IP_HEADER: str = ""
+    # OTP 3-strike lockout minutes. None → resolve via auth_lockout_minutes
+    # (1 in qa/staging/DEBUG, else 5). Set AUTH_LOCKOUT_MINUTES to override.
+    AUTH_LOCKOUT_MINUTES: int | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -139,6 +142,21 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """True only for an explicitly production deployment."""
         return (self.ENVIRONMENT or "").strip().lower() == "production"
+
+    @property
+    def auth_lockout_minutes(self) -> int:
+        """Resolved OTP lockout window after too many invalid codes.
+
+        Returns:
+            Explicit ``AUTH_LOCKOUT_MINUTES`` when set; otherwise 1 minute for
+            qa/staging or DEBUG, and 5 minutes everywhere else.
+        """
+        if self.AUTH_LOCKOUT_MINUTES is not None:
+            return max(1, int(self.AUTH_LOCKOUT_MINUTES))
+        env = (self.ENVIRONMENT or "").strip().lower()
+        if env in {"qa", "staging"} or self.DEBUG:
+            return 1
+        return 5
 
     @property
     def cors_origins_list(self) -> list[str]:

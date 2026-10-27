@@ -36,7 +36,7 @@ export default function ClientDashboard() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">Candidate Pipeline</h1>
+          <h1 className="text-xl font-semibold tracking-normal text-foreground">Candidate Pipeline</h1>
           <p className="mt-1 text-sm text-muted">
             Read-only progress and MindQ Reports for your assessment suites.
           </p>

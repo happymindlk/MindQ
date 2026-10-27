@@ -1011,7 +1011,7 @@ export default function SuiteBuilder() {
   return (
     <div className="h-[calc(100vh-5.5rem)] min-h-[32rem] flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3 shrink-0">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Suite Builder</h1>
+        <h1 className="text-xl font-semibold tracking-normal text-slate-900 dark:text-slate-100">Suite Builder</h1>
         <div className="flex items-center gap-3">
           <Badge variant={locked ? 'locked' : 'draft'} showDot>
             {locked ? 'Published (Locked)' : 'Draft (Editable)'}

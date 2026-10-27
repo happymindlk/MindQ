@@ -25,6 +25,7 @@ from app.services.admin_otp import (
     generate_otp,
     hash_otp,
     issue_admin_otp_token,
+    locked_message,
     otp_matches,
     seal_secret,
     send_block_reason,
@@ -84,7 +85,7 @@ def test_email_body_is_the_admin_verification_sentence():
     assert "<script>" not in render_admin_otp_html("<script>")
 
 
-def test_three_invalid_codes_lock_for_fifteen_minutes_and_burn_the_code():
+def test_three_invalid_codes_lock_and_burn_the_code():
     row, now = _challenge("123456")
     assert apply_otp_attempt(row, "000001", now) == "rejected"
     assert apply_otp_attempt(row, "000002", now) == "rejected"
@@ -96,7 +97,7 @@ def test_three_invalid_codes_lock_for_fifteen_minutes_and_burn_the_code():
     assert apply_otp_attempt(row, "123456", now) == "locked"
     assert row.attempt_count == 3
 
-    later = now + timedelta(minutes=16)
+    later = now + LOCKOUT + timedelta(seconds=1)
     assert apply_otp_attempt(row, "123456", later) == "consumed"
     assert row.attempt_count == 3
 
@@ -280,7 +281,7 @@ def _routes(monkeypatch):
     async def fake_verify(_db, token, code):
         calls.append(("verify", token, code))
         if code == "000000":
-            raise AdminLoginError(429, "Too many invalid codes. This sign-in is locked for 15 minutes.")
+            raise AdminLoginError(429, locked_message())
         return AdminTokenResponse(
             access_token="access-token-value",
             refresh_token="refresh-token-value",
@@ -376,7 +377,7 @@ async def test_verify_lockout_is_429(async_client, _routes):
         VERIFY_URL, json={"temp_token": "t" * 24, "otp_code": "000000"}
     )
     assert res.status_code == 429
-    assert "15 minutes" in res.json()["detail"]
+    assert "locked for" in res.json()["detail"]
 
 
 @pytest.mark.asyncio

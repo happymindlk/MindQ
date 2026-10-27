@@ -1,9 +1,10 @@
 """Admin email OTP: password proof, one-time code, then the withheld Supabase session.
 
 The code is never stored. The database holds HMAC-SHA256(secret, challenge_id || code).
-Three wrong codes lock that sign-in for 15 minutes. A new login supersedes any
-open code. Retrying login is not idempotent: it invalidates the previous code,
-subject to a per-account send cap so a stolen password cannot flood the inbox.
+Three wrong codes lock that sign-in for a configurable window (default 5 minutes,
+1 minute in qa/staging/DEBUG). A new login supersedes any open code. Retrying
+login is not idempotent: it invalidates the previous code, subject to a
+per-account send cap so a stolen password cannot flood the inbox.
 """
 from __future__ import annotations
 
@@ -43,7 +44,8 @@ logger = logging.getLogger("app.admin_auth")
 
 OTP_TTL = timedelta(minutes=5)
 MAX_ATTEMPTS = 3
-LOCKOUT = timedelta(minutes=15)
+LOCKOUT_MINUTES = settings.auth_lockout_minutes
+LOCKOUT = timedelta(minutes=LOCKOUT_MINUTES)
 MAX_SENDS_PER_WINDOW = 3
 SEND_WINDOW = timedelta(minutes=15)
 SEND_COOLDOWN = timedelta(seconds=60)
@@ -53,12 +55,27 @@ ADMIN_OTP_TYPE = "admin_otp"
 _INVALID_CREDENTIALS = "Invalid email or password"
 _INVALID_CODE = "Invalid or expired verification code"
 _INVALID_SESSION = "Invalid or expired verification session"
-_LOCKED = "Too many invalid codes. This sign-in is locked for 15 minutes."
 _SEND_COOLDOWN = "A verification code was just sent. Wait a minute before requesting another."
 _SEND_WINDOW_BLOCK = "Too many verification codes were requested. Try again later."
 _NOT_ADMIN = "This account cannot access the admin portal"
 _MAIL_FAILED = "Could not send the verification email. Try again."
 _AUTH_DOWN = "Authentication service is unavailable"
+
+
+def locked_message(minutes: int | None = None) -> str:
+    """Client-safe lockout detail reflecting the configured window.
+
+    Args:
+        minutes: Override minutes; defaults to ``LOCKOUT_MINUTES``.
+
+    Returns:
+        Human-readable lockout error string.
+    """
+    mins = LOCKOUT_MINUTES if minutes is None else max(1, int(minutes))
+    return f"Too many invalid codes. This sign-in is locked for {mins} minutes."
+
+
+_LOCKED = locked_message()
 
 
 class AdminLoginError(Exception):
@@ -193,7 +210,7 @@ def apply_otp_attempt(row: Any, otp: str, now: datetime) -> str:
     """Apply one code submission to a locked challenge row.
 
     Callers must hold a row lock. On lock, the code is burned and ``consumed_at``
-    is set so a replay after the 15-minute window cannot start a new lock.
+    is set so a replay after the lockout window cannot start a new lock.
 
     Args:
         row: Challenge with ``id``, ``otp_hash``, ``expires_at``, ``attempt_count``,

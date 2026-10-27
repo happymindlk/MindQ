@@ -160,7 +160,7 @@ export default function PendingApproval() {
           <div className="w-11 h-11 rounded-full bg-violet-600/10 text-violet-600 dark:text-violet-400 flex items-center justify-center mb-5">
             <Clock3 className="w-5 h-5" />
           </div>
-          <h1 className="text-xl font-semibold tracking-tight text-gray-900 dark:text-white">
+          <h1 className="text-xl font-semibold tracking-normal text-gray-900 dark:text-white">
             Pending approval
           </h1>
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 leading-relaxed">

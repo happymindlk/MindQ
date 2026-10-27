@@ -4,7 +4,7 @@
 
 @theme {
   --font-sans: "Montserrat", system-ui, -apple-system, sans-serif;
-  --font-display: "Clash Display", "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Poppins", "Montserrat", ui-sans-serif, system-ui, sans-serif;
   --font-logo: "Bricolage Grotesque", "Montserrat", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -114,7 +114,7 @@
   }
 
   h1, h2, h3, h4 {
-    @apply font-display tracking-tight;
+    @apply font-display font-bold tracking-normal;
   }
 
   ::selection {
