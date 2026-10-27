@@ -6,6 +6,7 @@ import re
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from app.api.v1.beta_access import router as beta_access_router
@@ -23,13 +24,21 @@ logger = logging.getLogger("app.main")
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Validate production config, then dispose the engine on shutdown.
+    """Validate production config, warm the DB pool, then dispose on shutdown.
 
     The database schema is managed by Supabase migrations (supabase/migrations),
     applied via `supabase db reset` / `supabase migration up` - never by
     metadata.create_all.
     """
     assert_production_ready(settings)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("db_pool_warmed", extra={"event": "db_pool_warmed"})
+    except Exception:
+        # Do not block process boot if Postgres is briefly unreachable; the first
+        # request path still uses pool_pre_ping + retry helpers.
+        logger.warning("db_pool_warmup_failed", exc_info=True, extra={"event": "db_pool_warmup_failed"})
     logger.info(
         "app_started",
         extra={"event": "app_started", "debug": settings.DEBUG},
@@ -213,8 +222,8 @@ async def database_error_handler(request: Request, exc: SQLAlchemyError):
     ``ProgrammingError`` (e.g. an undefined column from a stale schema).
 
     Schema drift returns an actionable migration hint. Transient pooler /
-    disconnect errors keep the retry wording (acquire-path retries happen in
-    ``get_db`` before this handler).
+    disconnect errors keep the retry wording (dashboard/auth paths retry via
+    ``run_db_op_with_retry`` before reaching this handler).
 
     Args:
         request: Incoming request.
@@ -259,55 +268,6 @@ async def database_error_handler(request: Request, exc: SQLAlchemyError):
             "statement": getattr(exc, "statement", None),
         },
     )
-    # #region agent log
-    try:
-        import json
-        import time
-        from pathlib import Path
-
-        sqlstate = getattr(orig, "sqlstate", None)
-        line = json.dumps(
-            {
-                "sessionId": "f4446e",
-                "runId": "post-fix",
-                "hypothesisId": "B" if schema_drift else ("A" if transient else "E"),
-                "location": "main.py:database_error_handler",
-                "message": "mapped_sqlalchemy_to_503",
-                "data": {
-                    "path": request.url.path,
-                    "method": request.method,
-                    "request_id": request_id,
-                    "exc_type": type(exc).__name__,
-                    "driver_type": type(orig).__name__ if orig else None,
-                    "driver_message": str(orig)[:500] if orig else None,
-                    "sqlalchemy_message": str(exc)[:500],
-                    "sqlstate": sqlstate,
-                    "connection_invalidated": getattr(exc, "connection_invalidated", None),
-                    "class_schema": schema_drift,
-                    "class_transient": transient,
-                    "error_class": error_class,
-                    "detail": detail[:200],
-                    "statement": (getattr(exc, "statement", None) or "")[:200] or None,
-                },
-                "timestamp": int(time.time() * 1000),
-            },
-            default=str,
-        ) + "\n"
-        for path in (
-            Path(__file__).resolve().parents[2] / "debug-f4446e.log",
-            Path("/app/data/debug-f4446e.log"),
-            Path("/tmp/debug-f4446e.log"),
-        ):
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                with path.open("a", encoding="utf-8") as fh:
-                    fh.write(line)
-                break
-            except OSError:
-                continue
-    except OSError:
-        pass
-    # #endregion
     return JSONResponse(
         status_code=503,
         content={"detail": detail, "request_id": request_id},
