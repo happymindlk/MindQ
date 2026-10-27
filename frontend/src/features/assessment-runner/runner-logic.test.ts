@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { RunnerQuestion } from '../assessment-builder/api/library-api';
-import { buildResponses, hasContent, isAnswered, isAttemptLocked, isTimeExpired } from './runner-logic';
+import {
+  buildResponses,
+  hasContent,
+  isAnswered,
+  isAttemptLocked,
+  isTimeExpired,
+  resolveTopDisclaimer,
+} from './runner-logic';
 
 const q = (type: string): RunnerQuestion => ({
   id: 'q',
@@ -31,6 +38,36 @@ describe('runner logic', () => {
       { assessment_id: 'a1', question_id: 'q1', response: { answer: 'B' }, elapsed_seconds: 3.5 },
       { assessment_id: 'a1', question_id: 'q4', response: { answer: 4 }, elapsed_seconds: 1 },
     ]);
+  });
+
+  it('resolveTopDisclaimer requires the flag and non-empty text', () => {
+    expect(
+      resolveTopDisclaimer({
+        show_top_disclaimer: true,
+        top_disclaimer_text: '  No right or wrong answers.  ',
+      }),
+    ).toBe('No right or wrong answers.');
+    expect(
+      resolveTopDisclaimer({
+        show_top_disclaimer: false,
+        top_disclaimer_text: 'No right or wrong answers.',
+      }),
+    ).toBeNull();
+    expect(resolveTopDisclaimer({ show_top_disclaimer: true, top_disclaimer_text: '   ' })).toBeNull();
+  });
+
+  it('resolveTopDisclaimer accepts camelCase and nested settings shapes', () => {
+    expect(
+      resolveTopDisclaimer({
+        showTopDisclaimer: true,
+        topDisclaimerText: 'Camel case notice.',
+      }),
+    ).toBe('Camel case notice.');
+    expect(
+      resolveTopDisclaimer({
+        settings: { show_top_disclaimer: true, top_disclaimer_text: 'Nested notice.' },
+      }),
+    ).toBe('Nested notice.');
   });
 
   it('distinguishes TIME_EXPIRED from a submitted lock', () => {

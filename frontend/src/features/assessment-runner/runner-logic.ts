@@ -1,5 +1,33 @@
-import type { RunnerQuestion } from '../assessment-builder/api/library-api';
+import type { RunnerQuestion, RunnerTest } from '../assessment-builder/api/library-api';
 import type { AnswerValue, ResponseSavePayload } from '../assessment-builder/types/telemetry';
+
+/**
+ * Resolve module-level top-disclaimer copy for the runner.
+ *
+ * Accepts snake_case API payloads and defensive camelCase / nested `settings`
+ * shapes so a naming mismatch cannot silently hide the banner.
+ *
+ * @param test - Candidate or preview runner payload.
+ * @returns Trimmed notice text when the flag is on and text is non-empty; otherwise null.
+ */
+export function resolveTopDisclaimer(test: RunnerTest | Record<string, unknown>): string | null {
+  const row = test as Record<string, unknown>;
+  const settings =
+    row.settings && typeof row.settings === 'object'
+      ? (row.settings as Record<string, unknown>)
+      : undefined;
+
+  const show = Boolean(
+    row.show_top_disclaimer ?? row.showTopDisclaimer ?? settings?.show_top_disclaimer ?? settings?.showTopDisclaimer,
+  );
+  const raw =
+    row.top_disclaimer_text ??
+    row.topDisclaimerText ??
+    settings?.top_disclaimer_text ??
+    settings?.topDisclaimerText;
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  return show && text ? text : null;
+}
 
 /**
  * Whether the current answer lets the candidate advance.
