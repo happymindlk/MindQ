@@ -3,8 +3,9 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Poppins", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Clash Display", "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Montserrat", system-ui, -apple-system, sans-serif;
+  --font-display: "Clash Display", "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-logo: "Bricolage Grotesque", "Montserrat", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   --color-canvas: var(--ap-canvas);
@@ -24,6 +25,11 @@
   --color-ring: var(--ap-ring);
 
   /* Brand accents: Indigo primary, Mid Purple, Coral. */
+  --color-brand-indigo: #7048E2;
+  --color-brand-hover: #5e3cc4;
+  --color-brand-active: #4f32a6;
+  --color-brand-orchid: #AF60BB;
+  --color-brand-coral: #FF7E8A;
   --color-accent-purple: var(--ap-accent-purple);
   --color-accent-coral: var(--ap-accent-coral);
   --color-accent-cyan: var(--ap-accent-cyan);
@@ -107,6 +113,10 @@
     @apply bg-canvas text-foreground font-sans antialiased;
   }
 
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight;
+  }
+
   ::selection {
     background: color-mix(in oklab, var(--color-primary) 35%, transparent);
     color: var(--color-foreground);
@@ -144,6 +154,10 @@
 
   .font-display {
     font-family: var(--font-display);
+  }
+
+  .font-logo {
+    font-family: var(--font-logo);
   }
 }
 
