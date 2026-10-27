@@ -1,13 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, MouseEvent, ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Loader2, Timer } from 'lucide-react';
+import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, Loader2, Timer } from 'lucide-react';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import { MarkdownText } from '../assessment-builder/components/markdown-preview';
 import type { AnswerValue, ResponseSavePayload, ResponseSubmitPayload } from '../assessment-builder/types/telemetry';
 import { resolveAssessmentMediaUrl } from '../../lib/resolve-assessment-media-url';
 import { RunnerQuestionInput } from './runner-question-input';
-import { buildResponses, hasContent, isAnswered, isAttemptLocked, isTimeExpired } from './runner-logic';
+import {
+  buildResponses,
+  hasContent,
+  isAnswered,
+  isAttemptLocked,
+  isTimeExpired,
+  resolveTopDisclaimer,
+} from './runner-logic';
 import { formatClock, timerTone, useModuleTimer } from './use-module-timer';
 import { useQuestionTelemetry } from './use-question-telemetry';
 
@@ -67,6 +74,7 @@ export function AssessmentRunner({
   const [timeUp, setTimeUp] = useState(false);
 
   const current = questions[index];
+  const topDisclaimer = useMemo(() => resolveTopDisclaimer(test), [test]);
   const telemetry = useQuestionTelemetry(current?.id ?? null);
   const answersRef = useRef(answers);
   answersRef.current = answers;
@@ -308,13 +316,21 @@ export function AssessmentRunner({
         onContextMenu={blockClipboard}
       >
         <div className="flex-1">
-          {test.show_top_disclaimer && test.top_disclaimer_text?.trim() && (
-            <p
+          {topDisclaimer && (
+            <div
               role="note"
-              className="mb-4 whitespace-pre-line rounded-md border border-border bg-surface-raised px-3 py-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300"
+              className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4 transition-colors dark:border-slate-800 dark:bg-slate-900/60"
             >
-              {test.top_disclaimer_text}
-            </p>
+              <div className="flex items-start gap-3">
+                <Info
+                  className="mt-0.5 h-5 w-5 shrink-0 text-[#7048E2] dark:text-purple-400"
+                  aria-hidden
+                />
+                <p className="text-sm font-medium leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-line">
+                  {topDisclaimer}
+                </p>
+              </div>
+            </div>
           )}
           {current.show_disclaimer && current.disclaimer_text?.trim() && (
             <p
