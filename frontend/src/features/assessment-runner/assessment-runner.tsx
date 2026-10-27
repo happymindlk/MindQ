@@ -293,7 +293,7 @@ export function AssessmentRunner({
           <span className="tabular-nums">
             Question {index + 1} of {questions.length}
           </span>
-          <span className="tabular-nums">{progressPct}%</span>
+          <span className="font-display font-bold tabular-nums">{progressPct}%</span>
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full border border-border bg-surface-raised">
           <div className="h-full bg-primary transition-[width] duration-200 ease-out" style={{ width: `${progressPct}%` }} />

@@ -457,10 +457,10 @@ export function ModuleEditorDrawer({
               onLockedEdit={() => setCloneOpen(true)}
             />
 
-            <section aria-labelledby="module-questions-title" className="space-y-3">
-              <header className="flex items-center justify-between">
+            <section aria-labelledby="module-questions-title" className="space-y-4">
+              <header className="mb-4 flex items-center justify-between">
                 <h3 id="module-questions-title" className="font-display text-sm font-semibold text-foreground">
-                  Questions <span className="font-mono text-xs text-slate-500">{questions.length}</span>
+                  Questions <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{questions.length}</span>
                 </h3>
                 <NeonButton size="sm" variant="outline" onClick={() => openEditor(null)} disabled={pending === 'question'}>
                   <Plus className="h-3.5 w-3.5" aria-hidden /> Add question
@@ -468,7 +468,7 @@ export function ModuleEditorDrawer({
               </header>
 
               {questions.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-800 px-4 py-8 text-center text-sm text-slate-400">
+                <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
                   No questions yet. Add SJT, CogniCheck MCQ, Likert, or CRT items to make this module publishable.
                 </div>
               ) : (
@@ -479,16 +479,30 @@ export function ModuleEditorDrawer({
                     return (
                       <li
                         key={question.id}
-                        className="group grid grid-cols-[2rem_1fr_auto] items-start gap-3 rounded-xl border border-border bg-surface p-3 transition-colors hover:border-primary/40"
+                        className="group grid grid-cols-[2rem_1fr_auto] items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-colors hover:border-[#7048E2]/40 dark:border-slate-800 dark:bg-slate-900"
                       >
-                        <span className="pt-0.5 font-mono text-xs tabular-nums text-slate-500">{String(index + 1).padStart(2, '0')}</span>
+                        <span className="pt-0.5 font-mono text-xs font-semibold tabular-nums text-slate-500 dark:text-slate-400">
+                          {String(index + 1).padStart(2, '0')}
+                        </span>
                         <div className="min-w-0 space-y-1.5">
-                          <p className="line-clamp-2 text-sm text-slate-100">{questionPrompt(question)}</p>
+                          <p className="line-clamp-2 text-sm font-medium leading-snug text-slate-800 dark:text-slate-100">
+                            {questionPrompt(question)}
+                          </p>
                           <div className="flex flex-wrap gap-1.5">
-                            <Pill tone="violet">
+                            <Pill
+                              tone="indigo"
+                              className="border border-purple-100 bg-purple-50 px-2.5 py-0.5 text-xs text-[#7048E2] dark:border-purple-800/60 dark:bg-purple-950/40 dark:text-purple-300"
+                            >
                               {payload ? QUESTION_TYPE_LABELS[payload.type] : question.question_type}
                             </Pill>
-                            {payload?.facet && <Pill tone="cyan">{payload.facet}</Pill>}
+                            {payload?.facet && (
+                              <Pill
+                                tone="neutral"
+                                className="border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                              >
+                                {payload.facet}
+                              </Pill>
+                            )}
                             {payload?.type === 'likert' && payload.reverse_scored && <Pill tone="amber">Reverse</Pill>}
                             {payload?.type === 'mcq' && payload.mode === 'multiple' && <Pill>Multi-key</Pill>}
                             {payload?.media_url && (
@@ -504,7 +518,7 @@ export function ModuleEditorDrawer({
                             disabled={legacy && !locked}
                             title={legacy ? 'Legacy rows cannot be edited in the builder. Recreate the question instead.' : 'Edit question'}
                             aria-label={`Edit question ${index + 1}`}
-                            className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-cyan-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-30"
+                            className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7048E2] dark:hover:bg-slate-800 dark:hover:text-cyan-200 disabled:opacity-30"
                           >
                             {locked ? <Lock className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
                           </button>
@@ -513,7 +527,7 @@ export function ModuleEditorDrawer({
                             onClick={() => void onRemoveQuestion(question.id)}
                             disabled={pending === 'question'}
                             aria-label={`Remove question ${index + 1}`}
-                            className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-rose-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:opacity-30"
+                            className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:hover:bg-slate-800 dark:hover:text-rose-300 disabled:opacity-30"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
