@@ -1,7 +1,6 @@
 import React, { useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Card from '../../components/ui/Card';
-import BrandLogo from '../../components/BrandLogo';
 import { PreviewRunner } from '../../features/assessment-runner/preview-runner';
 import { PREVIEW_ACCESS_CODE } from '../../features/assessment-builder/lib/preview-protocol';
 import {
@@ -195,9 +194,8 @@ function CandidateLogin({ initialAccessCode }) {
   return (
     <div className="flex-1 flex flex-col justify-center items-center w-full py-8">
       <div className="w-full max-w-md">
-        <BrandLogo collapsed={false} className="h-10 w-auto mx-auto mb-6 object-contain" />
-        <div className="mb-6">
-          <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+        <div className="mb-6 text-center">
+          <h1 className="font-display text-2xl font-bold tracking-normal text-slate-900 dark:text-slate-100">
             {step === 'details' ? 'Welcome to Your Assessment' : 'Check your inbox'}
           </h1>
           <p className="mt-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">

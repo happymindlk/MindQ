@@ -11,6 +11,7 @@ import pytest
 from app.database import get_db
 from app.main import app
 from app.security import candidate_otp_limiter, candidate_otp_verify_limiter, login_limiter
+from app.services.admin_otp import locked_message
 from app.services.candidate_otp import CandidateOtpError
 
 LOGIN_URL = "/api/v1/candidates/auth/otp/verify"
@@ -65,7 +66,7 @@ def _isolate(monkeypatch):
         if kwargs["otp_code"] == "000000":
             raise CandidateOtpError(401, "Invalid or expired verification code")
         if kwargs["otp_code"] == "999999":
-            raise CandidateOtpError(429, "Too many invalid codes. This sign-in is locked for 15 minutes.")
+            raise CandidateOtpError(429, locked_message())
         if kwargs["temp_token"].startswith("bad-token"):
             raise CandidateOtpError(401, "Invalid or expired verification session")
 

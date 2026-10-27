@@ -2,7 +2,7 @@
 
 Mirrors the admin OTP discipline without a withheld session: the code is
 never stored (HMAC-SHA256 keyed by SECRET_KEY and bound to the challenge),
-three wrong codes lock the sign-in for 15 minutes, and a new request
+three wrong codes lock the sign-in for a configurable window, and a new request
 supersedes any open code subject to a per-email send cap.
 """
 from __future__ import annotations
@@ -27,6 +27,7 @@ from app.services.admin_otp import (
     apply_otp_attempt,
     generate_otp,
     hash_otp,
+    locked_message,
     send_block_reason,
 )
 from app.services.candidate_service import CandidateService
@@ -40,7 +41,7 @@ CANDIDATE_OTP_TYPE = "candidate_otp"
 _INVALID_TARGET = "Invalid access code or email"
 _INVALID_CODE = "Invalid or expired verification code"
 _INVALID_SESSION = "Invalid or expired verification session"
-_LOCKED = "Too many invalid codes. This sign-in is locked for 15 minutes."
+_LOCKED = locked_message()
 _SEND_COOLDOWN = "A verification code was just sent. Wait a minute before requesting another."
 _SEND_WINDOW_BLOCK = "Too many verification codes were requested. Try again later."
 _MAIL_FAILED = "Could not send the verification email. Try again."

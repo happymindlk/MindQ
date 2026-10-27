@@ -300,7 +300,7 @@ export default function CandidateReport() {
             {average != null ? (
               <>
                 <p className="metric-label font-display">Average score</p>
-                <p className="mt-1 text-3xl font-semibold tracking-tight tabular-data text-foreground font-display">
+                <p className="mt-1 text-3xl font-semibold tracking-normal tabular-data text-foreground font-display">
                   {`${Math.round(average)}%`}
                 </p>
               </>

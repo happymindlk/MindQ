@@ -224,7 +224,7 @@ export default function CorporateDetail() {
       <header className="flex items-center gap-4">
         <CorporateLogo name={corporate.name} logoUrl={corporate.logo_url} size="lg" />
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground truncate">
+          <h1 className="text-xl font-semibold tracking-normal text-foreground truncate">
             {corporate.name}
           </h1>
           <p className="mt-1 text-xs text-neutral-400 truncate">
