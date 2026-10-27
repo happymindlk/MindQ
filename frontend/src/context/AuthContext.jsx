@@ -44,6 +44,16 @@ export function AuthProvider({ children }) {
   const [locked, setLocked] = useState(false);
   const [lockedEmail, setLockedEmail] = useState(null);
   const staleRefreshKey = useRef(null);
+  const sessionRef = useRef(null);
+  const profileRef = useRef(null);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   const applyMembership = useCallback(async (nextSession) => {
     setSession(nextSession);
@@ -54,8 +64,30 @@ export function AuthProvider({ children }) {
     }
 
     const jwtCorp = readJwtCorporateId(nextSession);
+    const nextUserId = nextSession.user.id;
+    const cachedProfile = profileRef.current;
+    const sameUser = sessionRef.current?.user?.id === nextUserId;
+    // Tab focus / TOKEN_REFRESHED only rotates JWTs — reuse membership already in memory.
+    if (
+      sameUser
+      && cachedProfile
+      && cachedProfile.user_id === nextUserId
+    ) {
+      const resolved = cachedProfile.corporate_id || jwtCorp || null;
+      setCorporateId(resolved);
+      const key = `${nextUserId}:${cachedProfile.role}:${cachedProfile.corporate_id}`;
+      if (claimsAreStale(nextSession, cachedProfile) && staleRefreshKey.current !== key) {
+        staleRefreshKey.current = key;
+        const { error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+          console.warn('Session refresh for stale role claims failed:', refreshError.message);
+        }
+      }
+      return resolved;
+    }
+
     try {
-      const membership = await fetchHrMembership(nextSession.user.id);
+      const membership = await fetchHrMembership(nextUserId);
       setProfile(membership);
       const resolved = membership?.corporate_id || jwtCorp || null;
       setCorporateId(resolved);
@@ -63,7 +95,7 @@ export function AuthProvider({ children }) {
       // The API and RLS authorize from JWT claims, so a role change in hr_users
       // (e.g. hr -> admin) yields 403s until the access-token hook re-mints the
       // token. One attempt per user+role avoids a loop if the hook is disabled.
-      const key = `${nextSession.user.id}:${membership?.role}:${membership?.corporate_id}`;
+      const key = `${nextUserId}:${membership?.role}:${membership?.corporate_id}`;
       if (claimsAreStale(nextSession, membership) && staleRefreshKey.current !== key) {
         staleRefreshKey.current = key;
         const { error: refreshError } = await supabase.auth.refreshSession();
@@ -89,7 +121,7 @@ export function AuthProvider({ children }) {
       return { corporateId: null, role: null };
     }
 
-    // Re-read hr_users first (works even when JWT claims are stale).
+    // Explicit refresh always re-reads hr_users (provisioning / role changes).
     const membership = await fetchHrMembership(active.user.id);
     if (membership?.corporate_id) {
       // Refresh so the custom access token hook injects corporate_id into the JWT
@@ -102,6 +134,9 @@ export function AuthProvider({ children }) {
         setCorporateId(membership.corporate_id);
         return { corporateId: membership.corporate_id, role: membership.role ?? null };
       }
+      // Force the network path by clearing the cache first — applyMembership would
+      // otherwise short-circuit on the same user id.
+      profileRef.current = null;
       await applyMembership(refreshed.session ?? active);
       // Prefer DB membership if JWT hook is not yet enabled.
       if (membership.corporate_id) {
@@ -111,6 +146,7 @@ export function AuthProvider({ children }) {
       return { corporateId: membership.corporate_id, role: membership.role ?? null };
     }
 
+    profileRef.current = null;
     await applyMembership(active);
     return { corporateId: null, role: membership?.role ?? resolveRole(active, membership) };
   }, [applyMembership]);
@@ -129,11 +165,22 @@ export function AuthProvider({ children }) {
     const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
       // Defer so we don't deadlock with other supabase-js auth calls.
       queueMicrotask(async () => {
-        const gate =
-          event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'USER_UPDATED';
-        if (gate) setLoading(true);
+        // TOKEN_REFRESHED / USER_UPDATED / INITIAL_SESSION must never flip the
+        // global loading gate — that unmounts ProtectedRoute children and wipes
+        // local UI state (drawers, forms). Only true sign-in/out boundaries load.
+        const isAuthBoundary = event === 'SIGNED_IN' || event === 'SIGNED_OUT';
+        const sameUserAlreadyMounted =
+          event === 'SIGNED_IN'
+          && Boolean(sessionRef.current?.user?.id)
+          && newSession?.user?.id === sessionRef.current.user.id;
+
+        if (isAuthBoundary && !sameUserAlreadyMounted) {
+          setLoading(true);
+        }
         await applyMembership(newSession);
-        if (gate) setLoading(false);
+        if (isAuthBoundary) {
+          setLoading(false);
+        }
       });
     });
 

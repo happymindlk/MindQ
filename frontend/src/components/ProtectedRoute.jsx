@@ -29,7 +29,9 @@ export default function ProtectedRoute({ children }) {
     );
   }
 
-  if (loading) {
+  // Only block the tree on the cold boot (no session yet). Background auth
+  // events must not unmount child routes — that wipes drawers / form state.
+  if (loading && !session) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-canvas text-muted">
         Loading...

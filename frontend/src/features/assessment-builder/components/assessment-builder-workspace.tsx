@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle } from 'lucide-react';
 import { useBuilderToast } from '../hooks/use-builder-toast';
 import type { ModuleLibraryState } from '../hooks/use-module-library';
@@ -11,6 +12,8 @@ import { ModuleLibraryHub } from './module-library-hub';
 import type { HubFilter } from './module-library-hub';
 import { NeonButton } from './primitives';
 
+const ASSESSMENT_ID_PARAM = 'assessmentId';
+
 interface AssessmentBuilderWorkspaceProps {
   library: ModuleLibraryState;
   filter: HubFilter;
@@ -22,6 +25,9 @@ interface AssessmentBuilderWorkspaceProps {
 /**
  * Library hub + module editor drawer + lifecycle dialogs. The host page owns
  * the header, search, and tabs, and passes the shared library state in.
+ *
+ * Open drawer identity is synced to ``?assessmentId=`` so tab blur / minimize /
+ * hard refresh restores the same panel.
  */
 export function AssessmentBuilderWorkspace({
   library,
@@ -32,11 +38,27 @@ export function AssessmentBuilderWorkspace({
 }: AssessmentBuilderWorkspaceProps) {
   const { toast } = useBuilderToast();
   const { modules, loading, error, refresh, createModule, archiveModule, upsertLocal } = library;
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openId = searchParams.get(ASSESSMENT_ID_PARAM);
   const [archiveId, setArchiveId] = useState<string | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createKey, setCreateKey] = useState(0);
+
+  const setOpenId = useCallback(
+    (id: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (id) next.set(ASSESSMENT_ID_PARAM, id);
+          else next.delete(ASSESSMENT_ID_PARAM);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const archiveTarget = useMemo<AssessmentModule | null>(
     () => modules.find((m) => m.id === archiveId) ?? null,
@@ -60,7 +82,7 @@ export function AssessmentBuilderWorkspace({
         setCreating(false);
       }
     },
-    [createModule, onCreateDraftChange, toast],
+    [createModule, onCreateDraftChange, setOpenId, toast],
   );
 
   const onArchive = useCallback(async () => {
@@ -80,7 +102,7 @@ export function AssessmentBuilderWorkspace({
     } finally {
       setArchiving(false);
     }
-  }, [archiveModule, archiveTarget, openId, toast]);
+  }, [archiveModule, archiveTarget, openId, setOpenId, toast]);
 
   const requestCreate = useCallback(
     (kind: CreateModuleDraft['kind'], category: CreateModuleDraft['category']) => {
