@@ -135,8 +135,9 @@ def test_build_module_outcomes_keeps_only_completed_and_keys_sequentially() -> N
     )
     assert [(o.key, o.title, o.category, o.score) for o in outcomes] == [
         ("A1", "SQL", "technical", 62.5),
-        ("A2", "Big Five", "personality", 50.0),
+        ("A2", "Big Five", "personality", None),
     ]
+    assert outcomes[1].score_kind == "traits"
 
 
 def test_build_module_outcomes_uses_catalog_category() -> None:
@@ -159,44 +160,14 @@ def test_build_module_outcomes_falls_back_to_graded_open_items() -> None:
 # --- compute_category_averages ------------------------------------------------
 
 
-def test_category_averages_use_only_completed_assessments() -> None:
+def test_category_averages_are_always_null() -> None:
     outcomes = [
         _outcome("Logic", "cognitive", 80.0),
         _outcome("Numbers", "cognitive", 70.0),
         _outcome("Big Five", "personality", 62.5),
     ]
-    averages = compute_category_averages(outcomes)
-    assert averages == {"Cognitive": 75.0, "Personality": 62.5}
-    assert "Technical" not in averages
-    assert "Behavioral" not in averages
-
-
-def test_category_averages_ignore_unscored_outcomes_without_zero_weighting() -> None:
-    outcomes = [_outcome("Logic", "cognitive", 90.0), _outcome("Ungraded", "cognitive", None)]
-    assert compute_category_averages(outcomes) == {"Cognitive": 90.0}
-
-
-def test_category_with_only_unscored_outcomes_is_excluded() -> None:
-    assert compute_category_averages([_outcome("Ungraded", "technical", None)]) == {}
-
-
-def test_category_averages_follow_fixed_order() -> None:
-    outcomes = [
-        _outcome("T", "technical", 40.0),
-        _outcome("B", "behavioral", 50.0),
-        _outcome("P", "personality", 60.0),
-        _outcome("C", "cognitive", 70.0),
-    ]
-    assert list(compute_category_averages(outcomes)) == [
-        "Cognitive",
-        "Personality",
-        "Behavioral",
-        "Technical",
-    ]
-
-
-def test_category_averages_empty_input() -> None:
-    assert compute_category_averages([]) == {}
+    assert compute_category_averages(outcomes) is None
+    assert compute_category_averages([]) is None
 
 
 # --- bands, sentences, breakdown ---------------------------------------------
@@ -204,8 +175,9 @@ def test_category_averages_empty_input() -> None:
 
 @pytest.mark.parametrize(
     ("score", "band"),
-    [(100, "exceptional"), (80, "exceptional"), (79.9, "strong"), (65, "strong"),
-     (50, "moderate"), (35, "developing"), (34.9, "emerging"), (0, "emerging")],
+    [(100, "very_high"), (80, "very_high"), (79.9, "high"), (60, "high"),
+     (59.9, "moderate"), (40, "moderate"), (39.9, "low"), (20, "low"),
+     (19.9, "very_low"), (0, "very_low")],
 )
 def test_score_band_boundaries(score, band) -> None:
     assert score_band(score) == band
@@ -228,7 +200,7 @@ def test_performance_summaries_prefer_gemini_and_fallback_per_missing_key() -> N
 def test_performance_summaries_without_synthesis_use_fallbacks() -> None:
     a1 = _outcome("Logic", "cognitive", 85.0)
     summaries = performance_summaries("Ada", [a1], None)
-    assert "exceptional" in summaries[a1.id]
+    assert "very high" in summaries[a1.id]
 
 
 def test_performance_summaries_ignore_hallucinated_keys() -> None:
@@ -300,7 +272,7 @@ def test_build_category_summaries_falls_back_and_omits_unscored_pillars() -> Non
     result = build_category_summaries("Ada Lovelace", outcomes, None)
     assert len(result) == 1
     assert result[0].category == "Cognitive"
-    assert "averaged 70%" in result[0].summary
+    assert "averaged 70%" not in result[0].summary
     assert "Logic, Verbal" in result[0].summary
 
 
@@ -312,9 +284,11 @@ def test_build_category_summaries_ignores_technical_prose() -> None:
 def test_prompt_assessments_and_fingerprint() -> None:
     scored = _outcome("Logic", "cognitive", 80.0, key="A1")
     unscored = _outcome("Essay", "technical", None, key="A2")
-    assert prompt_assessments([scored, unscored]) == [
-        {"assessment_key": "A1", "assessment_name": "Logic", "category": "Cognitive", "score": 80.0}
-    ]
+    payload = prompt_assessments([scored, unscored])
+    assert payload[0]["assessment_key"] == "A1"
+    assert payload[0]["score"] == 80.0
+    assert payload[0]["category"] == "Cognitive"
+    assert len(payload) == 1
     changed = _outcome("Logic", "cognitive", 81.0, key="A1")
     assert outcomes_fingerprint([scored]) != outcomes_fingerprint([changed])
 

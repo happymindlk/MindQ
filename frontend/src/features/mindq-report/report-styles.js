@@ -114,6 +114,11 @@ export const REPORT_CSS = `
   text-align: right; font-variant-numeric: tabular-nums; color: #374151; font-weight: 600;
 }
 .mq-score-summary { margin-top: 4px !important; font-size: 12.5px; color: #4b5563; }
+.mq-subscales { list-style: none; margin: 8px 0 0; padding: 0; }
+.mq-subscale-row {
+  display: grid; grid-template-columns: minmax(0, 220px) 1fr 120px; align-items: center; gap: 16px;
+  padding: 4px 0; font-size: 12px; color: #4b5563;
+}
 .mq-bar-track { height: 8px; border-radius: 999px; background: #e5e7eb; overflow: hidden; }
 .mq-bar-fill { height: 100%; border-radius: 999px; background: #7048E2; }
 .mq-strengths-risks { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }

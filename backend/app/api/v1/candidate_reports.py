@@ -297,6 +297,8 @@ def _progress_with_facet_scores(
                 status=getattr(row, "status", None),
                 completed_at=getattr(row, "completed_at", None),
                 facet_scores=facet_scores,
+                derived_profile=getattr(row, "derived_profile", None),
+                score_details=getattr(row, "score_details", None),
             )
         )
     return coerced

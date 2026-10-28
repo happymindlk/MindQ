@@ -30,6 +30,8 @@ class CandidateProgress(Base):
     overtime: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     facet_scores: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     derived_profile: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    score_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    scoring_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("candidate_id", "assessment_id", name="uq_progress_candidate_assessment"),

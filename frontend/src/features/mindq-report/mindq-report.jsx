@@ -37,8 +37,23 @@ function asList(value) {
  * @returns {string}
  */
 function formatScore(score) {
-  if (score == null) return 'N/A';
+  if (score == null) return '';
   return `${Math.round(score * 10) / 10}%`;
+}
+
+/**
+ * @param {BreakdownRow} row
+ * @returns {string}
+ */
+function formatRowValue(row) {
+  if (row.displayScore) {
+    return row.band ? `${row.displayScore} · ${row.band}` : row.displayScore;
+  }
+  if (row.score != null) {
+    const pct = formatScore(row.score);
+    return row.band ? `${pct} · ${row.band}` : pct;
+  }
+  return row.band || '';
 }
 
 /** @param {{ score: number | null }} props */
@@ -77,7 +92,8 @@ function SynthesisFallback({ status }) {
 }
 
 /**
- * @typedef {{ category: string, assessmentName: string, score: number, summary: string }} BreakdownRow
+ * @typedef {{ name: string, mean: number | null, positionPct: number | null, band: string | null }} SubscaleRow
+ * @typedef {{ category: string, assessmentName: string, score: number | null, displayScore: string | null, band: string | null, scoreKind: string | null, summary: string, subscales: SubscaleRow[] }} BreakdownRow
  * @typedef {{ category: string, average: number | null, rows: BreakdownRow[], summary: string | null }} CategoryGroup
  */
 
@@ -110,14 +126,32 @@ function toBreakdownRows(raw) {
   return raw
     .map((item) => {
       if (!item || typeof item !== 'object') return null;
-      const score = asNumber(item.score);
       const assessmentName = String(item.assessment_name || '').trim();
-      if (score == null || !assessmentName) return null;
+      if (!assessmentName) return null;
+      const subscales = Array.isArray(item.subscales)
+        ? item.subscales
+            .filter((row) => row && typeof row === 'object' && String(row.name || '').trim())
+            .map((row) => ({
+              name: String(row.name).trim(),
+              mean: asNumber(row.mean),
+              positionPct: asNumber(row.position_pct),
+              band: String(row.band_label || row.band || '').trim() || null,
+            }))
+        : [];
+      const score = asNumber(item.score);
+      const displayScore = item.display_score != null && String(item.display_score).trim()
+        ? String(item.display_score).trim()
+        : null;
+      if (score == null && !displayScore && subscales.length === 0) return null;
       return {
         category: String(item.category || 'Technical'),
         assessmentName,
         score,
+        displayScore,
+        band: item.band != null && String(item.band).trim() ? String(item.band).trim() : null,
+        scoreKind: item.score_kind != null ? String(item.score_kind) : null,
         summary: String(item.performance_summary || '').trim(),
+        subscales,
       };
     })
     .filter(Boolean);
@@ -155,16 +189,9 @@ function groupByCategory(rows, averages, summaries) {
  * @param {Record<string, any>} data
  */
 function toViewModel(data) {
-  const rawAverages =
-    data.category_averages && typeof data.category_averages === 'object'
-      ? data.category_averages
-      : {};
+  // Scoring Spec v2: unlike instruments are never averaged into pillar cards.
   /** @type {Record<string, number>} */
   const averages = {};
-  Object.entries(rawAverages).forEach(([category, value]) => {
-    const n = asNumber(value);
-    if (n != null) averages[category] = n;
-  });
   const breakdown = toBreakdownRows(data.competency_breakdown);
   const summary =
     typeof data.executive_summary === 'string' && data.executive_summary.trim()
@@ -177,10 +204,7 @@ function toViewModel(data) {
     candidateEmail: String(data.candidate_email || '—'),
     targetRole: data.target_role ? String(data.target_role) : '—',
     totalCompleted: Math.max(0, asNumber(data.total_assessments_completed) ?? 0),
-    scoreCards: CATEGORY_ORDER.map((category) => ({
-      category,
-      average: averages[category] ?? null,
-    })).filter((card) => card.average != null),
+    scoreCards: [],
     summary,
     synthesisStatus: typeof data.synthesis_status === 'string' ? data.synthesis_status : 'pending',
     strengths: asList(data.strengths),
@@ -196,10 +220,6 @@ function CategoryBreakdown({ group }) {
     <article className={`mq-group ${KEEP_TOGETHER}`} data-pdf-block>
       <div className="mq-group-head">
         <h3>{group.category}</h3>
-        <span className="mq-avg">
-          <span className="mq-avg-label">Average</span>
-          {formatScore(group.average)}
-        </span>
       </div>
       {group.summary && <p className="mq-group-summary">{group.summary}</p>}
       <ul className="mq-score-list">
@@ -207,9 +227,23 @@ function CategoryBreakdown({ group }) {
           <li key={`${row.assessmentName}-${index}`} className="mq-score-item" data-pdf-row>
             <div className="mq-score-row">
               <span className="mq-score-name">{row.assessmentName}</span>
-              <ScoreBar score={row.score} />
-              <span className="mq-score-value">{formatScore(row.score)}</span>
+              {row.score != null ? <ScoreBar score={row.score} /> : <span />}
+              <span className="mq-score-value">{formatRowValue(row)}</span>
             </div>
+            {row.subscales.length > 0 && (
+              <ul className="mq-subscales">
+                {row.subscales.map((facet) => (
+                  <li key={facet.name} className="mq-subscale-row">
+                    <span>{facet.name}</span>
+                    {facet.positionPct != null ? <ScoreBar score={facet.positionPct} /> : <span />}
+                    <span>
+                      {facet.positionPct != null ? formatScore(facet.positionPct) : ''}
+                      {facet.band ? ` · ${facet.band}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
             {row.summary && <p className="mq-score-summary">{row.summary}</p>}
           </li>
         ))}

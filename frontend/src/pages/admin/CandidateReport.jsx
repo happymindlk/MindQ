@@ -189,7 +189,6 @@ export default function CandidateReport() {
   const candidate = data?.candidate;
   const status = candidate ? candidateStatus(candidate) : null;
   const synthesis = useMemo(() => readSynthesis(data?.evaluation), [data?.evaluation]);
-  const average = candidate?.avg_score != null ? Number(candidate.avg_score) : null;
 
   const sections = useMemo(() => {
     if (!data) return [];
@@ -297,15 +296,7 @@ export default function CandidateReport() {
       <section className="rounded-lg border border-slate-200 dark:border-neutral-800 bg-surface px-4 py-4">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
-            {average != null ? (
-              <>
-                <p className="metric-label font-display">Average score</p>
-                <p className="mt-1 text-3xl font-semibold tracking-normal tabular-data text-foreground font-display">
-                  {`${Math.round(average)}%`}
-                </p>
-              </>
-            ) : null}
-            <p className={`text-xs text-neutral-500 dark:text-neutral-400 tabular-data ${average != null ? 'mt-1' : ''}`}>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 tabular-data">
               {candidate.completed_assessments}/{candidate.total_assessments} assessments
             </p>
           </div>

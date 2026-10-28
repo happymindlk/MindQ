@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from app.services.instrument_results import IPC_DISPLAY_NAMES, ipc_intensity
 from app.services.profiles.base import DerivedProfile, ProfileInputs
 
 OCTANTS: tuple[str, ...] = ("PA", "BC", "DE", "FG", "HI", "JK", "LM", "NO")
@@ -17,7 +18,7 @@ DIFFERENTIATION_THRESHOLD = 0.3
 UNDIFFERENTIATED = "undifferentiated"
 PRECISION = 3
 
-# (lower_inclusive, upper_exclusive, code, label); LM wraps 0 deg and is the fallback.
+# Clinical labels stay internal; reports use IPC_DISPLAY_NAMES.
 _BANDS: tuple[tuple[float, float, str, str], ...] = (
     (22.5, 67.5, "NO", "Gregarious-Extraverted"),
     (67.5, 112.5, "PA", "Assured-Dominant"),
@@ -68,7 +69,7 @@ class IpipIpcResolver:
     """Resolver for the 32-item IPIP-IPC (8 octants x 4 items)."""
 
     key = "ipip_ipc_v1"
-    version = "1.0.0"
+    version = "1.1.0"
 
     def resolve(self, inputs: ProfileInputs) -> DerivedProfile:
         """Compute circumplex coordinates and interpersonal style.
@@ -109,13 +110,16 @@ class IpipIpcResolver:
         # Classify on unrounded values so rounding can never cross a band edge.
         angle_deg: float | None
         style_code: str | None
+        intensity = ipc_intensity(vector_length)
         if vector_length < DIFFERENTIATION_THRESHOLD:
             angle_deg = None
             style_code = None
-            style_label = UNDIFFERENTIATED
+            clinical = UNDIFFERENTIATED
+            display_name = UNDIFFERENTIATED
         else:
             angle_deg = math.degrees(math.atan2(dominance, warmth)) % 360.0
-            style_code, style_label = classify_angle(angle_deg)
+            style_code, clinical = classify_angle(angle_deg)
+            display_name = IPC_DISPLAY_NAMES.get(style_code, clinical)
 
         return DerivedProfile(
             resolver=self.key,
@@ -127,7 +131,10 @@ class IpipIpcResolver:
                 "vector_length": round(vector_length, PRECISION),
                 "angle_deg": round(angle_deg, PRECISION) if angle_deg is not None else None,
                 "style_code": style_code,
-                "style_label": style_label,
+                "style_label": display_name,
+                "style_label_clinical": clinical,
+                "display_name": display_name,
+                "intensity": intensity,
                 "octant_means": {k: round(v, PRECISION) for k, v in means.items()},
             },
         )

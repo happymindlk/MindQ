@@ -23,7 +23,7 @@ function PackageGridSkeleton({ count = 3 }) {
       {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}
-          className="rounded-lg border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-4 space-y-4"
+          className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
         >
           <div className="flex justify-between gap-3">
             <div className="flex-1 space-y-2">
@@ -52,7 +52,7 @@ function ErrorPanel({ title, message, onRetry }) {
       <AlertTriangle className="w-5 h-5 text-danger" aria-hidden="true" />
       <div>
         <p className="text-sm font-semibold text-foreground">{title}</p>
-        <p className="mt-1 text-xs text-neutral-400">{message}</p>
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{message}</p>
       </div>
       {onRetry && (
         <Button variant="secondary" size="sm" onClick={onRetry}>
@@ -132,6 +132,9 @@ export default function CorporateDetail() {
     }
   }, [deleting, removePackage, toast]);
 
+  const pageClass =
+    'min-h-full space-y-6 bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-slate-100';
+
   const backButton = (
     <Button variant="secondary" size="sm" onClick={() => navigate('/admin')}>
       <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
@@ -141,7 +144,7 @@ export default function CorporateDetail() {
 
   if (corporatesLoading) {
     return (
-      <div className="space-y-6">
+      <div className={pageClass}>
         {backButton}
         <div className="flex items-center gap-4" role="status" aria-label="Loading corporate">
           <Skeleton className="h-16 w-16 rounded-md" />
@@ -157,7 +160,7 @@ export default function CorporateDetail() {
 
   if (corporatesError) {
     return (
-      <div className="space-y-6">
+      <div className={pageClass}>
         {backButton}
         <ErrorPanel
           title="Could not load corporate"
@@ -170,7 +173,7 @@ export default function CorporateDetail() {
 
   if (!corporate) {
     return (
-      <div className="space-y-6">
+      <div className={pageClass}>
         {backButton}
         <EmptyState
           icon={Building2}
@@ -190,7 +193,7 @@ export default function CorporateDetail() {
     );
   } else if (packages.length === 0) {
     packagesBody = (
-      <div className="rounded-lg border border-dashed border-slate-300 dark:border-neutral-800">
+      <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-800">
         <EmptyState
           icon={Package}
           title="No assessment suites yet"
@@ -218,28 +221,33 @@ export default function CorporateDetail() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className={pageClass}>
       {backButton}
 
-      <header className="flex items-center gap-4">
+      <header className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <CorporateLogo name={corporate.name} logoUrl={corporate.logo_url} size="lg" />
         <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-normal text-foreground truncate">
+          <h1 className="truncate font-display text-xl font-bold text-slate-900 dark:text-slate-100">
             {corporate.name}
           </h1>
-          <p className="mt-1 text-xs text-neutral-400 truncate">
+          <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
             {corporate.contact_email || 'No HR email'}
           </p>
         </div>
       </header>
 
-      <section aria-labelledby="packages-heading" className="space-y-3">
-        <div className="flex items-baseline justify-between gap-2">
-          <h2 id="packages-heading" className="metric-label">
+      <section aria-labelledby="packages-heading">
+        <div className="mb-4 flex items-center justify-between">
+          <h2
+            id="packages-heading"
+            className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+          >
             Published Suites
           </h2>
           {!packagesLoading && !packagesError && (
-            <span className="text-xs tabular-data text-neutral-400">{packages.length} total</span>
+            <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+              {packages.length} total
+            </span>
           )}
         </div>
         {packagesBody}
@@ -286,7 +294,7 @@ export default function CorporateDetail() {
           </>
         }
       >
-        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+        <p className="text-sm text-slate-700 dark:text-slate-300">
           Are you sure you want to delete this package? This will revoke access for any pending
           invitations. Candidate records and reports are kept.
         </p>

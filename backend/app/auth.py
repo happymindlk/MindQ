@@ -65,45 +65,7 @@ async def get_current_candidate(
         candidate_id = UUID(payload["sub"])
     except (KeyError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid token subject")
-    try:
-        candidate = await CandidateService.get_candidate(db, candidate_id)
-    except Exception as exc:
-        # #region agent log
-        try:
-            import json
-            import time
-            from pathlib import Path
-
-            orig = getattr(exc, "orig", None)
-            Path(__file__).resolve().parents[2].joinpath("debug-f4446e.log").open(
-                "a", encoding="utf-8"
-            ).write(
-                json.dumps(
-                    {
-                        "sessionId": "f4446e",
-                        "hypothesisId": "A",
-                        "location": "auth.py:get_current_candidate",
-                        "message": "candidate_lookup_db_error",
-                        "data": {
-                            "exc_type": type(exc).__name__,
-                            "exc": str(exc)[:500],
-                            "driver_type": type(orig).__name__ if orig else None,
-                            "driver": str(orig)[:500] if orig else None,
-                            "sqlstate": getattr(orig, "sqlstate", None),
-                            "connection_invalidated": getattr(
-                                exc, "connection_invalidated", None
-                            ),
-                        },
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    default=str,
-                )
-                + "\n"
-            )
-        except OSError:
-            pass
-        # #endregion
-        raise
+    candidate = await CandidateService.get_candidate(db, candidate_id)
     if not candidate:
         raise HTTPException(status_code=401, detail="Candidate not found")
     return candidate

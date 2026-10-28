@@ -11,12 +11,26 @@ ReportCategory = Literal["Cognitive", "Personality", "Behavioral", "Technical"]
 SynthesisStatus = Literal["ok", "failed", "skipped", "pending"]
 
 
+class SubscaleScore(BaseModel):
+    """One trait or facet shown under a module that must not be blended."""
+
+    name: str
+    mean: float | None = None
+    position_pct: float | None = None
+    band: str | None = None
+    band_label: str | None = None
+
+
 class AssessmentBreakdownItem(BaseModel):
-    """One completed, scored assessment in the competency breakdown."""
+    """One completed assessment in the competency breakdown."""
 
     category: ReportCategory
     assessment_name: str
-    score: float = Field(ge=0, le=100)
+    score: float | None = Field(default=None, ge=0, le=100)
+    display_score: str | None = None
+    band: str | None = None
+    score_kind: str | None = None
+    subscales: list[SubscaleScore] = Field(default_factory=list)
     # Exactly one concise sentence on how the candidate performed on this test.
     performance_summary: str
 
@@ -49,16 +63,15 @@ class ReportCustomQuestion(BaseModel):
 class MindQReport(BaseModel):
     """Core MindQ Report content.
 
-    ``category_averages`` only contains categories with at least one completed,
-    scored assessment; a category the candidate never took is absent rather
-    than reported as 0.
+    ``category_averages`` is always null (Scoring Spec v2 forbids unlike-test
+    pillar averages). Clients hide the dashboard cards when this is empty.
     """
 
     candidate_full_name: str
     candidate_email: str
     target_role: str
     total_assessments_completed: int = Field(ge=0)
-    category_averages: dict[ReportCategory, float] = Field(default_factory=dict)
+    category_averages: dict[ReportCategory, float] | None = None
     executive_summary: str
     strengths: list[str] = Field(default_factory=list)
     risks_and_antipatterns: list[str] = Field(default_factory=list)

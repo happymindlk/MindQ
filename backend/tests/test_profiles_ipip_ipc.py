@@ -26,14 +26,14 @@ def _resolve(facets: dict[str, dict]) -> DerivedProfile:
 @pytest.mark.parametrize(
     "octant, expected_label",
     [
-        ("LM", "Warm-Agreeable"),
-        ("NO", "Gregarious-Extraverted"),
-        ("PA", "Assured-Dominant"),
-        ("BC", "Arrogant-Calculating"),
-        ("DE", "Cold-Hearted"),
-        ("FG", "Aloof-Introverted"),
-        ("HI", "Unassured-Submissive"),
-        ("JK", "Unassuming-Ingenuous"),
+        ("LM", "Warm and cooperative"),
+        ("NO", "Outgoing and sociable"),
+        ("PA", "Assured and takes charge"),
+        ("BC", "Competitive and calculating"),
+        ("DE", "Tough-minded and detached"),
+        ("FG", "Reserved and private"),
+        ("HI", "Quiet and deferential"),
+        ("JK", "Easygoing and trusting"),
     ],
 )
 def test_elevated_single_octant_maps_to_its_style(octant, expected_label):
@@ -54,7 +54,8 @@ def test_formulas_match_spec_exactly():
     assert profile.data["angle_deg"] == round(math.degrees(math.atan2(y, x)) % 360.0, 3)
     assert profile.data["octant_means"] == means
     assert profile.resolver == "ipip_ipc_v1"
-    assert profile.version == "1.0.0"
+    assert profile.version == "1.1.0"
+    assert profile.data["intensity"] in {"mild", "moderate", "pronounced", "undifferentiated"}
 
 
 @pytest.mark.parametrize(
