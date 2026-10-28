@@ -193,7 +193,7 @@ export function QuestionEditorModal({
           storage={storage}
         />
 
-        <section aria-label="Question disclaimer" className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+        <section aria-label="Question disclaimer" className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 transition-colors dark:border-slate-800 dark:bg-slate-800/60">
           <Switch
             id={ids.disclaimer}
             checked={question.show_disclaimer}
@@ -216,8 +216,8 @@ export function QuestionEditorModal({
           )}
         </section>
 
-        <section aria-label="Answer builder" className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
-          <h3 className="mb-3 text-sm font-semibold text-white">{QUESTION_TYPE_LABELS[question.type]}</h3>
+        <section aria-label="Answer builder" className="rounded-xl border border-slate-200 bg-slate-50 p-4 transition-colors dark:border-slate-800 dark:bg-slate-800/60">
+          <h3 className="mb-3 font-display text-sm font-bold text-slate-900 dark:text-slate-100">{QUESTION_TYPE_LABELS[question.type]}</h3>
           {question.type === 'sjt' && <SjtBuilder question={question} dispatch={dispatch} disabled={saving} />}
           {question.type === 'mcq' && <McqBuilder question={question} dispatch={dispatch} disabled={saving} />}
           {question.type === 'likert' && <LikertBuilder question={question} dispatch={dispatch} disabled={saving} />}

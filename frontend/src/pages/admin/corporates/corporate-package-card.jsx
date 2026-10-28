@@ -12,13 +12,13 @@ const STATUS_BADGE = {
 };
 
 const secondaryLinkClass =
-  'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium text-neutral-400 border border-neutral-800 transition-colors duration-150 hover:text-neutral-100 hover:bg-neutral-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600';
+  'inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium text-slate-600 border border-slate-200 transition-colors duration-150 hover:text-slate-900 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7048E2] dark:text-slate-300 dark:border-slate-700 dark:hover:text-slate-100 dark:hover:bg-slate-800';
 
 function Metric({ label, value }) {
   return (
     <div>
-      <dt className="text-[11px] uppercase tracking-wider text-neutral-400">{label}</dt>
-      <dd className="mt-1 text-lg font-semibold tabular-data text-foreground">{value}</dd>
+      <dt className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</dt>
+      <dd className="mt-1 font-display text-2xl font-bold tabular-data text-slate-900 dark:text-slate-100">{value}</dd>
     </div>
   );
 }
@@ -37,11 +37,11 @@ function CorporatePackageCard({ pkg, corporateId, onShare, onExtendDeadline, onD
   const badge = STATUS_BADGE[pkg.status] ?? STATUS_BADGE.draft;
 
   return (
-    <article className="flex flex-col gap-4 rounded-lg border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 p-4">
+    <article className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-foreground truncate">{pkg.title}</h3>
-          <p className="mt-1 text-xs text-neutral-400 truncate">
+          <h3 className="truncate font-display text-sm font-bold text-slate-900 dark:text-slate-100">{pkg.title}</h3>
+          <p className="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
             {pkg.target_role || 'No target role'}
           </p>
           <DeadlineLabel closeTime={pkg.close_time} className="mt-1" />
@@ -56,7 +56,7 @@ function CorporatePackageCard({ pkg, corporateId, onShare, onExtendDeadline, onD
               aria-label={`Delete ${pkg.title}`}
               title={`Delete ${pkg.title}`}
               onClick={() => onDelete(pkg)}
-              className="p-1.5 rounded-md text-neutral-400 transition-colors duration-150 hover:text-rose-500 hover:bg-rose-500/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+              className="rounded-md p-1.5 text-slate-500 transition-colors duration-150 hover:bg-rose-500/10 hover:text-rose-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 dark:text-slate-400"
             >
               <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
