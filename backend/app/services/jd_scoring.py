@@ -47,7 +47,8 @@ from app.services.report_synthesis import (
     outcomes_fingerprint,
     prompt_assessments,
 )
-from app.services.scoring import _extract_answer, crt_credit, sjt_credit
+from app.services.instrument_results import sjt_item_tier
+from app.services.scoring import _extract_answer, _parse_number, crt_credit, sjt_credit
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -180,7 +181,7 @@ def _is_blank(answer: Any) -> bool:
 
 
 def _sjt_entry(question: dict[str, Any], text: str, given: Any) -> dict[str, Any]:
-    """SJT evidence: the choice and its credit, never the option weights.
+    """SJT evidence: theme and credit tier, never the chosen option text.
 
     Args:
         question: Stored SJT question (with ``option_weights``).
@@ -188,38 +189,48 @@ def _sjt_entry(question: dict[str, Any], text: str, given: Any) -> dict[str, Any
         given: Candidate's extracted answer.
 
     Returns:
-        ``{scenario, competency, chosen_option, credit}``.
+        ``{theme, competency, credit, credit_tier}``.
     """
     if isinstance(given, (list, tuple)):
         given = given[0] if given else None
     credit = None if _is_blank(given) else sjt_credit(question, given)
+    theme = _competency(question) or (text.strip()[:80] if text else "scenario")
     return {
-        "scenario": text,
+        "theme": theme,
         "competency": _competency(question),
-        "chosen_option": None if _is_blank(given) else str(given),
         "credit": None if credit is None else round(credit, 2),
+        "credit_tier": None if credit is None else sjt_item_tier(credit),
     }
 
 
-def crt_reasoning(question: dict[str, Any], given: Any) -> str:
-    """Classify a CRT answer as reflective / intuitive / unanswered / ungraded.
+_CRT_TRAP_NUMBERS = frozenset({10.0, 0.10, 100.0, 24.0})
 
-    The question bank stores accepted answers but not the trap answer, so any
-    unaccepted answer is reported as intuitive.
+
+def crt_reasoning(question: dict[str, Any], given: Any) -> str:
+    """Classify a CRT answer as reflective / intuitive / other / unanswered / ungraded.
+
+    Known lure answers (10 cents, 100 minutes, 24 days) are intuitive; any other
+    unaccepted answer is ``other``.
 
     Args:
         question: Stored CRT question (``accepted_answers``, ``match``).
         given: Candidate's extracted answer.
 
     Returns:
-        One of ``reflective``, ``intuitive``, ``unanswered``, ``ungraded``.
+        One of ``reflective``, ``intuitive``, ``other``, ``unanswered``, ``ungraded``.
     """
     if _is_blank(given):
         return "unanswered"
     credit = crt_credit(question, given)
     if credit is None:
         return "ungraded"
-    return "reflective" if credit >= 1.0 else "intuitive"
+    if credit >= 1.0:
+        return "reflective"
+    number = _parse_number(given)
+    text = str(given).casefold()
+    if number in _CRT_TRAP_NUMBERS or "10 cent" in text or "100 minute" in text or "24 day" in text:
+        return "intuitive"
+    return "other"
 
 
 def build_evidence(
@@ -241,7 +252,6 @@ def build_evidence(
             for r in responses_by_assessment.get(assessment.id, [])
         }
         open_ended: list[dict[str, Any]] = []
-        likert: list[dict[str, Any]] = []
         mcq_selected: list[dict[str, Any]] = []
         sjt_choices: list[dict[str, Any]] = []
         crt_answers: list[dict[str, Any]] = []
@@ -268,7 +278,6 @@ def build_evidence(
                 crt_answers.append(
                     {
                         "question": public.text,
-                        "answer": given,
                         "reasoning": crt_reasoning(raw, raw_given),
                     }
                 )
@@ -279,9 +288,11 @@ def build_evidence(
                     entry["benchmark_rubric"] = rubric.strip()
                 open_ended.append(entry)
             elif qtype == "likert":
-                likert.append({"question": public.text, "rating": given})
+                continue
             elif qtype == "mcq":
-                mcq_selected.append({"question": public.text, "selected": given})
+                kind = str(getattr(assessment, "module_kind", "") or "technical").lower()
+                if kind != "psychometric":
+                    mcq_selected.append({"question": public.text, "selected": given})
 
         score = None
         if progress is not None and progress.score is not None:
@@ -298,12 +309,19 @@ def build_evidence(
         if crt_answers:
             entry_out["crt"] = crt_answers
         profile = _complete_profile(progress)
-        # Withhold raw Likert ratings when a resolver already did the math, so
-        # the model interprets the computed profile instead of re-deriving it.
+        # Withhold raw Likert ratings; facet means (and IPC profile) are authoritative.
         if profile is not None:
             entry_out["interpersonal_profile"] = profile
-        else:
-            entry_out["likert"] = likert
+        facet_scores = getattr(progress, "facet_scores", None) if progress is not None else None
+        if isinstance(facet_scores, dict) and facet_scores:
+            entry_out["facet_means"] = {
+                str(name): (
+                    {"mean": value.get("mean"), "n": value.get("n")}
+                    if isinstance(value, dict)
+                    else value
+                )
+                for name, value in facet_scores.items()
+            }
         evidence.append(entry_out)
     return evidence
 

@@ -18,9 +18,6 @@ _env = Environment(
     autoescape=select_autoescape(enabled_extensions=("html", "htm", "xml"), default=True),
 )
 
-CATEGORY_DISPLAY_ORDER = ("Cognitive", "Personality", "Behavioral", "Technical")
-
-
 class ReportResourceBlocked(ValueError):
     """WeasyPrint attempted to load a resource outside the allowlist."""
 
@@ -109,28 +106,6 @@ def _safe_logo(url: str | None) -> str:
     return ""
 
 
-def _ordered_category_averages(averages: dict[str, Any] | None) -> list[dict[str, Any]]:
-    """Assessed category cards only, in display order.
-
-    Unassessed categories (missing or null average) are omitted so the report
-    does not render N/A placeholder cards.
-
-    Args:
-        averages: ``category_averages`` from the MindQ Report payload.
-
-    Returns:
-        ``[{"category": str, "average": float}]`` for assessed categories only.
-    """
-    source = averages or {}
-    cards: list[dict[str, Any]] = []
-    for name in CATEGORY_DISPLAY_ORDER:
-        raw = source.get(name)
-        if raw is None:
-            continue
-        cards.append({"category": name, "average": float(raw)})
-    return cards
-
-
 class ReportService:
     @staticmethod
     def render_report_html(report: dict[str, Any]) -> str:
@@ -148,7 +123,7 @@ class ReportService:
         now = datetime.now(timezone.utc)
         return template.render(
             report=report,
-            category_averages=_ordered_category_averages(report.get("category_averages")),
+            category_averages=[],
             corporate_logo_url=_safe_logo(report.get("company_logo_url")),
             generated_at=now.strftime("%B %d, %Y at %H:%M UTC"),
             current_year=now.year,

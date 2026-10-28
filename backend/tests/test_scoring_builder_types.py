@@ -55,7 +55,19 @@ CRT_NUMERIC = {"id": "c1", "type": "crt", "accepted_answers": ["0.05", "5"], "ma
 CRT_EXACT = {"id": "c2", "type": "crt", "accepted_answers": ["five cents"], "match": "exact"}
 
 
-@pytest.mark.parametrize("answer, expected", [("5", 100.0), ("5.000", 100.0), (" .05 ", 100.0), ("10", 0.0), ("ten", 0.0)])
+@pytest.mark.parametrize(
+    "answer, expected",
+    [
+        ("5", 100.0),
+        ("5.000", 100.0),
+        (" .05 ", 100.0),
+        ("$0.05", 100.0),
+        ("5 cents", 100.0),
+        ("five cents", 100.0),
+        ("10", 0.0),
+        ("ten", 0.0),
+    ],
+)
 def test_crt_numeric_match(answer, expected):
     assert score_assessment([CRT_NUMERIC], [_resp("c1", answer)]) == expected
 

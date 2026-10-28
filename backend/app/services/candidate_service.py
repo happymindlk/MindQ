@@ -22,6 +22,7 @@ from app.services.package_window import (
     window_state,
 )
 from app.services.runner_payload import effective_duration_seconds, strict_deadline
+from app.services.instrument_results import SCORING_VERSION, build_score_details
 from app.services.profiles import ItemResult, ProfileInputs, resolve_profile
 from app.services.scoring import ScoreResult, _extract_answer, score_assessment_detailed
 from app.exceptions import (
@@ -797,6 +798,18 @@ class CandidateService:
         progress.facet_scores = result.facet_scores or None
         progress.derived_profile = derive_profile_payload(
             assessment, result, responses, server_seconds
+        )
+        progress.scoring_version = SCORING_VERSION
+        progress.score_details = build_score_details(
+            questions=assessment.questions,
+            result=result,
+            derived_profile=progress.derived_profile,
+            category=(
+                "cognitive"
+                if (getattr(assessment, "module_kind", None) or "").strip().lower()
+                == "psychometric"
+                else "technical"
+            ),
         )
         progress.client_duration_seconds = _elapsed_decimal(client_duration_seconds)
         if server_seconds is not None:

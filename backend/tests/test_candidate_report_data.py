@@ -232,7 +232,7 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
     assert body["candidate_email"] == "pat@ex.com"
     assert body["target_role"] == "Data Analyst"
     assert body["total_assessments_completed"] == 3
-    assert body["category_averages"] == {"Personality": 75.0, "Technical": 85.0}
+    assert body["category_averages"] is None
     assert body["executive_summary"] == "Strong SQL fundamentals with calm temperament."
     assert body["strengths"] == ["Solid indexing rationale."]
     assert body["risks_and_antipatterns"] == ["Light on isolation trade-offs."]
@@ -241,10 +241,13 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
 
     breakdown = body["competency_breakdown"]
     assert [(b["category"], b["assessment_name"], b["score"]) for b in breakdown] == [
-        ("Personality", "Big Five", 75.0),
+        ("Personality", "Big Five", None),
         ("Technical", "SQL Basics", 80.0),
         ("Technical", "Custom Technical", 90.0),
     ]
+    assert breakdown[0]["score_kind"] == "traits"
+    assert breakdown[0]["subscales"][0]["name"] == "Emotional stability"
+    assert breakdown[0]["subscales"][0]["position_pct"] == 25.0
     assert breakdown[1]["performance_summary"] == "Strong SQL."
     assert breakdown[2]["performance_summary"].startswith("Pat scored 90% on Custom Technical")
     assert body["category_summaries"] == [
@@ -261,7 +264,7 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
     assert cq["scorecard"] == ["Correctness: strong"]
     assert "correct_answer" not in str(body)
     assert "secret" not in str(body)
-    assert "trait" not in str(body)
+    assert "I stay calm" not in str(body)
 
     passed = synthesis_stub["calls"][0]["outcomes"]
     assert [o.key for o in passed] == ["A1", "A2", "A3"]
@@ -281,7 +284,8 @@ def test_report_data_falls_back_when_synthesis_fails(app, corp_id, candidate_id,
     assert all(b["performance_summary"] for b in body["competency_breakdown"])
     # Pillar summaries fall back to server-computed prose when synthesis fails.
     assert [s["category"] for s in body["category_summaries"]] == ["Personality"]
-    assert "75" in body["category_summaries"][0]["summary"]
+    assert "Big Five" in body["category_summaries"][0]["summary"]
+    assert "averaged 75" not in body["category_summaries"][0]["summary"]
 
 
 def test_report_data_skipped_synthesis_status(app, corp_id, candidate_id, synthesis_stub):
@@ -354,7 +358,7 @@ def test_report_data_with_no_completed_assessments(app, corp_id, candidate_id, s
     )
     body = client.get(f"/api/v1/candidates/{candidate_id}/report-data").json()
     assert body["total_assessments_completed"] == 0
-    assert body["category_averages"] == {}
+    assert body["category_averages"] is None
     assert body["competency_breakdown"] == []
     assert body["completed_at"] is None
 
@@ -418,4 +422,4 @@ def test_report_data_includes_failed_ai_eval_keys(app, corp_id, candidate_id, sy
     assert cq["ai_eval_status"] == "failed"
     assert body["total_assessments_completed"] == 1
     assert body["competency_breakdown"] == []
-    assert body["category_averages"] == {}
+    assert body["category_averages"] is None

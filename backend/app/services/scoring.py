@@ -52,14 +52,47 @@ def _normalize_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip().casefold()
 
 
+_FIRST_NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)")
+_WORD_NUMBERS = {
+    "zero": 0.0,
+    "one": 1.0,
+    "two": 2.0,
+    "three": 3.0,
+    "four": 4.0,
+    "five": 5.0,
+    "six": 6.0,
+    "seven": 7.0,
+    "eight": 8.0,
+    "nine": 9.0,
+    "ten": 10.0,
+    "twenty": 20.0,
+    "twenty four": 24.0,
+    "hundred": 100.0,
+}
+
+
 def _parse_number(value: Any) -> float | None:
-    text = str(value or "").strip().replace(",", "")
+    text = str(value or "").strip().replace(",", "").replace("$", "")
     if not text:
         return None
     try:
         number = float(text)
     except ValueError:
-        return None
+        match = _FIRST_NUMBER.search(text)
+        if match:
+            try:
+                number = float(match.group(0))
+            except ValueError:
+                number = None
+        else:
+            number = None
+        if number is None:
+            words = re.sub(r"\b(cents?|dollars?|minutes?|days?|hours?)\b", " ", text.casefold())
+            words = re.sub(r"\s+", " ", words).strip()
+            mapped = _WORD_NUMBERS.get(words)
+            if mapped is None:
+                return None
+            number = mapped
     return number if math.isfinite(number) else None
 
 
@@ -78,19 +111,22 @@ def crt_credit(question: dict[str, Any], given: Any) -> float | None:
         return None
     if isinstance(given, (list, tuple)):
         given = given[0] if given else ""
-    if question.get("match") == "numeric":
-        number = _parse_number(given)
-        if number is None:
-            return 0.0
-        for answer in accepted:
-            target = _parse_number(answer)
-            if target is not None and math.isclose(
-                number, target, rel_tol=NUMERIC_REL_TOLERANCE, abs_tol=1e-9
-            ):
-                return 1.0
-        return 0.0
     normalized = _normalize_text(given)
-    return 1.0 if normalized and normalized in {_normalize_text(a) for a in accepted} else 0.0
+    accepted_text = {_normalize_text(a) for a in accepted}
+    if normalized and normalized in accepted_text:
+        return 1.0
+    if question.get("match") != "numeric":
+        return 0.0
+    number = _parse_number(given)
+    if number is None:
+        return 0.0
+    for answer in accepted:
+        target = _parse_number(answer)
+        if target is not None and math.isclose(
+            number, target, rel_tol=NUMERIC_REL_TOLERANCE, abs_tol=1e-9
+        ):
+            return 1.0
+    return 0.0
 
 
 def sjt_credit(question: dict[str, Any], given: Any) -> float | None:
@@ -168,11 +204,27 @@ class ScoreResult:
         score: Percentage over gradable items, or None when nothing is gradable.
         facet_scores: ``{facet: {"mean": float, "n": int}}`` from Likert items.
         gradable_count: Number of items that contributed to ``score``.
+        items_total: Recognized items in the bank.
+        items_answered: Items with a usable response.
+        unanswered_count: ``items_total - items_answered``.
+        uniform_responding: True when ≥90% of ≥8 Likert answers share one value.
+        sjt_points: Sum of chosen SJT weights.
+        sjt_max: Sum of best SJT weights.
+        crt_correct: Accepted CRT answers.
+        crt_total: CRT items in the bank.
     """
 
     score: Optional[float]
     facet_scores: dict[str, dict[str, float | int]] = field(default_factory=dict)
     gradable_count: int = 0
+    items_total: int = 0
+    items_answered: int = 0
+    unanswered_count: int = 0
+    uniform_responding: bool = False
+    sjt_points: float | None = None
+    sjt_max: float | None = None
+    crt_correct: int | None = None
+    crt_total: int | None = None
 
 
 def score_assessment_detailed(questions: Optional[list], responses: Iterable) -> ScoreResult:
@@ -192,26 +244,68 @@ def score_assessment_detailed(questions: Optional[list], responses: Iterable) ->
     gradable = 0
     earned = 0.0
     facet_totals: dict[str, list[float]] = {}
+    items_total = 0
+    items_answered = 0
+    likert_raw: list[float] = []
+    sjt_points = 0.0
+    sjt_max = 0.0
+    sjt_items = 0
+    crt_correct = 0
+    crt_items = 0
     for q in questions or []:
         if not isinstance(q, dict):
             continue
         qtype = str(q.get("type", "")).lower()
+        if qtype not in {"likert", "mcq", "sjt", "crt", "open", "open_ended"}:
+            continue
+        scored_type = qtype in {"likert", "mcq", "sjt", "crt"}
+        if scored_type:
+            items_total += 1
         given = resp_map.get(str(q.get("id")))
 
         if qtype == "likert":
             value = _likert_value(q, given)
             if value is None:
                 continue
+            items_answered += 1
+            # Uniform-responding uses the selected index, not the reverse recode.
+            selected = _parse_number(given if not isinstance(given, (list, tuple)) else (given[0] if given else None))
+            if selected is not None:
+                likert_raw.append(selected)
             facet = str(q.get("facet") or q.get("evaluated_competency") or "General").strip() or "General"
             facet_totals.setdefault(facet, []).append(value)
             continue
+
+        blank = given is None or (
+            isinstance(given, (list, tuple)) and not any(str(a).strip() for a in given)
+        ) or (not isinstance(given, (list, tuple, dict)) and not str(given).strip())
+        if qtype in {"mcq", "sjt", "crt"} and not blank:
+            items_answered += 1
 
         if qtype == "mcq":
             credit = _mcq_credit(q, given)
         elif qtype == "sjt":
             credit = sjt_credit(q, given)
+            weights = q.get("option_weights") or []
+            options = [str(o) for o in (q.get("options") or [])]
+            if options and len(weights) == len(options):
+                try:
+                    numeric_weights = [float(w) for w in weights]
+                except (TypeError, ValueError):
+                    numeric_weights = []
+                if numeric_weights:
+                    sjt_items += 1
+                    sjt_max += max(numeric_weights)
+                    if not blank and given is not None:
+                        choice = str(given[0] if isinstance(given, (list, tuple)) else given).strip()
+                        if choice in options:
+                            sjt_points += numeric_weights[options.index(choice)]
         elif qtype == "crt":
             credit = crt_credit(q, given)
+            if credit is not None:
+                crt_items += 1
+                if credit >= 1.0:
+                    crt_correct += 1
         else:
             credit = None
         if credit is None:
@@ -224,7 +318,25 @@ def score_assessment_detailed(questions: Optional[list], responses: Iterable) ->
         for facet, values in facet_totals.items()
     }
     score = round(earned / gradable * 100, 2) if gradable else None
-    return ScoreResult(score=score, facet_scores=facet_scores, gradable_count=gradable)
+    uniform = False
+    if len(likert_raw) >= 8:
+        counts: dict[float, int] = {}
+        for value in likert_raw:
+            counts[value] = counts.get(value, 0) + 1
+        uniform = max(counts.values()) / len(likert_raw) >= 0.9
+    return ScoreResult(
+        score=score,
+        facet_scores=facet_scores,
+        gradable_count=gradable,
+        items_total=items_total,
+        items_answered=items_answered,
+        unanswered_count=max(0, items_total - items_answered),
+        uniform_responding=uniform,
+        sjt_points=sjt_points if sjt_items else None,
+        sjt_max=sjt_max if sjt_items else None,
+        crt_correct=crt_correct if crt_items else None,
+        crt_total=crt_items if crt_items else None,
+    )
 
 
 def score_assessment(questions: Optional[list], responses: Iterable) -> Optional[float]:

@@ -86,17 +86,10 @@ describe('MindQReport', () => {
     expect(within(footer).getByText(SPEC_FIT_DISCLAIMER)).toBeInTheDocument();
   });
 
-  it('renders only assessed category cards and omits N/A placeholders', () => {
+  it('does not render unlike-test pillar average cards', () => {
     render(<MindQReport data={BASE} />);
-    const cards = screen.getByRole('region', { name: 'Category scores' });
-    const labels = [...cards.querySelectorAll('.mq-dash-label')].map((el) => el.textContent);
-    expect(labels).toEqual(['Cognitive', 'Personality']);
-    expect(within(cards).getByText('82.5%')).toBeInTheDocument();
-    expect(within(cards).getByText('64%')).toBeInTheDocument();
-    expect(within(cards).queryByText('N/A')).not.toBeInTheDocument();
-    expect(within(cards).queryByText('Not assessed')).not.toBeInTheDocument();
-    expect(within(cards).queryByText('Technical')).not.toBeInTheDocument();
-    expect(within(cards).queryByText('Behavioral')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Category scores' })).not.toBeInTheDocument();
+    expect(screen.queryByText('82.5%')).not.toBeInTheDocument();
   });
 
   it('never renders AI, fit, MCQ, or recommendation copy even if the payload carries them', () => {
@@ -160,7 +153,7 @@ describe('MindQReport', () => {
     expect(first).toHaveAttribute('data-pdf-block');
     expect(first).toHaveClass('break-inside-avoid', 'print:break-inside-avoid', 'print:break-after-auto');
     expect(within(first).getByRole('heading', { name: 'Executive Summary' })).toBeInTheDocument();
-    expect(within(first).getByRole('region', { name: 'Category scores' })).toBeInTheDocument();
+    expect(within(first).queryByRole('region', { name: 'Category scores' })).not.toBeInTheDocument();
 
     container.querySelectorAll('article.mq-group').forEach((group) => {
       expect(group).toHaveAttribute('data-pdf-block');

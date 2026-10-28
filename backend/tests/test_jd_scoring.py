@@ -99,7 +99,7 @@ def test_prompt_does_not_embed_json_schema():
         "Do not include any overall hiring recommendation (such as 'Hire', 'Strong Hire', "
         "or 'Do Not Hire') and do not generate a 'Candidate Fit' score.",
         "For each assessment in the competency breakdown, generate exactly one analytical "
-        "sentence summarizing the candidate's performance based on their score.",
+        "sentence summarizing the candidate's performance based on their score, band, display_score, and subscales.",
         "Generate an executive summary and detailed bullet points for Strengths and "
         "Risks/Anti-patterns.",
         "The psychometric assessments are grouped into three pillars: Cognitive, Personality, "
@@ -123,7 +123,7 @@ def test_prompt_falls_back_to_package_title_without_role():
 
 
 def test_prompt_version_is_report_synthesis():
-    assert PROMPT_VERSION == "mindq-report-v2"
+    assert PROMPT_VERSION == "mindq-report-v3"
 
 
 def test_build_evidence_strips_answer_keys():
@@ -410,7 +410,7 @@ def test_report_html_renders_synthesis_without_fit_or_recommendation():
     assert "Assessment Report" in html
     assert "MindQ Report - " in html
     assert "Solid quantitative reasoning" in html
-    assert "62.5%" in html
+    assert "62.5%" not in html
     assert "strong numerical reasoning" in html
     assert "Risks &amp; Anti-patterns" in html
     assert "Overall Fit" not in html
@@ -426,13 +426,13 @@ def test_report_html_renders_synthesis_without_fit_or_recommendation():
     assert "Strong quantitative pillar overall." in html
 
 
-def test_report_html_omits_unassessed_category_cards():
-    html = ReportService.render_report_html(_report(category_averages={"Cognitive": 80.0}))
-    assert "80.0%" in html
-    assert "Cognitive" in html
+def test_report_html_omits_pillar_average_cards():
+    html = ReportService.render_report_html(
+        _report(category_averages={"Cognitive": 80.0, "Personality": 10.0, "Technical": 62.5})
+    )
     assert "N/A" not in html
-    for category in ("Personality", "Behavioral", "Technical"):
-        assert category not in html
+    assert "Personality" not in html
+    assert "62.5%" not in html
 
 
 def test_report_html_skipped_synthesis():
@@ -496,6 +496,7 @@ def _likert_evidence(derived_profile):
         status="COMPLETED",
         score=None,
         derived_profile=derived_profile,
+        facet_scores={"PA": {"mean": 5.0, "n": 1}},
     )
     response = SimpleNamespace(
         assessment_id=assessment.id, question_id="l1", response={"answer": 5}
@@ -509,6 +510,7 @@ def test_complete_profile_replaces_raw_likert():
     profile = evidence[0]["interpersonal_profile"]
     assert profile["resolver"] == "ipip_ipc_v1"
     assert profile["style_label"] == "Assured-Dominant"
+    assert evidence[0]["facet_means"]["PA"]["mean"] == 5.0
     assert profile["dominance"] == 2.0
     score_against_jd(
         job_description="Team lead",
@@ -532,7 +534,8 @@ def test_complete_profile_replaces_raw_likert():
 def test_non_complete_profile_falls_back_to_likert(derived_profile):
     evidence = _likert_evidence(derived_profile)
     assert "interpersonal_profile" not in evidence[0]
-    assert evidence[0]["likert"] == [{"question": "I take charge.", "rating": 5}]
+    assert "likert" not in evidence[0]
+    assert evidence[0]["facet_means"] == {"PA": {"mean": 5.0, "n": 1}}
 
 
 def test_prompt_marks_interpersonal_profile_authoritative():
@@ -585,14 +588,11 @@ def _module_evidence(questions, answers, title="Module"):
 )
 def test_build_evidence_includes_sjt_choice_competency_and_credit(answer, credit):
     entry = _module_evidence([SJT_ITEM], {"s1": answer}, title="Situational Judgment")
-    assert entry["sjt"] == [
-        {
-            "scenario": SJT_ITEM["text"],
-            "competency": "Decision Making",
-            "chosen_option": answer,
-            "credit": credit,
-        }
-    ]
+    assert entry["sjt"][0]["competency"] == "Decision Making"
+    assert entry["sjt"][0]["credit"] == credit
+    assert entry["sjt"][0]["theme"] == "Decision Making"
+    assert "chosen_option" not in entry["sjt"][0]
+    assert "credit_tier" in entry["sjt"][0]
     dumped = json.dumps(entry)
     assert "option_weights" not in dumped
     assert "sme_rationale" not in dumped
@@ -601,14 +601,13 @@ def test_build_evidence_includes_sjt_choice_competency_and_credit(answer, credit
 
 def test_build_evidence_sjt_unanswered_has_no_choice_or_credit():
     entry = _module_evidence([SJT_ITEM], {})
-    assert entry["sjt"][0]["chosen_option"] is None
     assert entry["sjt"][0]["credit"] is None
+    assert entry["sjt"][0]["credit_tier"] is None
 
 
 def test_build_evidence_sjt_without_weights_reports_null_credit():
     unweighted = {**SJT_ITEM, "option_weights": [1, 2]}
     entry = _module_evidence([unweighted], {"s1": "Stay late"})
-    assert entry["sjt"][0]["chosen_option"] == "Stay late"
     assert entry["sjt"][0]["credit"] is None
 
 
@@ -621,14 +620,15 @@ def test_build_evidence_sjt_without_weights_reports_null_credit():
         (CRT_MALFORMED, "   ", "unanswered"),
         (CRT_NUMERIC, "5.0", "reflective"),
         (CRT_NUMERIC, "100", "intuitive"),
-        (CRT_NUMERIC, "a lot", "intuitive"),
+        (CRT_NUMERIC, "a lot", "other"),
     ],
 )
 def test_build_evidence_includes_crt_prompt_answer_and_reasoning(question, answer, reasoning):
     entry = _module_evidence([question], {question["id"]: answer}, title="CRT")
     assert entry["crt"] == [
-        {"question": question["text"], "answer": answer, "reasoning": reasoning}
+        {"question": question["text"], "reasoning": reasoning}
     ]
+    assert "answer" not in entry["crt"][0]
     dumped = json.dumps(entry)
     assert "accepted_answers" not in dumped
     assert '"5 cents"' not in dumped
@@ -663,7 +663,8 @@ def test_sjt_crt_evidence_passes_leak_guard_end_to_end():
         complete=complete,
     )
     assert '"reasoning": "reflective"' in captured["prompt"]
-    assert '"chosen_option": "Stay late"' in captured["prompt"]
+    assert "chosen_option" not in captured["prompt"]
+    assert "credit_tier" in captured["prompt"]
 
 
 def test_prompt_explains_sjt_credit_and_crt_reasoning():
