@@ -352,7 +352,10 @@ describe('AssessmentRunner autosave race', () => {
     await user.click(screen.getByRole('radio', { name: /Alpha/ }));
     await user.click(screen.getByRole('button', { name: /Next question/ }));
     expect(transport.autosave).toHaveBeenCalledTimes(1);
-    expect(transport.autosave.mock.calls[0][0].question_id).toBe('q1');
+    expect(transport.autosave).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ question_id: 'q1' }),
+    );
 
     await user.click(screen.getByRole('button', { name: /Previous/ }));
     await user.click(screen.getByRole('radio', { name: /Beta/ }));
@@ -360,7 +363,8 @@ describe('AssessmentRunner autosave race', () => {
 
     resolveSave?.();
     await waitFor(() => expect(transport.autosave).toHaveBeenCalledTimes(2));
-    expect(transport.autosave.mock.calls[1][0]).toEqual(
+    expect(transport.autosave).toHaveBeenNthCalledWith(
+      2,
       expect.objectContaining({
         question_id: 'q1',
         response: { answer: 'Beta' },
