@@ -128,6 +128,21 @@ def test_likert_rejects_label_text_and_out_of_range_values(answer):
     assert score_assessment_detailed([question], responses).facet_scores == {}
 
 
+def test_seven_point_likert_accepts_6_and_7_and_reverse_recode():
+    question = {
+        "id": "p1",
+        "type": "likert",
+        "facet": "Personal Initiative",
+        "scale_points": 7,
+        "scale_labels": ["1", "2", "3", "4", "5", "6", "7"],
+    }
+    result = score_assessment_detailed([question], [_resp("p1", 7)])
+    assert result.facet_scores["Personal Initiative"] == {"mean": 7.0, "n": 1}
+    reversed_item = {**question, "id": "p2", "reverse_scored": True}
+    recoded = score_assessment_detailed([reversed_item], [_resp("p2", 7)])
+    assert recoded.facet_scores["Personal Initiative"] == {"mean": 1.0, "n": 1}
+
+
 def test_mixed_bank_averages_only_gradable_items():
     questions = [SJT, MCQ_MULTI, CRT_NUMERIC, {"id": "o1", "type": "open"}]
     responses = [_resp("s1", "Help"), _resp("m1", ["2"]), _resp("c1", "5"), _resp("o1", "essay")]

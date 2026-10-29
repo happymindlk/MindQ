@@ -147,6 +147,7 @@ export function AssessmentRunner({
       inFlightSaveRef.current.add(questionId);
       dirtyRef.current.delete(questionId);
       setSaveStatus('saving');
+      let failed = false;
       try {
         await transport.autosave({
           assessment_id: test.id,
@@ -156,6 +157,7 @@ export function AssessmentRunner({
         });
         setSaveStatus('saved');
       } catch (err) {
+        failed = true;
         dirtyRef.current.add(questionId);
         setSaveStatus('error');
         if (isTimeExpired(err)) {
@@ -166,6 +168,9 @@ export function AssessmentRunner({
         }
       } finally {
         inFlightSaveRef.current.delete(questionId);
+        if (!failed && dirtyRef.current.has(questionId)) {
+          void saveQuestion(questionId);
+        }
       }
     },
     [onLocked, submit, telemetry, test.id, transport],

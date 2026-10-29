@@ -131,6 +131,8 @@ def test_rewrite_local_media_url_maps_localhost_to_configured_origin(monkeypatch
     remote = "https://proj.supabase.co" + MEDIA_PATH
     assert rewrite_local_media_url(remote) == remote
     assert rewrite_local_media_url(None) is None
+    assert rewrite_local_media_url("assets/icar/q09_matrix.jpg") == "/assets/icar/q09_matrix.jpg"
+    assert rewrite_local_media_url("/assets/icar/q09_matrix.jpg") == "/assets/icar/q09_matrix.jpg"
 
 
 def test_unknown_fields_are_forbidden():
@@ -172,11 +174,31 @@ def test_likert_custom_labels_round_trip_and_mirror_endpoints():
     assert question_payload_adapter.validate_python(rebuilt).to_storage() == stored
 
 
+def test_likert_seven_point_round_trip():
+    labels = [
+        "Totally Disagree",
+        "Disagree",
+        "Moderately Disagree",
+        "Neither",
+        "Moderately Agree",
+        "Agree",
+        "Totally Agree",
+    ]
+    stored = question_payload_adapter.validate_python(
+        {"type": "likert", "prompt": "Q", "scale_labels": labels}
+    ).to_storage()
+    assert stored["scale_points"] == 7
+    assert stored["scale_labels"] == labels
+    rebuilt = payload_from_storage(stored)
+    assert rebuilt is not None
+    assert rebuilt["scale_labels"] == labels
+
+
 @pytest.mark.parametrize(
     "labels, message",
     [
         (["a", "b", "c", "d"], "at least 5"),
-        (["a", "b", "c", "d", "e", "f"], "at most 5"),
+        (["a", "b", "c", "d", "e", "f", "g", "h"], "at most 7"),
         (["a", "b", " ", "d", "e"], "filled in"),
         (["a", "B", "b", "d", "e"], "unique"),
         (["a", "b", "c", "d", "x" * 65], "64 characters"),

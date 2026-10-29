@@ -37,6 +37,23 @@ describe('RunnerQuestionInput likert', () => {
     );
   });
 
+  it('renders seven Personal Initiative anchors and emits 7', async () => {
+    const onChange = vi.fn();
+    const labels = [
+      'Totally Disagree',
+      'Disagree',
+      'Moderately Disagree',
+      'Neither',
+      'Moderately Agree',
+      'Agree',
+      'Totally Agree',
+    ];
+    render(<RunnerQuestionInput question={likert({ scale_labels: labels })} value={undefined} disabled={false} onChange={onChange} />);
+    expect(screen.getAllByRole('radio')).toHaveLength(7);
+    await userEvent.setup().click(screen.getByRole('radio', { name: /7 of 7/i }));
+    expect(onChange).toHaveBeenCalledWith(7);
+  });
+
   it('builds a full agreement scale from legacy endpoint labels', () => {
     render(
       <RunnerQuestionInput

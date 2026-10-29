@@ -11,8 +11,8 @@ Gradable item types, each contributing a credit in [0, 1]:
 * ``crt``  — strict match against ``accepted_answers`` (exact text or numeric).
 
 Likert items are not right/wrong: they feed per-facet means (reverse-scored
-items recoded ``6 - x``) returned in ``facet_scores``. Assessments with no
-gradable items return a None score rather than fabricating a number.
+items recoded ``(min + max) - x``) returned in ``facet_scores``. Assessments
+with no gradable items return a None score rather than fabricating a number.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from app.schemas.question_payload import split_accepted_answers
 
 LIKERT_MIN = 1
 LIKERT_MAX = 5
+LIKERT_MAX_POINTS = 7
 NUMERIC_REL_TOLERANCE = 1e-6
 
 
@@ -129,6 +130,96 @@ def crt_credit(question: dict[str, Any], given: Any) -> float | None:
     return 0.0
 
 
+def likert_scale_max(question: dict[str, Any] | None) -> int:
+    """Return the inclusive upper bound of a Likert item.
+
+    Args:
+        question: Stored Likert question, or None.
+
+    Returns:
+        ``scale_points`` / label count when in 5–7, otherwise the 5-point default.
+    """
+    if not isinstance(question, dict):
+        return LIKERT_MAX
+    points = question.get("scale_points")
+    if isinstance(points, bool) or not isinstance(points, (int, float)):
+        points = None
+    elif int(points) != points:
+        points = None
+    else:
+        points = int(points)
+    if points is None:
+        labels = question.get("scale_labels")
+        if isinstance(labels, (list, tuple)) and labels:
+            points = len(labels)
+    if points is None or not (LIKERT_MAX <= points <= LIKERT_MAX_POINTS):
+        return LIKERT_MAX
+    return points
+
+
+def likert_scale_max_from_questions(questions: Iterable | None) -> int:
+    """Widest Likert scale among a stored question bank.
+
+    Args:
+        questions: Assessment or catalog questions.
+
+    Returns:
+        5 unless a 6- or 7-point item is present.
+    """
+    widest = LIKERT_MAX
+    for question in questions or []:
+        if not isinstance(question, dict):
+            continue
+        if str(question.get("type", "")).lower() != "likert":
+            continue
+        widest = max(widest, likert_scale_max(question))
+    return widest
+
+
+def _option_letter(text: str) -> str | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    head = stripped[0].upper()
+    if head not in "ABCDEFGH":
+        return None
+    if len(stripped) == 1 or stripped[1] in ".)":
+        return head
+    return None
+
+
+def resolve_choice(given: Any, options: list[str]) -> str | None:
+    """Map a candidate answer onto an option string.
+
+    Accepts the full option text or a letter key (``B`` / ``B.``) so catalog
+    vectors keyed A–D still score after options are stored as ``B. text``.
+
+    Args:
+        given: Extracted candidate answer.
+        options: Stored option strings.
+
+    Returns:
+        Matching option text, or None when blank.
+    """
+    if given is None:
+        return None
+    if isinstance(given, (list, tuple)):
+        given = given[0] if given else None
+    if given is None:
+        return None
+    choice = str(given).strip()
+    if not choice:
+        return None
+    if choice in options:
+        return choice
+    letter = choice.upper() if len(choice) == 1 else _option_letter(choice)
+    if letter:
+        for option in options:
+            if option.strip().upper() == letter or _option_letter(option) == letter:
+                return option
+    return choice
+
+
 def sjt_credit(question: dict[str, Any], given: Any) -> float | None:
     """Score one SJT choice as its weight relative to the best option.
 
@@ -150,11 +241,11 @@ def sjt_credit(question: dict[str, Any], given: Any) -> float | None:
     best = max(numeric_weights)
     if best <= 0:
         return None
-    if isinstance(given, (list, tuple)):
-        given = given[0] if given else None
     if given is None:
         return 0.0
-    choice = str(given).strip()
+    choice = resolve_choice(given, options)
+    if choice is None:
+        return 0.0
     if choice in options:
         return numeric_weights[options.index(choice)] / best
     return 0.0
@@ -164,7 +255,18 @@ def _mcq_credit(question: dict[str, Any], given: Any) -> float | None:
     correct_answer = question.get("correct_answer")
     if correct_answer is None:
         return None
+    options = [str(o) for o in (question.get("options") or [])]
     expected = _normalize_answer_set(correct_answer)
+    if options:
+        resolved_expected: set[str] = set()
+        for item in expected:
+            matched = resolve_choice(item, options)
+            resolved_expected.add(matched if matched is not None else item)
+        expected = resolved_expected
+        if isinstance(given, (list, tuple)):
+            given = [resolve_choice(item, options) or item for item in given]
+        else:
+            given = resolve_choice(given, options)
     if not expected:
         return None
     return 1.0 if _normalize_answer_set(given) == expected else 0.0
@@ -181,18 +283,19 @@ def _likert_value(question: dict[str, Any], given: Any) -> float | None:
         given: Candidate response — the 1-based index of the chosen point.
 
     Returns:
-        The index (recoded ``6 - x`` when reverse scored), or None when the
-        response is missing, non-integral, or outside 1–5.
+        The index (recoded ``(min + max) - x`` when reverse scored), or None
+        when the response is missing, non-integral, or outside the item scale.
     """
     if isinstance(given, (list, tuple)):
         given = given[0] if given else None
     if isinstance(given, bool):
         return None
     number = _parse_number(given)
-    if number is None or not number.is_integer() or not (LIKERT_MIN <= number <= LIKERT_MAX):
+    scale_max = likert_scale_max(question)
+    if number is None or not number.is_integer() or not (LIKERT_MIN <= number <= scale_max):
         return None
     if question.get("reverse_scored"):
-        number = (LIKERT_MIN + LIKERT_MAX) - number
+        number = (LIKERT_MIN + scale_max) - number
     return float(number)
 
 
@@ -297,7 +400,7 @@ def score_assessment_detailed(questions: Optional[list], responses: Iterable) ->
                     sjt_items += 1
                     sjt_max += max(numeric_weights)
                     if not blank and given is not None:
-                        choice = str(given[0] if isinstance(given, (list, tuple)) else given).strip()
+                        choice = resolve_choice(given, options)
                         if choice in options:
                             sjt_points += numeric_weights[options.index(choice)]
         elif qtype == "crt":

@@ -40,6 +40,15 @@ describe('runner logic', () => {
     ]);
   });
 
+  it('buildResponses keys answers by item id after a shuffled presentation order', () => {
+    const answers = { hex_08: 2, mini_01: 5, ipc_01: 4 };
+    const out = buildResponses('mod', answers, () => 1);
+    expect(out.map((row) => row.question_id).sort()).toEqual(['hex_08', 'ipc_01', 'mini_01']);
+    expect(out.every((row) => typeof row.question_id === 'string' && Number.isNaN(Number(row.question_id)))).toBe(
+      true,
+    );
+  });
+
   it('resolveTopDisclaimer requires the flag and non-empty text', () => {
     expect(
       resolveTopDisclaimer({

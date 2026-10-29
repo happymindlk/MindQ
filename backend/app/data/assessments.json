@@ -1,0 +1,2650 @@
+{
+  "schemaVersion": "1.0",
+  "generatedFrom": [
+    "Original_Assessments_-_Questions_-_Statements__1.docx",
+    "Original_Assessments_-_Scoring_Mechanism__1.docx"
+  ],
+  "assessments": [
+    {
+      "id": "ipip_ipc",
+      "displayName": "IPIP Interpersonal Circumplex (IPIP-IPC)",
+      "category": "behavioral",
+      "instrumentType": "likert",
+      "itemCount": 32,
+      "responseScale": [
+        {
+          "value": 1,
+          "label": "Very Inaccurate"
+        },
+        {
+          "value": 2,
+          "label": "Moderately Inaccurate"
+        },
+        {
+          "value": 3,
+          "label": "Neither Inaccurate nor Accurate"
+        },
+        {
+          "value": 4,
+          "label": "Moderately Accurate"
+        },
+        {
+          "value": 5,
+          "label": "Very Accurate"
+        }
+      ],
+      "reverseScoring": false,
+      "scales": [
+        {
+          "id": "PA",
+          "name": "Assured-Dominant",
+          "itemNumbers": [
+            6,
+            14,
+            22,
+            30
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum"
+        },
+        {
+          "id": "BC",
+          "name": "Arrogant-Calculating",
+          "itemNumbers": [
+            7,
+            15,
+            23,
+            31
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum"
+        },
+        {
+          "id": "DE",
+          "name": "Cold-Hearted",
+          "itemNumbers": [
+            8,
+            16,
+            24,
+            32
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum"
+        },
+        {
+          "id": "FG",
+          "name": "Aloof-Introverted",
+          "itemNumbers": [
+            1,
+            9,
+            17,
+            25
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum"
+        },
+        {
+          "id": "HI",
+          "name": "Unassured-Submissive",
+          "itemNumbers": [
+            2,
+            10,
+            18,
+            26
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum"
+        },
+        {
+          "id": "JK",
+          "name": "Unassuming-Ingenuous",
+          "itemNumbers": [
+            3,
+            11,
+            19,
+            27
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum"
+        },
+        {
+          "id": "LM",
+          "name": "Warm-Agreeable",
+          "itemNumbers": [
+            4,
+            12,
+            20,
+            28
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum"
+        },
+        {
+          "id": "NO",
+          "name": "Gregarious-Extraverted",
+          "itemNumbers": [
+            5,
+            13,
+            21,
+            29
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum"
+        }
+      ],
+      "items": [
+        {
+          "id": "ipc_01",
+          "n": 1,
+          "text": "I am quiet around strangers.",
+          "scale": "FG",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_02",
+          "n": 2,
+          "text": "I speak softly.",
+          "scale": "HI",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_03",
+          "n": 3,
+          "text": "I tolerate a lot from others",
+          "scale": "JK",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_04",
+          "n": 4,
+          "text": "I am interested in people",
+          "scale": "LM",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_05",
+          "n": 5,
+          "text": "I feel comfortable around people",
+          "scale": "NO",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_06",
+          "n": 6,
+          "text": "I demand to be the center of interest",
+          "scale": "PA",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_07",
+          "n": 7,
+          "text": "I cut others to pieces",
+          "scale": "BC",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_08",
+          "n": 8,
+          "text": "I believe people should fend for themselves",
+          "scale": "DE",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_09",
+          "n": 9,
+          "text": "I am a very private person",
+          "scale": "FG",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_10",
+          "n": 10,
+          "text": "I let others finish what they are saying",
+          "scale": "HI",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_11",
+          "n": 11,
+          "text": "I take things as they come",
+          "scale": "JK",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_12",
+          "n": 12,
+          "text": "I reassure others",
+          "scale": "LM",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_13",
+          "n": 13,
+          "text": "I start conversations",
+          "scale": "NO",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_14",
+          "n": 14,
+          "text": "I do most of the talking",
+          "scale": "PA",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_15",
+          "n": 15,
+          "text": "I contradict others",
+          "scale": "BC",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_16",
+          "n": 16,
+          "text": "I don't fall for sob-stories",
+          "scale": "DE",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_17",
+          "n": 17,
+          "text": "I don't talk a lot",
+          "scale": "FG",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_18",
+          "n": 18,
+          "text": "I seldom toot my own horn",
+          "scale": "HI",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_19",
+          "n": 19,
+          "text": "I think of others first",
+          "scale": "JK",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_20",
+          "n": 20,
+          "text": "I inquire about others' well-being",
+          "scale": "LM",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_21",
+          "n": 21,
+          "text": "I talk to a lot of different people at parties",
+          "scale": "NO",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_22",
+          "n": 22,
+          "text": "I speak loudly",
+          "scale": "PA",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_23",
+          "n": 23,
+          "text": "I snap at people",
+          "scale": "BC",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_24",
+          "n": 24,
+          "text": "I don't put a lot of thought into things",
+          "scale": "DE",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_25",
+          "n": 25,
+          "text": "I have little to say",
+          "scale": "FG",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_26",
+          "n": 26,
+          "text": "I dislike being the center of attention",
+          "scale": "HI",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_27",
+          "n": 27,
+          "text": "I seldom stretch the truth",
+          "scale": "JK",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_28",
+          "n": 28,
+          "text": "I get along well with others",
+          "scale": "LM",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_29",
+          "n": 29,
+          "text": "I love large parties",
+          "scale": "NO",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_30",
+          "n": 30,
+          "text": "I demand attention",
+          "scale": "PA",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_31",
+          "n": 31,
+          "text": "I have a sharp tongue",
+          "scale": "BC",
+          "keying": "+"
+        },
+        {
+          "id": "ipc_32",
+          "n": 32,
+          "text": "I am not interested in other people's problems",
+          "scale": "DE",
+          "keying": "+"
+        }
+      ],
+      "testVectors": [
+        {
+          "name": "all_min",
+          "responses": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1,
+            "19": 1,
+            "20": 1,
+            "21": 1,
+            "22": 1,
+            "23": 1,
+            "24": 1,
+            "25": 1,
+            "26": 1,
+            "27": 1,
+            "28": 1,
+            "29": 1,
+            "30": 1,
+            "31": 1,
+            "32": 1
+          },
+          "expected": {
+            "PA": 4,
+            "BC": 4,
+            "DE": 4,
+            "FG": 4,
+            "HI": 4,
+            "JK": 4,
+            "LM": 4,
+            "NO": 4
+          }
+        },
+        {
+          "name": "all_max",
+          "responses": {
+            "1": 5,
+            "2": 5,
+            "3": 5,
+            "4": 5,
+            "5": 5,
+            "6": 5,
+            "7": 5,
+            "8": 5,
+            "9": 5,
+            "10": 5,
+            "11": 5,
+            "12": 5,
+            "13": 5,
+            "14": 5,
+            "15": 5,
+            "16": 5,
+            "17": 5,
+            "18": 5,
+            "19": 5,
+            "20": 5,
+            "21": 5,
+            "22": 5,
+            "23": 5,
+            "24": 5,
+            "25": 5,
+            "26": 5,
+            "27": 5,
+            "28": 5,
+            "29": 5,
+            "30": 5,
+            "31": 5,
+            "32": 5
+          },
+          "expected": {
+            "PA": 20,
+            "BC": 20,
+            "DE": 20,
+            "FG": 20,
+            "HI": 20,
+            "JK": 20,
+            "LM": 20,
+            "NO": 20
+          }
+        },
+        {
+          "name": "all_mid",
+          "responses": {
+            "1": 3,
+            "2": 3,
+            "3": 3,
+            "4": 3,
+            "5": 3,
+            "6": 3,
+            "7": 3,
+            "8": 3,
+            "9": 3,
+            "10": 3,
+            "11": 3,
+            "12": 3,
+            "13": 3,
+            "14": 3,
+            "15": 3,
+            "16": 3,
+            "17": 3,
+            "18": 3,
+            "19": 3,
+            "20": 3,
+            "21": 3,
+            "22": 3,
+            "23": 3,
+            "24": 3,
+            "25": 3,
+            "26": 3,
+            "27": 3,
+            "28": 3,
+            "29": 3,
+            "30": 3,
+            "31": 3,
+            "32": 3
+          },
+          "expected": {
+            "PA": 12,
+            "BC": 12,
+            "DE": 12,
+            "FG": 12,
+            "HI": 12,
+            "JK": 12,
+            "LM": 12,
+            "NO": 12
+          }
+        },
+        {
+          "name": "mixed_seeded",
+          "responses": {
+            "1": 3,
+            "2": 2,
+            "3": 4,
+            "4": 1,
+            "5": 1,
+            "6": 5,
+            "7": 1,
+            "8": 3,
+            "9": 5,
+            "10": 1,
+            "11": 5,
+            "12": 2,
+            "13": 1,
+            "14": 1,
+            "15": 4,
+            "16": 4,
+            "17": 1,
+            "18": 2,
+            "19": 1,
+            "20": 5,
+            "21": 4,
+            "22": 1,
+            "23": 5,
+            "24": 1,
+            "25": 2,
+            "26": 5,
+            "27": 1,
+            "28": 5,
+            "29": 5,
+            "30": 4,
+            "31": 1,
+            "32": 2
+          },
+          "expected": {
+            "PA": 11,
+            "BC": 11,
+            "DE": 10,
+            "FG": 11,
+            "HI": 10,
+            "JK": 11,
+            "LM": 13,
+            "NO": 11
+          }
+        }
+      ],
+      "timeAllocationAsWritten": "4.30 minutes"
+    },
+    {
+      "id": "personal_initiative",
+      "displayName": "Personal Initiative Scale",
+      "category": "behavioral",
+      "instrumentType": "likert",
+      "itemCount": 10,
+      "responseScale": [
+        {
+          "value": 1,
+          "label": "Totally Disagree"
+        },
+        {
+          "value": 2,
+          "label": "Disagree"
+        },
+        {
+          "value": 3,
+          "label": "Moderately Disagree"
+        },
+        {
+          "value": 4,
+          "label": "Neither disagree or agree"
+        },
+        {
+          "value": 5,
+          "label": "Moderately Agree"
+        },
+        {
+          "value": 6,
+          "label": "Agree"
+        },
+        {
+          "value": 7,
+          "label": "Totally Agree"
+        }
+      ],
+      "reverseScoring": false,
+      "scales": [
+        {
+          "id": "total",
+          "name": "Personal Initiative",
+          "itemNumbers": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "min": 10,
+          "max": 70,
+          "aggregation": "sum",
+          "alsoStore": "mean (1-7)"
+        }
+      ],
+      "items": [
+        {
+          "id": "pis_01",
+          "n": 1,
+          "text": "I regularly seek out new ways to improve my life.",
+          "keying": "+"
+        },
+        {
+          "id": "pis_02",
+          "n": 2,
+          "text": "In most settings I've been part of, I've helped bring about positive change.",
+          "keying": "+"
+        },
+        {
+          "id": "pis_03",
+          "n": 3,
+          "text": "I get my greatest satisfaction from watching my ideas come to life.",
+          "keying": "+"
+        },
+        {
+          "id": "pis_04",
+          "n": 4,
+          "text": "When something isn't working, I take action to correct it.",
+          "keying": "+"
+        },
+        {
+          "id": "pis_05",
+          "n": 5,
+          "text": "When I believe in something, I follow through even when success looks unlikely.",
+          "keying": "+"
+        },
+        {
+          "id": "pis_06",
+          "n": 6,
+          "text": "I'm willing to advocate for my ideas even when others disagree.",
+          "keying": "+"
+        },
+        {
+          "id": "pis_07",
+          "n": 7,
+          "text": "I'm good at recognizing opportunities.",
+          "keying": "+"
+        },
+        {
+          "id": "pis_08",
+          "n": 8,
+          "text": "I'm constantly searching for more effective ways to get things done.",
+          "keying": "+"
+        },
+        {
+          "id": "pis_09",
+          "n": 9,
+          "text": "Once I commit to an idea, I find a way around obstacles to carry it out.",
+          "keying": "+"
+        },
+        {
+          "id": "pis_10",
+          "n": 10,
+          "text": "I often notice promising opportunities before other people do.",
+          "keying": "+"
+        }
+      ],
+      "testVectors": [
+        {
+          "name": "all_min",
+          "responses": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1
+          },
+          "expected": {
+            "sum": 10,
+            "mean": 1.0
+          }
+        },
+        {
+          "name": "all_max",
+          "responses": {
+            "1": 7,
+            "2": 7,
+            "3": 7,
+            "4": 7,
+            "5": 7,
+            "6": 7,
+            "7": 7,
+            "8": 7,
+            "9": 7,
+            "10": 7
+          },
+          "expected": {
+            "sum": 70,
+            "mean": 7.0
+          }
+        },
+        {
+          "name": "all_mid",
+          "responses": {
+            "1": 4,
+            "2": 4,
+            "3": 4,
+            "4": 4,
+            "5": 4,
+            "6": 4,
+            "7": 4,
+            "8": 4,
+            "9": 4,
+            "10": 4
+          },
+          "expected": {
+            "sum": 40,
+            "mean": 4.0
+          }
+        },
+        {
+          "name": "mixed_seeded",
+          "responses": {
+            "1": 1,
+            "2": 5,
+            "3": 7,
+            "4": 2,
+            "5": 3,
+            "6": 4,
+            "7": 2,
+            "8": 5,
+            "9": 1,
+            "10": 5
+          },
+          "expected": {
+            "sum": 35,
+            "mean": 3.5
+          }
+        }
+      ],
+      "timeAllocationAsWritten": "2 minutes"
+    },
+    {
+      "id": "sjt",
+      "displayName": "Situational Judgment Test",
+      "category": "behavioral",
+      "instrumentType": "single_choice_ranked_options",
+      "itemCount": 8,
+      "pointsByTier": {
+        "Best": 3,
+        "Good": 2,
+        "Poor": 1,
+        "Worst": 0
+      },
+      "totalRange": [
+        0,
+        24
+      ],
+      "bands": [
+        {
+          "min": 20,
+          "max": 24,
+          "label": "Consistently strong judgment"
+        },
+        {
+          "min": 15,
+          "max": 19,
+          "label": "Generally sound"
+        },
+        {
+          "min": 10,
+          "max": 14,
+          "label": "Mixed"
+        },
+        {
+          "min": 0,
+          "max": 9,
+          "label": "Frequently chose weaker responses"
+        }
+      ],
+      "items": [
+        {
+          "id": "sjt_01",
+          "n": 1,
+          "tag": "Pace and quality (Decision making / Pace)",
+          "stem": "A report is due at 5 pm. At 3 pm you spot a data inconsistency that could affect one section, and checking it will take about two hours.",
+          "options": [
+            {
+              "label": "A",
+              "text": "Submit on time and say nothing, since it may be minor.",
+              "tier": "Worst",
+              "points": 0
+            },
+            {
+              "label": "B",
+              "text": "Inform your manager and propose a short delay or flagging the section.",
+              "tier": "Best",
+              "points": 3
+            },
+            {
+              "label": "C",
+              "text": "Quietly stay late and submit after the deadline without telling anyone.",
+              "tier": "Good",
+              "points": 2
+            },
+            {
+              "label": "D",
+              "text": "Submit on time with the affected section removed and no explanation.",
+              "tier": "Poor",
+              "points": 1
+            }
+          ]
+        },
+        {
+          "id": "sjt_02",
+          "n": 2,
+          "tag": "Rule adherence",
+          "stem": "A senior colleague asks you to skip a mandatory approval step to speed up a task.",
+          "options": [
+            {
+              "label": "A",
+              "text": "Skip it, since they outrank you.",
+              "tier": "Poor",
+              "points": 1
+            },
+            {
+              "label": "B",
+              "text": "Politely decline and explain the reasoning",
+              "tier": "Best",
+              "points": 3
+            },
+            {
+              "label": "C",
+              "text": "Complete the task, then backdate the approval.",
+              "tier": "Worst",
+              "points": 0
+            },
+            {
+              "label": "D",
+              "text": "Report the colleague to compliance without speaking to them first.",
+              "tier": "Good",
+              "points": 2
+            }
+          ]
+        },
+        {
+          "id": "sjt_03",
+          "n": 3,
+          "tag": "Teamwork",
+          "stem": "A teammate repeatedly misses handoffs, which delays your work.",
+          "options": [
+            {
+              "label": "A",
+              "text": "Quietly take over their tasks.",
+              "tier": "Poor",
+              "points": 1
+            },
+            {
+              "label": "B",
+              "text": "Discuss the issue privately and agree on a better handoff routine.",
+              "tier": "Best",
+              "points": 3
+            },
+            {
+              "label": "C",
+              "text": "Raise it in the next team meeting so everyone sees the pattern.",
+              "tier": "Worst",
+              "points": 0
+            },
+            {
+              "label": "D",
+              "text": "Escalate to your manager without speaking to the teammate.",
+              "tier": "Good",
+              "points": 2
+            }
+          ]
+        },
+        {
+          "id": "sjt_04",
+          "n": 4,
+          "tag": "Decision making under limited authority",
+          "stem": "Your manager is away. Another department asks you to complete an urgent task today, but the task requires approval or access that is normally handled by your manager.",
+          "options": [
+            {
+              "label": "A",
+              "text": "Complete the task yourself and bypass the usual approval process.",
+              "tier": "Worst",
+              "points": 0
+            },
+            {
+              "label": "B",
+              "text": "Decline the request, explaining that your manager is currently unavailable to review or authorize the matter.",
+              "tier": "Good",
+              "points": 2
+            },
+            {
+              "label": "C",
+              "text": "Contact your manager. If unavailable, proceed with tasks within your authority,  and document any pending approvals.",
+              "tier": "Best",
+              "points": 3
+            },
+            {
+              "label": "D",
+              "text": "Ask the other department to wait until your manager returns before taking any action.",
+              "tier": "Poor",
+              "points": 1
+            }
+          ]
+        },
+        {
+          "id": "sjt_05",
+          "n": 5,
+          "tag": "Influence and communication",
+          "stem": "A peer criticizes your proposal in a meeting.",
+          "options": [
+            {
+              "label": "A",
+              "text": "Restate your points more firmly.",
+              "tier": "Good",
+              "points": 2
+            },
+            {
+              "label": "B",
+              "text": "Ask what concerns them and offer to test the idea with data.",
+              "tier": "Best",
+              "points": 3
+            },
+            {
+              "label": "C",
+              "text": "Immediately withdraw the proposal at that time due to the peer's feedback.",
+              "tier": "Poor",
+              "points": 1
+            },
+            {
+              "label": "D",
+              "text": "Lobby other attendees privately before the next meeting.",
+              "tier": "Worst",
+              "points": 0
+            }
+          ]
+        },
+        {
+          "id": "sjt_06",
+          "n": 6,
+          "tag": "Prioritization (Pace)",
+          "stem": "You have three tasks due today: an urgent request from a director, a deliverable another team is waiting on, and a routine report.",
+          "options": [
+            {
+              "label": "A",
+              "text": "Do them in the order received.",
+              "tier": "Poor",
+              "points": 1
+            },
+            {
+              "label": "B",
+              "text": "Tackle the easiest tasks first to secure quick wins and build momentum, then address the remaining items",
+              "tier": "Worst",
+              "points": 0
+            },
+            {
+              "label": "C",
+              "text": "Confirm the director's actual deadline, tell the waiting team your revised timing, and defer the routine report.",
+              "tier": "Best",
+              "points": 3
+            },
+            {
+              "label": "D",
+              "text": "Do only the director's request and tell no one about the others.",
+              "tier": "Good",
+              "points": 2
+            }
+          ]
+        },
+        {
+          "id": "sjt_07",
+          "n": 7,
+          "tag": "Integrity and rules",
+          "stem": "You realize you made an error in a report you submitted last week, and the error may have affected some of the information presented.",
+          "options": [
+            {
+              "label": "A",
+              "text": "Remain silent and offer no further comments, as the final report has already been successfully submitted.",
+              "tier": "Worst",
+              "points": 0
+            },
+            {
+              "label": "B",
+              "text": "Correct the report yourself without informing anyone.",
+              "tier": "Good",
+              "points": 2
+            },
+            {
+              "label": "C",
+              "text": "Inform your manager, correct the error, and communicate the error to anyone who received the original version.",
+              "tier": "Best",
+              "points": 3
+            },
+            {
+              "label": "D",
+              "text": "Wait to see if someone notices the error before taking action.",
+              "tier": "Poor",
+              "points": 1
+            }
+          ]
+        },
+        {
+          "id": "sjt_08",
+          "n": 8,
+          "tag": "Adapting to change (Rule adherence / Decision making)",
+          "stem": "Your company replaces a process you prefer, with a new one.",
+          "options": [
+            {
+              "label": "A",
+              "text": "Keep using the old method quietly while hoping the discrepancy goes unnoticed.",
+              "tier": "Worst",
+              "points": 0
+            },
+            {
+              "label": "B",
+              "text": "Learn about the new process, then raise specific concerns with evidence.",
+              "tier": "Best",
+              "points": 3
+            },
+            {
+              "label": "C",
+              "text": "Complain to colleagues but follow the new process.",
+              "tier": "Good",
+              "points": 2
+            },
+            {
+              "label": "D",
+              "text": "Wait until someone forces you to switch.",
+              "tier": "Poor",
+              "points": 1
+            }
+          ]
+        }
+      ],
+      "testVectors": [
+        {
+          "name": "all_best",
+          "responses": {
+            "sjt_01": "B",
+            "sjt_02": "B",
+            "sjt_03": "B",
+            "sjt_04": "C",
+            "sjt_05": "B",
+            "sjt_06": "C",
+            "sjt_07": "C",
+            "sjt_08": "B"
+          },
+          "expectedTotal": 24,
+          "expectedBand": "20-24"
+        },
+        {
+          "name": "all_worst",
+          "responses": {
+            "sjt_01": "A",
+            "sjt_02": "C",
+            "sjt_03": "C",
+            "sjt_04": "A",
+            "sjt_05": "D",
+            "sjt_06": "B",
+            "sjt_07": "A",
+            "sjt_08": "A"
+          },
+          "expectedTotal": 0,
+          "expectedBand": "<10"
+        }
+      ],
+      "timeAllocationAsWritten": "5 minutes"
+    },
+    {
+      "id": "cognicheck",
+      "displayName": "CogniCheck (based on ICAR-16)",
+      "category": "cognitive",
+      "instrumentType": "mcq",
+      "itemCount": 16,
+      "scoring": {
+        "perItem": "1 if selected == correct else 0",
+        "total": "sum, range 0-16"
+      },
+      "areas": [
+        {
+          "id": "verbal",
+          "name": "Verbal Reasoning",
+          "itemNumbers": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "reportAsStandaloneScore": false
+        },
+        {
+          "id": "series",
+          "name": "Letter and Number Series",
+          "itemNumbers": [
+            5,
+            6,
+            7,
+            8
+          ],
+          "reportAsStandaloneScore": false
+        },
+        {
+          "id": "matrix",
+          "name": "Matrix Reasoning",
+          "itemNumbers": [
+            9,
+            10,
+            11,
+            12
+          ],
+          "reportAsStandaloneScore": false
+        },
+        {
+          "id": "rotation",
+          "name": "Three-Dimensional Rotation",
+          "itemNumbers": [
+            13,
+            14,
+            15,
+            16
+          ],
+          "reportAsStandaloneScore": false
+        }
+      ],
+      "items": [
+        {
+          "id": "icar_01",
+          "n": 1,
+          "area": "verbal",
+          "type": "mcq_text",
+          "text": "What number is one third of one half of one fifth of 600?",
+          "options": [
+            {
+              "label": "A",
+              "text": "10"
+            },
+            {
+              "label": "B",
+              "text": "20"
+            },
+            {
+              "label": "C",
+              "text": "40"
+            },
+            {
+              "label": "D",
+              "text": "60"
+            }
+          ],
+          "correct": "B"
+        },
+        {
+          "id": "icar_02",
+          "n": 2,
+          "area": "verbal",
+          "type": "mcq_text",
+          "text": "Maya scored higher than Noah, and Eli scored lower than Maya. Which statement is most accurate?",
+          "options": [
+            {
+              "label": "A",
+              "text": "Eli scored higher than Noah"
+            },
+            {
+              "label": "B",
+              "text": "Eli scored lower than Noah"
+            },
+            {
+              "label": "C",
+              "text": "It's impossible to tell"
+            },
+            {
+              "label": "D",
+              "text": "Eli scored the same as Noah"
+            }
+          ],
+          "correct": "C"
+        },
+        {
+          "id": "icar_03",
+          "n": 3,
+          "area": "verbal",
+          "type": "mcq_text",
+          "text": "Lena is 8 years old and her brother is four times as old as she. When Lena is 15 years old, how old will her brother be?",
+          "options": [
+            {
+              "label": "A",
+              "text": "23"
+            },
+            {
+              "label": "B",
+              "text": "47"
+            },
+            {
+              "label": "C",
+              "text": "60"
+            },
+            {
+              "label": "D",
+              "text": "39"
+            }
+          ],
+          "correct": "D"
+        },
+        {
+          "id": "icar_04",
+          "n": 4,
+          "area": "verbal",
+          "type": "mcq_text",
+          "text": "If the day before yesterday was three days after Monday, then what day is it today?",
+          "options": [
+            {
+              "label": "A",
+              "text": "Saturday"
+            },
+            {
+              "label": "B",
+              "text": "Thursday"
+            },
+            {
+              "label": "C",
+              "text": "Friday"
+            },
+            {
+              "label": "D",
+              "text": "Sunday"
+            }
+          ],
+          "correct": "A"
+        },
+        {
+          "id": "icar_05",
+          "n": 5,
+          "area": "series",
+          "type": "mcq_text",
+          "text": "In the following alphanumeric series, what letter comes next? K N P S U",
+          "options": [
+            {
+              "label": "A",
+              "text": "V"
+            },
+            {
+              "label": "B",
+              "text": "W"
+            },
+            {
+              "label": "C",
+              "text": "X"
+            },
+            {
+              "label": "D",
+              "text": "Y"
+            }
+          ],
+          "correct": "C"
+        },
+        {
+          "id": "icar_06",
+          "n": 6,
+          "area": "series",
+          "type": "mcq_text",
+          "text": "In the following alphanumeric series, what letter comes next? Z U Q N L",
+          "options": [
+            {
+              "label": "A",
+              "text": "I"
+            },
+            {
+              "label": "B",
+              "text": "J"
+            },
+            {
+              "label": "C",
+              "text": "K"
+            },
+            {
+              "label": "D",
+              "text": "L"
+            }
+          ],
+          "correct": "C"
+        },
+        {
+          "id": "icar_07",
+          "n": 7,
+          "area": "series",
+          "type": "mcq_text",
+          "text": "In the following alphanumeric series, what letter comes next? C E H L Q",
+          "options": [
+            {
+              "label": "A",
+              "text": "V"
+            },
+            {
+              "label": "B",
+              "text": "W"
+            },
+            {
+              "label": "C",
+              "text": "X"
+            },
+            {
+              "label": "D",
+              "text": "Y"
+            }
+          ],
+          "correct": "B"
+        },
+        {
+          "id": "icar_08",
+          "n": 8,
+          "area": "series",
+          "type": "mcq_text",
+          "text": "In the following alphanumeric series, what letter comes next? B Z D X F",
+          "options": [
+            {
+              "label": "A",
+              "text": "T"
+            },
+            {
+              "label": "B",
+              "text": "U"
+            },
+            {
+              "label": "C",
+              "text": "V"
+            },
+            {
+              "label": "D",
+              "text": "W"
+            }
+          ],
+          "correct": "C"
+        },
+        {
+          "id": "icar_09",
+          "n": 9,
+          "area": "matrix",
+          "type": "mcq_image",
+          "text": "Please select which answer best completes the figure below",
+          "image": "assets/icar/q09_matrix.jpg",
+          "options": [
+            {
+              "label": "A"
+            },
+            {
+              "label": "B"
+            },
+            {
+              "label": "C"
+            },
+            {
+              "label": "D"
+            }
+          ],
+          "optionsAreInsideImage": true,
+          "correct": "B"
+        },
+        {
+          "id": "icar_10",
+          "n": 10,
+          "area": "matrix",
+          "type": "mcq_image",
+          "text": "Please select which answer best completes the figure below",
+          "image": "assets/icar/q10_matrix.jpg",
+          "options": [
+            {
+              "label": "A"
+            },
+            {
+              "label": "B"
+            },
+            {
+              "label": "C"
+            },
+            {
+              "label": "D"
+            }
+          ],
+          "optionsAreInsideImage": true,
+          "correct": "C"
+        },
+        {
+          "id": "icar_11",
+          "n": 11,
+          "area": "matrix",
+          "type": "mcq_image",
+          "text": "Please select which answer best completes the figure below",
+          "image": "assets/icar/q11_matrix.jpg",
+          "options": [
+            {
+              "label": "A"
+            },
+            {
+              "label": "B"
+            },
+            {
+              "label": "C"
+            },
+            {
+              "label": "D"
+            }
+          ],
+          "optionsAreInsideImage": true,
+          "correct": "A"
+        },
+        {
+          "id": "icar_12",
+          "n": 12,
+          "area": "matrix",
+          "type": "mcq_image",
+          "text": "Please select which answer best completes the figure below",
+          "image": "assets/icar/q12_matrix.jpg",
+          "options": [
+            {
+              "label": "A"
+            },
+            {
+              "label": "B"
+            },
+            {
+              "label": "C"
+            },
+            {
+              "label": "D"
+            }
+          ],
+          "optionsAreInsideImage": true,
+          "correct": "D"
+        },
+        {
+          "id": "icar_13",
+          "n": 13,
+          "area": "rotation",
+          "type": "mcq_image",
+          "text": "Which cube is the reference cube, rotated?",
+          "image": "assets/icar/q13_rotation.png",
+          "options": [
+            {
+              "label": "A"
+            },
+            {
+              "label": "B"
+            },
+            {
+              "label": "C"
+            },
+            {
+              "label": "D"
+            }
+          ],
+          "optionsAreInsideImage": true,
+          "correct": "C"
+        },
+        {
+          "id": "icar_14",
+          "n": 14,
+          "area": "rotation",
+          "type": "mcq_image",
+          "text": "Which cube can be folded from this net?",
+          "image": "assets/icar/q14_rotation.png",
+          "options": [
+            {
+              "label": "A"
+            },
+            {
+              "label": "B"
+            },
+            {
+              "label": "C"
+            },
+            {
+              "label": "D"
+            }
+          ],
+          "optionsAreInsideImage": true,
+          "correct": "A"
+        },
+        {
+          "id": "icar_15",
+          "n": 15,
+          "area": "rotation",
+          "type": "mcq_image",
+          "text": "Both views show the same cube. Which cube is also the same cube?",
+          "image": "assets/icar/q15_rotation.png",
+          "options": [
+            {
+              "label": "A"
+            },
+            {
+              "label": "B"
+            },
+            {
+              "label": "C"
+            },
+            {
+              "label": "D"
+            }
+          ],
+          "optionsAreInsideImage": true,
+          "correct": "D"
+        },
+        {
+          "id": "icar_16",
+          "n": 16,
+          "area": "rotation",
+          "type": "mcq_image",
+          "text": "Three of these cubes show the same cube. Which one is different?",
+          "image": "assets/icar/q16_rotation.png",
+          "options": [
+            {
+              "label": "A"
+            },
+            {
+              "label": "B"
+            },
+            {
+              "label": "C"
+            },
+            {
+              "label": "D"
+            }
+          ],
+          "optionsAreInsideImage": true,
+          "correct": "B"
+        }
+      ],
+      "testVectors": [
+        {
+          "name": "all_correct",
+          "expectedTotal": 16
+        },
+        {
+          "name": "none_correct",
+          "expectedTotal": 0
+        }
+      ],
+      "timeAllocationAsWritten": "15 to 20 minutes"
+    },
+    {
+      "id": "crt",
+      "displayName": "Cognitive Reflection Test",
+      "category": "cognitive",
+      "instrumentType": "free_text_numeric",
+      "itemCount": 3,
+      "scoring": {
+        "perItem": "1 for the correct (reflective) answer, 0 otherwise",
+        "total": "sum, range 0-3"
+      },
+      "items": [
+        {
+          "id": "crt_01",
+          "n": 1,
+          "text": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost?",
+          "correct": "5 cents",
+          "correctAnswerAsWritten": [
+            "5 cents",
+            "$0.05"
+          ]
+        },
+        {
+          "id": "crt_02",
+          "n": 2,
+          "text": "If it takes 5 machines 5 minutes to make 5 widgets, how long would it take 100 machines to make 100 widgets?",
+          "correct": "5 minutes",
+          "correctAnswerAsWritten": [
+            "5 minutes"
+          ]
+        },
+        {
+          "id": "crt_03",
+          "n": 3,
+          "text": "In a lake, there is a patch of lily pads. Every day, the patch doubles in size. If it takes 48 days for the patch to cover the entire lake, how long would it take for the patch to cover half of the lake?",
+          "correct": "47 days",
+          "correctAnswerAsWritten": [
+            "47 days"
+          ]
+        }
+      ],
+      "testVectors": [
+        {
+          "name": "all_correct",
+          "expectedTotal": 3
+        },
+        {
+          "name": "none_correct",
+          "expectedTotal": 0
+        }
+      ],
+      "timeAllocationAsWritten": "3 minutes",
+      "strictlyTimed": true
+    },
+    {
+      "id": "mini_ipip",
+      "displayName": "Mini-IPIP (Big Five, 20 items)",
+      "category": "personality",
+      "instrumentType": "likert",
+      "itemCount": 20,
+      "responseScale": [
+        {
+          "value": 1,
+          "label": "Very Inaccurate"
+        },
+        {
+          "value": 2,
+          "label": "Moderately Inaccurate"
+        },
+        {
+          "value": 3,
+          "label": "Neither Inaccurate nor Accurate"
+        },
+        {
+          "value": 4,
+          "label": "Moderately Accurate"
+        },
+        {
+          "value": 5,
+          "label": "Very Accurate"
+        }
+      ],
+      "reverseScoring": true,
+      "reverseFormula": "6 - response",
+      "scales": [
+        {
+          "id": "E",
+          "name": "Surgency or Extraversion",
+          "positiveItems": [
+            1,
+            11
+          ],
+          "reverseItems": [
+            6,
+            16
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum_after_reversal"
+        },
+        {
+          "id": "A",
+          "name": "Agreeableness",
+          "positiveItems": [
+            2,
+            12
+          ],
+          "reverseItems": [
+            7,
+            17
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum_after_reversal"
+        },
+        {
+          "id": "C",
+          "name": "Conscientiousness",
+          "positiveItems": [
+            3,
+            13
+          ],
+          "reverseItems": [
+            8,
+            18
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum_after_reversal"
+        },
+        {
+          "id": "N",
+          "name": "Neuroticism",
+          "positiveItems": [
+            4,
+            14
+          ],
+          "reverseItems": [
+            9,
+            19
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum_after_reversal"
+        },
+        {
+          "id": "I",
+          "name": "Intellect or Imagination",
+          "positiveItems": [
+            5
+          ],
+          "reverseItems": [
+            10,
+            15,
+            20
+          ],
+          "min": 4,
+          "max": 20,
+          "aggregation": "sum_after_reversal"
+        }
+      ],
+      "items": [
+        {
+          "id": "mini_01",
+          "n": 1,
+          "text": "I am the life of the party.",
+          "scale": "E",
+          "keying": "+"
+        },
+        {
+          "id": "mini_02",
+          "n": 2,
+          "text": "I sympathize with others' feelings.",
+          "scale": "A",
+          "keying": "+"
+        },
+        {
+          "id": "mini_03",
+          "n": 3,
+          "text": "I get chores done right away.",
+          "scale": "C",
+          "keying": "+"
+        },
+        {
+          "id": "mini_04",
+          "n": 4,
+          "text": "I have frequent mood swings.",
+          "scale": "N",
+          "keying": "+"
+        },
+        {
+          "id": "mini_05",
+          "n": 5,
+          "text": "I have a vivid imagination.",
+          "scale": "I",
+          "keying": "+"
+        },
+        {
+          "id": "mini_06",
+          "n": 6,
+          "text": "I don't talk a lot.",
+          "scale": "E",
+          "keying": "-"
+        },
+        {
+          "id": "mini_07",
+          "n": 7,
+          "text": "I am not interested in other people's problems.",
+          "scale": "A",
+          "keying": "-"
+        },
+        {
+          "id": "mini_08",
+          "n": 8,
+          "text": "I often forget to put things back in their proper place.",
+          "scale": "C",
+          "keying": "-"
+        },
+        {
+          "id": "mini_09",
+          "n": 9,
+          "text": "I am relaxed most of the time.",
+          "scale": "N",
+          "keying": "-"
+        },
+        {
+          "id": "mini_10",
+          "n": 10,
+          "text": "I am not interested in abstract ideas.",
+          "scale": "I",
+          "keying": "-"
+        },
+        {
+          "id": "mini_11",
+          "n": 11,
+          "text": "I talk to a lot of different people at parties.",
+          "scale": "E",
+          "keying": "+"
+        },
+        {
+          "id": "mini_12",
+          "n": 12,
+          "text": "I feel others' emotions.",
+          "scale": "A",
+          "keying": "+"
+        },
+        {
+          "id": "mini_13",
+          "n": 13,
+          "text": "I like order.",
+          "scale": "C",
+          "keying": "+"
+        },
+        {
+          "id": "mini_14",
+          "n": 14,
+          "text": "I get upset easily.",
+          "scale": "N",
+          "keying": "+"
+        },
+        {
+          "id": "mini_15",
+          "n": 15,
+          "text": "I have difficulty understanding abstract ideas.",
+          "scale": "I",
+          "keying": "-"
+        },
+        {
+          "id": "mini_16",
+          "n": 16,
+          "text": "I keep in the background.",
+          "scale": "E",
+          "keying": "-"
+        },
+        {
+          "id": "mini_17",
+          "n": 17,
+          "text": "I am not really interested in others.",
+          "scale": "A",
+          "keying": "-"
+        },
+        {
+          "id": "mini_18",
+          "n": 18,
+          "text": "I make a mess of things.",
+          "scale": "C",
+          "keying": "-"
+        },
+        {
+          "id": "mini_19",
+          "n": 19,
+          "text": "I seldom feel blue.",
+          "scale": "N",
+          "keying": "-"
+        },
+        {
+          "id": "mini_20",
+          "n": 20,
+          "text": "I do not have a good imagination.",
+          "scale": "I",
+          "keying": "-"
+        }
+      ],
+      "testVectors": [
+        {
+          "name": "all_min",
+          "responses": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1,
+            "19": 1,
+            "20": 1
+          },
+          "expected": {
+            "E": 12,
+            "A": 12,
+            "C": 12,
+            "N": 12,
+            "I": 16
+          }
+        },
+        {
+          "name": "all_max",
+          "responses": {
+            "1": 5,
+            "2": 5,
+            "3": 5,
+            "4": 5,
+            "5": 5,
+            "6": 5,
+            "7": 5,
+            "8": 5,
+            "9": 5,
+            "10": 5,
+            "11": 5,
+            "12": 5,
+            "13": 5,
+            "14": 5,
+            "15": 5,
+            "16": 5,
+            "17": 5,
+            "18": 5,
+            "19": 5,
+            "20": 5
+          },
+          "expected": {
+            "E": 12,
+            "A": 12,
+            "C": 12,
+            "N": 12,
+            "I": 8
+          }
+        },
+        {
+          "name": "all_mid",
+          "responses": {
+            "1": 3,
+            "2": 3,
+            "3": 3,
+            "4": 3,
+            "5": 3,
+            "6": 3,
+            "7": 3,
+            "8": 3,
+            "9": 3,
+            "10": 3,
+            "11": 3,
+            "12": 3,
+            "13": 3,
+            "14": 3,
+            "15": 3,
+            "16": 3,
+            "17": 3,
+            "18": 3,
+            "19": 3,
+            "20": 3
+          },
+          "expected": {
+            "E": 12,
+            "A": 12,
+            "C": 12,
+            "N": 12,
+            "I": 12
+          }
+        },
+        {
+          "name": "mixed_seeded",
+          "responses": {
+            "1": 3,
+            "2": 5,
+            "3": 2,
+            "4": 1,
+            "5": 5,
+            "6": 5,
+            "7": 2,
+            "8": 3,
+            "9": 1,
+            "10": 5,
+            "11": 1,
+            "12": 5,
+            "13": 1,
+            "14": 5,
+            "15": 2,
+            "16": 4,
+            "17": 5,
+            "18": 4,
+            "19": 3,
+            "20": 4
+          },
+          "expected": {
+            "E": 7,
+            "A": 15,
+            "C": 8,
+            "N": 14,
+            "I": 12
+          }
+        }
+      ],
+      "timeAllocationAsWritten": "4 minutes"
+    },
+    {
+      "id": "hexaco_hh",
+      "displayName": "IPIP-HEXACO Honesty-Humility",
+      "category": "personality",
+      "instrumentType": "likert",
+      "itemCount": 40,
+      "responseScale": [
+        {
+          "value": 1,
+          "label": "Very Inaccurate"
+        },
+        {
+          "value": 2,
+          "label": "Moderately Inaccurate"
+        },
+        {
+          "value": 3,
+          "label": "Neither Inaccurate nor Accurate"
+        },
+        {
+          "value": 4,
+          "label": "Moderately Accurate"
+        },
+        {
+          "value": 5,
+          "label": "Very Accurate"
+        }
+      ],
+      "reverseScoring": true,
+      "reverseFormula": "6 - response",
+      "facets": [
+        {
+          "id": "Sinc",
+          "name": "Sincerity",
+          "positiveItems": [
+            1
+          ],
+          "reverseItems": [
+            5,
+            9,
+            13,
+            17,
+            21,
+            25,
+            29,
+            33,
+            37
+          ],
+          "min": 10,
+          "max": 50,
+          "aggregation": "sum_after_reversal"
+        },
+        {
+          "id": "Fair",
+          "name": "Fairness",
+          "positiveItems": [
+            2,
+            10,
+            14,
+            22,
+            26
+          ],
+          "reverseItems": [
+            6,
+            18,
+            30,
+            34,
+            38
+          ],
+          "min": 10,
+          "max": 50,
+          "aggregation": "sum_after_reversal"
+        },
+        {
+          "id": "Gree",
+          "name": "Greed Avoidance",
+          "positiveItems": [
+            11,
+            23
+          ],
+          "reverseItems": [
+            3,
+            7,
+            15,
+            19,
+            27,
+            31,
+            35,
+            39
+          ],
+          "min": 10,
+          "max": 50,
+          "aggregation": "sum_after_reversal"
+        },
+        {
+          "id": "Mode",
+          "name": "Modesty",
+          "positiveItems": [
+            4,
+            12,
+            20,
+            24
+          ],
+          "reverseItems": [
+            8,
+            16,
+            28,
+            32,
+            36,
+            40
+          ],
+          "min": 10,
+          "max": 50,
+          "aggregation": "sum_after_reversal"
+        }
+      ],
+      "domain": {
+        "aggregation": "sum of all 40 after reversal",
+        "min": 40,
+        "max": 200,
+        "alsoStore": "mean (1-5)"
+      },
+      "items": [
+        {
+          "id": "hex_01",
+          "n": 1,
+          "text": "I don't pretend to be more than I am.",
+          "scale": "Sinc",
+          "keying": "+"
+        },
+        {
+          "id": "hex_02",
+          "n": 2,
+          "text": "I would never cheat on my taxes.",
+          "scale": "Fair",
+          "keying": "+"
+        },
+        {
+          "id": "hex_03",
+          "n": 3,
+          "text": "I seek status.",
+          "scale": "Gree",
+          "keying": "-"
+        },
+        {
+          "id": "hex_04",
+          "n": 4,
+          "text": "I see myself as an average person.",
+          "scale": "Mode",
+          "keying": "+"
+        },
+        {
+          "id": "hex_05",
+          "n": 5,
+          "text": "I switch my loyalties when I feel like it.",
+          "scale": "Sinc",
+          "keying": "-"
+        },
+        {
+          "id": "hex_06",
+          "n": 6,
+          "text": "I admire a really clever scam.",
+          "scale": "Fair",
+          "keying": "-"
+        },
+        {
+          "id": "hex_07",
+          "n": 7,
+          "text": "I prefer to eat at expensive restaurants.",
+          "scale": "Gree",
+          "keying": "-"
+        },
+        {
+          "id": "hex_08",
+          "n": 8,
+          "text": "I like to attract attention.",
+          "scale": "Mode",
+          "keying": "-"
+        },
+        {
+          "id": "hex_09",
+          "n": 9,
+          "text": "I let people push me around to help them feel important.",
+          "scale": "Sinc",
+          "keying": "-"
+        },
+        {
+          "id": "hex_10",
+          "n": 10,
+          "text": "I try to follow the rules.",
+          "scale": "Fair",
+          "keying": "+"
+        },
+        {
+          "id": "hex_11",
+          "n": 11,
+          "text": "I don't strive for elegance in my appearance.",
+          "scale": "Gree",
+          "keying": "+"
+        },
+        {
+          "id": "hex_12",
+          "n": 12,
+          "text": "I consider myself an average person.",
+          "scale": "Mode",
+          "keying": "+"
+        },
+        {
+          "id": "hex_13",
+          "n": 13,
+          "text": "I pretend to be concerned for others.",
+          "scale": "Sinc",
+          "keying": "-"
+        },
+        {
+          "id": "hex_14",
+          "n": 14,
+          "text": "I return extra change when a cashier makes a mistake.",
+          "scale": "Fair",
+          "keying": "+"
+        },
+        {
+          "id": "hex_15",
+          "n": 15,
+          "text": "I wish to stay young forever.",
+          "scale": "Gree",
+          "keying": "-"
+        },
+        {
+          "id": "hex_16",
+          "n": 16,
+          "text": "I am more capable than most others.",
+          "scale": "Mode",
+          "keying": "-"
+        },
+        {
+          "id": "hex_17",
+          "n": 17,
+          "text": "I use flattery to get ahead.",
+          "scale": "Sinc",
+          "keying": "-"
+        },
+        {
+          "id": "hex_18",
+          "n": 18,
+          "text": "I cheat on people who have trusted me.",
+          "scale": "Fair",
+          "keying": "-"
+        },
+        {
+          "id": "hex_19",
+          "n": 19,
+          "text": "I love luxury.",
+          "scale": "Gree",
+          "keying": "-"
+        },
+        {
+          "id": "hex_20",
+          "n": 20,
+          "text": "I don't think that I'm better than other people.",
+          "scale": "Mode",
+          "keying": "+"
+        },
+        {
+          "id": "hex_21",
+          "n": 21,
+          "text": "I tell other people what they want to hear so that they will do what I want them to do.",
+          "scale": "Sinc",
+          "keying": "-"
+        },
+        {
+          "id": "hex_22",
+          "n": 22,
+          "text": "I would never take things that aren't mine.",
+          "scale": "Fair",
+          "keying": "+"
+        },
+        {
+          "id": "hex_23",
+          "n": 23,
+          "text": "I would not enjoy being a famous celebrity",
+          "scale": "Gree",
+          "keying": "+"
+        },
+        {
+          "id": "hex_24",
+          "n": 24,
+          "text": "I am just an ordinary person.",
+          "scale": "Mode",
+          "keying": "+"
+        },
+        {
+          "id": "hex_25",
+          "n": 25,
+          "text": "I put on a show to impress people.",
+          "scale": "Sinc",
+          "keying": "-"
+        },
+        {
+          "id": "hex_26",
+          "n": 26,
+          "text": "I would feel very badly for a long time if I were to steal from someone.",
+          "scale": "Fair",
+          "keying": "+"
+        },
+        {
+          "id": "hex_27",
+          "n": 27,
+          "text": "I have a strong need for power.",
+          "scale": "Gree",
+          "keying": "-"
+        },
+        {
+          "id": "hex_28",
+          "n": 28,
+          "text": "I would like to have more power than other people.",
+          "scale": "Mode",
+          "keying": "-"
+        },
+        {
+          "id": "hex_29",
+          "n": 29,
+          "text": "I Play a role in order to impress people.",
+          "scale": "Sinc",
+          "keying": "-"
+        },
+        {
+          "id": "hex_30",
+          "n": 30,
+          "text": "I cheat to get ahead.",
+          "scale": "Fair",
+          "keying": "-"
+        },
+        {
+          "id": "hex_31",
+          "n": 31,
+          "text": "I am mainly interested in money.",
+          "scale": "Gree",
+          "keying": "-"
+        },
+        {
+          "id": "hex_32",
+          "n": 32,
+          "text": "I believe that I am better than others.",
+          "scale": "Mode",
+          "keying": "-"
+        },
+        {
+          "id": "hex_33",
+          "n": 33,
+          "text": "I act like different people in different situations.",
+          "scale": "Sinc",
+          "keying": "-"
+        },
+        {
+          "id": "hex_34",
+          "n": 34,
+          "text": "I steal things.",
+          "scale": "Fair",
+          "keying": "-"
+        },
+        {
+          "id": "hex_35",
+          "n": 35,
+          "text": "I try to impress others.",
+          "scale": "Gree",
+          "keying": "-"
+        },
+        {
+          "id": "hex_36",
+          "n": 36,
+          "text": "I am likely to show off if I get the chance.",
+          "scale": "Mode",
+          "keying": "-"
+        },
+        {
+          "id": "hex_37",
+          "n": 37,
+          "text": "I find it necessary to please the people who have power.",
+          "scale": "Sinc",
+          "keying": "-"
+        },
+        {
+          "id": "hex_38",
+          "n": 38,
+          "text": "I would not regret my behavior if I were to take advantage of someone impulsively.",
+          "scale": "Fair",
+          "keying": "-"
+        },
+        {
+          "id": "hex_39",
+          "n": 39,
+          "text": "I am out for my own personal gain.",
+          "scale": "Gree",
+          "keying": "-"
+        },
+        {
+          "id": "hex_40",
+          "n": 40,
+          "text": "I boast about my virtues.",
+          "scale": "Mode",
+          "keying": "-"
+        }
+      ],
+      "testVectors": [
+        {
+          "name": "all_min",
+          "responses": {
+            "1": 1,
+            "2": 1,
+            "3": 1,
+            "4": 1,
+            "5": 1,
+            "6": 1,
+            "7": 1,
+            "8": 1,
+            "9": 1,
+            "10": 1,
+            "11": 1,
+            "12": 1,
+            "13": 1,
+            "14": 1,
+            "15": 1,
+            "16": 1,
+            "17": 1,
+            "18": 1,
+            "19": 1,
+            "20": 1,
+            "21": 1,
+            "22": 1,
+            "23": 1,
+            "24": 1,
+            "25": 1,
+            "26": 1,
+            "27": 1,
+            "28": 1,
+            "29": 1,
+            "30": 1,
+            "31": 1,
+            "32": 1,
+            "33": 1,
+            "34": 1,
+            "35": 1,
+            "36": 1,
+            "37": 1,
+            "38": 1,
+            "39": 1,
+            "40": 1
+          },
+          "expected": {
+            "facetSums": {
+              "Sinc": 46,
+              "Fair": 30,
+              "Gree": 42,
+              "Mode": 34
+            },
+            "domainSum": 152,
+            "domainMean": 3.8,
+            "facetMeans": {
+              "Sinc": 4.6,
+              "Fair": 3.0,
+              "Gree": 4.2,
+              "Mode": 3.4
+            }
+          }
+        },
+        {
+          "name": "all_max",
+          "responses": {
+            "1": 5,
+            "2": 5,
+            "3": 5,
+            "4": 5,
+            "5": 5,
+            "6": 5,
+            "7": 5,
+            "8": 5,
+            "9": 5,
+            "10": 5,
+            "11": 5,
+            "12": 5,
+            "13": 5,
+            "14": 5,
+            "15": 5,
+            "16": 5,
+            "17": 5,
+            "18": 5,
+            "19": 5,
+            "20": 5,
+            "21": 5,
+            "22": 5,
+            "23": 5,
+            "24": 5,
+            "25": 5,
+            "26": 5,
+            "27": 5,
+            "28": 5,
+            "29": 5,
+            "30": 5,
+            "31": 5,
+            "32": 5,
+            "33": 5,
+            "34": 5,
+            "35": 5,
+            "36": 5,
+            "37": 5,
+            "38": 5,
+            "39": 5,
+            "40": 5
+          },
+          "expected": {
+            "facetSums": {
+              "Sinc": 14,
+              "Fair": 30,
+              "Gree": 18,
+              "Mode": 26
+            },
+            "domainSum": 88,
+            "domainMean": 2.2,
+            "facetMeans": {
+              "Sinc": 1.4,
+              "Fair": 3.0,
+              "Gree": 1.8,
+              "Mode": 2.6
+            }
+          }
+        },
+        {
+          "name": "all_mid",
+          "responses": {
+            "1": 3,
+            "2": 3,
+            "3": 3,
+            "4": 3,
+            "5": 3,
+            "6": 3,
+            "7": 3,
+            "8": 3,
+            "9": 3,
+            "10": 3,
+            "11": 3,
+            "12": 3,
+            "13": 3,
+            "14": 3,
+            "15": 3,
+            "16": 3,
+            "17": 3,
+            "18": 3,
+            "19": 3,
+            "20": 3,
+            "21": 3,
+            "22": 3,
+            "23": 3,
+            "24": 3,
+            "25": 3,
+            "26": 3,
+            "27": 3,
+            "28": 3,
+            "29": 3,
+            "30": 3,
+            "31": 3,
+            "32": 3,
+            "33": 3,
+            "34": 3,
+            "35": 3,
+            "36": 3,
+            "37": 3,
+            "38": 3,
+            "39": 3,
+            "40": 3
+          },
+          "expected": {
+            "facetSums": {
+              "Sinc": 30,
+              "Fair": 30,
+              "Gree": 30,
+              "Mode": 30
+            },
+            "domainSum": 120,
+            "domainMean": 3.0,
+            "facetMeans": {
+              "Sinc": 3.0,
+              "Fair": 3.0,
+              "Gree": 3.0,
+              "Mode": 3.0
+            }
+          }
+        },
+        {
+          "name": "mixed_seeded",
+          "responses": {
+            "1": 5,
+            "2": 4,
+            "3": 3,
+            "4": 3,
+            "5": 2,
+            "6": 2,
+            "7": 2,
+            "8": 1,
+            "9": 5,
+            "10": 3,
+            "11": 5,
+            "12": 4,
+            "13": 3,
+            "14": 4,
+            "15": 3,
+            "16": 5,
+            "17": 1,
+            "18": 1,
+            "19": 5,
+            "20": 4,
+            "21": 2,
+            "22": 3,
+            "23": 2,
+            "24": 4,
+            "25": 4,
+            "26": 1,
+            "27": 1,
+            "28": 5,
+            "29": 5,
+            "30": 3,
+            "31": 3,
+            "32": 3,
+            "33": 5,
+            "34": 4,
+            "35": 5,
+            "36": 4,
+            "37": 1,
+            "38": 1,
+            "39": 3,
+            "40": 4
+          },
+          "expected": {
+            "facetSums": {
+              "Sinc": 31,
+              "Fair": 34,
+              "Gree": 30,
+              "Mode": 29
+            },
+            "domainSum": 124,
+            "domainMean": 3.1,
+            "facetMeans": {
+              "Sinc": 3.1,
+              "Fair": 3.4,
+              "Gree": 3.0,
+              "Mode": 2.9
+            }
+          }
+        }
+      ],
+      "timeAllocationAsWritten": "5.30 minutes"
+    }
+  ],
+  "note": "Contains only content and scoring taken from the two source documents (plus arithmetic ranges derived from them)."
+}

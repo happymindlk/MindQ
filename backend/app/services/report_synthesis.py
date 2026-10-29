@@ -35,7 +35,13 @@ from app.services.instrument_results import (
     module_bar_percentage,
     position_band,
 )
-from app.services.scoring import ScoreResult, _extract_answer, _normalize_answer_set, score_assessment_detailed
+from app.services.scoring import (
+    ScoreResult,
+    _extract_answer,
+    _normalize_answer_set,
+    likert_scale_max_from_questions,
+    score_assessment_detailed,
+)
 
 CategoryKey = Literal["cognitive", "behavioral", "personality", "technical"]
 Band = Literal["very_high", "high", "moderate", "low", "very_low"]
@@ -167,16 +173,20 @@ def resolve_category(
 
 
 def module_percentage(
-    score: float | int | None, facet_scores: Mapping[str, Any] | None
+    score: float | int | None,
+    facet_scores: Mapping[str, Any] | None,
+    questions: Sequence[Any] | None = None,
 ) -> float | None:
     """Return a 0–100 score for a completed module.
 
     Likert-only modules have no right/wrong score, so their n-weighted facet
-    means are mapped linearly from the 1–5 scale onto 0–100.
+    means are mapped linearly from the item scale (1–5 default, 1–7 for PI)
+    onto 0–100.
 
     Args:
         score: ``candidate_progress.score`` or None.
         facet_scores: ``{facet: {"mean": float, "n": int}}`` from Likert items.
+        questions: Optional bank used to detect a 7-point scale.
 
     Returns:
         Percentage rounded to one decimal, or None when nothing is scorable.
@@ -187,6 +197,7 @@ def module_percentage(
         return None
     weighted = 0.0
     total_n = 0
+    observed_max = LIKERT_MAX
     for entry in facet_scores.values():
         if not isinstance(entry, Mapping):
             continue
@@ -198,10 +209,16 @@ def module_percentage(
             n = 1
         weighted += float(mean) * n
         total_n += n
+        if float(mean) > observed_max:
+            observed_max = 7.0 if float(mean) <= 7 else float(mean)
     if total_n == 0:
         return None
-    mean_rating = min(LIKERT_MAX, max(LIKERT_MIN, weighted / total_n))
-    return round((mean_rating - LIKERT_MIN) / (LIKERT_MAX - LIKERT_MIN) * 100, 1)
+    scale_max = float(likert_scale_max_from_questions(questions)) if questions else observed_max
+    mean_rating = min(scale_max, max(LIKERT_MIN, weighted / total_n))
+    span = scale_max - LIKERT_MIN
+    if span <= 0:
+        return None
+    return round((mean_rating - LIKERT_MIN) / span * 100, 1)
 
 
 def _as_float(value: Any) -> float | None:
