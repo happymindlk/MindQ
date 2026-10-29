@@ -207,6 +207,22 @@ def payload_to_storage(payload: dict[str, Any], index: int = 0) -> dict[str, Any
     return stored
 
 
+def catalog_or_row_id(stored: dict[str, Any], row_id: Any) -> str:
+    """Prefer a catalog item id over the template_questions UUID.
+
+    Args:
+        stored: Portal question dict (may already carry ``id``).
+        row_id: ``template_questions.id`` fallback.
+
+    Returns:
+        Stable string id used by autosave and scoring.
+    """
+    existing = stored.get("id")
+    if isinstance(existing, str) and existing.strip():
+        return existing.strip()
+    return str(row_id)
+
+
 def custom_in_to_storage(item: CustomQuestionIn, index: int = 0) -> dict[str, Any]:
     """Map a CustomQuestionIn into assessments.questions JSONB shape.
 
@@ -429,7 +445,7 @@ class LibraryService:
                     stored["correct_answer"] = rubric
                 else:
                     stored["benchmark_rubric"] = rubric
-            stored["id"] = str(row.id)
+            stored["id"] = catalog_or_row_id(stored, row.id)
             questions.append(stored)
 
         module.questions = questions
@@ -844,7 +860,6 @@ class LibraryService:
         ).scalars().all()
         for index, row in enumerate(rows):
             payload = copy.deepcopy(row.question_payload) if isinstance(row.question_payload, dict) else {}
-            payload.pop("id", None)
             session.add(
                 TemplateQuestion(
                     id=uuid4(),

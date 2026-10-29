@@ -309,6 +309,66 @@ describe('AssessmentRunner strict expiry', () => {
   });
 });
 
+describe('AssessmentRunner flexible overtime', () => {
+  it('does not auto-submit when a flexible timer runs over', async () => {
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    const onSubmitted = vi.fn();
+    const onTimeExpired = vi.fn();
+    renderRunner(
+      {
+        ...twoQuestionTest('psychometric'),
+        duration_seconds: 60,
+        timer_mode: 'flexible',
+        started_at: new Date(Date.now() - 61_000).toISOString(),
+      },
+      transport,
+      'live',
+      { onSubmitted, onTimeExpired },
+    );
+    await screen.findByRole('timer');
+    expect(transport.submit).not.toHaveBeenCalled();
+    expect(onTimeExpired).not.toHaveBeenCalled();
+    expect(onSubmitted).not.toHaveBeenCalled();
+  });
+});
+
+describe('AssessmentRunner autosave race', () => {
+  it('posts the latest answer after an in-flight save for the same item id', async () => {
+    let resolveSave: (() => void) | undefined;
+    const transport = {
+      autosave: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSave = resolve;
+          }),
+      ),
+      submit: vi.fn(async () => undefined),
+    };
+    const user = userEvent.setup();
+    renderRunner(twoQuestionTest(), transport, 'live');
+    await user.click(screen.getByRole('radio', { name: /Alpha/ }));
+    await user.click(screen.getByRole('button', { name: /Next question/ }));
+    expect(transport.autosave).toHaveBeenCalledTimes(1);
+    expect(transport.autosave.mock.calls[0][0].question_id).toBe('q1');
+
+    await user.click(screen.getByRole('button', { name: /Previous/ }));
+    await user.click(screen.getByRole('radio', { name: /Beta/ }));
+    await user.click(screen.getByRole('button', { name: /Next question/ }));
+
+    resolveSave?.();
+    await waitFor(() => expect(transport.autosave).toHaveBeenCalledTimes(2));
+    expect(transport.autosave.mock.calls[1][0]).toEqual(
+      expect.objectContaining({
+        question_id: 'q1',
+        response: { answer: 'Beta' },
+      }),
+    );
+  });
+});
+
 describe('AssessmentRunner content protection', () => {
   it('disables text selection and blocks copy/cut/context menu on the question card', () => {
     const { container } = renderRunner(test());

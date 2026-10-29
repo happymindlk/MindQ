@@ -19,6 +19,7 @@ from app.services.library import (
     LibraryError,
     LibraryService,
     ModuleLockedError,
+    catalog_or_row_id,
     create_body_to_storage,
     custom_in_to_storage,
     payload_to_storage,
@@ -595,9 +596,15 @@ async def test_clone_version_increments_version_and_copies_questions():
     assert clone.slug == "sql-basics-v3"
     assert copied.template_id == clone.id
     assert copied.question_payload["correct_keys"] == [0]
-    assert "id" not in copied.question_payload
+    assert copied.question_payload["id"] == "tq-001"
     assert question_row.question_payload["id"] == "tq-001"
     session.commit.assert_awaited_once()
+
+
+def test_catalog_or_row_id_keeps_catalog_slug():
+    assert catalog_or_row_id({"id": "ipc_01"}, uuid4()) == "ipc_01"
+    row_id = uuid4()
+    assert catalog_or_row_id({}, row_id) == str(row_id)
 
 
 def test_template_create_notice_defaults_and_blank_normalization():

@@ -22,6 +22,15 @@ describe('resolveAssessmentMediaUrl', () => {
     expect(resolveAssessmentMediaUrl(remote, REMOTE)).toBe(remote);
   });
 
+  it('maps catalog ICAR paths onto the candidate origin', () => {
+    expect(resolveAssessmentMediaUrl('assets/icar/q09_matrix.jpg', REMOTE)).toBe(
+      '/assets/icar/q09_matrix.jpg',
+    );
+    expect(resolveAssessmentMediaUrl('/assets/icar/q09_matrix.jpg', REMOTE)).toBe(
+      '/assets/icar/q09_matrix.jpg',
+    );
+  });
+
   it('prefixes relative assessment-media paths', () => {
     expect(resolveAssessmentMediaUrl('modules/m1/a.png', REMOTE)).toBe(
       `${REMOTE}/storage/v1/object/public/assessment-media/modules/m1/a.png`,

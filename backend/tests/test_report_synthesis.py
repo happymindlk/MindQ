@@ -96,6 +96,12 @@ def test_module_percentage_clamps_out_of_range_means() -> None:
     assert module_percentage(None, {"A": {"mean": -2, "n": 0}}) == 0.0
 
 
+def test_module_percentage_maps_seven_point_mean() -> None:
+    questions = [{"type": "likert", "scale_points": 7}]
+    assert module_percentage(None, {"PI": {"mean": 7.0, "n": 10}}, questions) == 100.0
+    assert module_percentage(None, {"PI": {"mean": 4.0, "n": 10}}, questions) == 50.0
+
+
 # --- build_module_outcomes ----------------------------------------------------
 
 

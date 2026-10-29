@@ -33,6 +33,9 @@ export function resolveAssessmentMediaUrl(
     }
   }
 
+  if (raw.startsWith('assets/')) return `/${raw}`;
+  if (raw.startsWith('/assets/')) return raw;
+
   if (!base) return raw;
 
   if (raw.startsWith('/storage/v1/object/public/assessment-media/')) {

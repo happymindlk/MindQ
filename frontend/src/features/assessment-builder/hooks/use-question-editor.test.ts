@@ -178,4 +178,17 @@ describe('resolveLikertLabels', () => {
   it('falls back to IPIP anchors when nothing is stored', () => {
     expect(resolveLikertLabels(undefined, null, null)).toEqual([...LIKERT_DEFAULT_LABELS]);
   });
+
+  it('keeps a seven-point Personal Initiative scale', () => {
+    const labels = [
+      'Totally Disagree',
+      'Disagree',
+      'Moderately Disagree',
+      'Neither',
+      'Moderately Agree',
+      'Agree',
+      'Totally Agree',
+    ];
+    expect(resolveLikertLabels(labels)).toEqual(labels);
+  });
 });

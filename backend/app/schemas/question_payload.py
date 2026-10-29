@@ -21,6 +21,8 @@ MEDIA_BUCKET = "assessment-media"
 SJT_OPTION_COUNT = 4
 SJT_MAX_WEIGHT = 3
 LIKERT_POINTS = 5
+LIKERT_MIN_POINTS = 5
+LIKERT_MAX_POINTS = 7
 LIKERT_LABEL_MAX = 64
 LIKERT_DEFAULT_LABELS: tuple[str, ...] = (
     "Very Inaccurate",
@@ -145,6 +147,10 @@ def rewrite_local_media_url(value: str | None) -> str | None:
     url = str(value).strip()
     if not url:
         return None
+    if url.startswith("assets/"):
+        return f"/{url}"
+    if url.startswith("/assets/"):
+        return url
     parsed = urlparse(url)
     media_marker = f"/storage/v1/object/public/{MEDIA_BUCKET}/"
     if parsed.hostname not in ("127.0.0.1", "localhost") or media_marker not in parsed.path:
@@ -284,7 +290,7 @@ def normalize_likert_labels(
     low: Any = None,
     high: Any = None,
 ) -> list[str]:
-    """Resolve a full five-point label set from new or legacy storage fields.
+    """Resolve Likert anchors from new or legacy storage fields.
 
     Args:
         labels: ``scale_labels`` list (may be missing, short, or contain blanks).
@@ -292,14 +298,22 @@ def normalize_likert_labels(
         high: Legacy ``likert_label_5`` endpoint label.
 
     Returns:
-        Exactly ``LIKERT_POINTS`` labels; gaps fall back to the IPIP defaults.
+        5–7 labels. A stored 6- or 7-point set is kept; shorter or missing
+        sets fall back to the five IPIP defaults with endpoint overrides.
     """
-    resolved = list(LIKERT_DEFAULT_LABELS)
-    if isinstance(labels, (list, tuple)):
+    if isinstance(labels, (list, tuple)) and len(labels) >= LIKERT_MIN_POINTS:
+        count = min(len(labels), LIKERT_MAX_POINTS)
+        if count > LIKERT_POINTS:
+            return [
+                label.strip() if isinstance(label, str) and label.strip() else str(i + 1)
+                for i, label in enumerate(labels[:count])
+            ]
+        resolved = list(LIKERT_DEFAULT_LABELS)
         for i, label in enumerate(labels[:LIKERT_POINTS]):
             if isinstance(label, str) and label.strip():
                 resolved[i] = label.strip()
         return resolved
+    resolved = list(LIKERT_DEFAULT_LABELS)
     endpoints = f"{low or ''} {high or ''}".lower()
     if "agree" in endpoints:
         resolved = list(LIKERT_AGREEMENT_LABELS)
@@ -311,18 +325,18 @@ def normalize_likert_labels(
 
 
 class LikertPayload(_QuestionBase):
-    """Five-point Likert item with admin-editable anchors.
+    """Likert item with admin-editable anchors (5-point default, up to 7).
 
-    Scoring uses only the selected index (1–5, recoded ``6 - x`` when reverse
-    scored), so labels are presentation-only and can be customised freely.
+    Scoring uses only the selected index (1–N, recoded ``(1+N) - x`` when
+    reverse scored), so labels are presentation-only and can be customised.
     """
 
     type: Literal["likert"] = "likert"
     reverse_scored: bool = False
     scale_labels: list[str] = Field(
         default_factory=lambda: list(LIKERT_DEFAULT_LABELS),
-        min_length=LIKERT_POINTS,
-        max_length=LIKERT_POINTS,
+        min_length=LIKERT_MIN_POINTS,
+        max_length=LIKERT_MAX_POINTS,
     )
 
     @model_validator(mode="before")
@@ -359,16 +373,17 @@ class LikertPayload(_QuestionBase):
             labels are mirrored into ``likert_label_1``/``likert_label_5`` for
             legacy report and package consumers.
         """
+        points = len(self.scale_labels)
         return {
             **self._base_storage(),
             "type": "likert",
             "builder_type": "likert",
             "options": [],
-            "scale_points": LIKERT_POINTS,
+            "scale_points": points,
             "reverse_scored": self.reverse_scored,
             "scale_labels": list(self.scale_labels),
             "likert_label_1": self.scale_labels[0],
-            "likert_label_5": self.scale_labels[-1],
+            "likert_label_5": self.scale_labels[min(4, points - 1)],
         }
 
 

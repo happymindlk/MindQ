@@ -8,6 +8,8 @@ export type BuilderQuestionType = 'sjt' | 'mcq' | 'likert' | 'crt' | 'open_ended
 export const SJT_OPTION_COUNT = 4;
 export const SJT_MAX_WEIGHT = 3;
 export const LIKERT_POINTS = 5;
+export const LIKERT_MIN_POINTS = 5;
+export const LIKERT_MAX_POINTS = 7;
 export const LIKERT_LABEL_MAX = 64;
 /** IPIP accuracy anchors used for new Likert items; admins may relabel freely. */
 export const LIKERT_DEFAULT_LABELS = [
@@ -26,14 +28,19 @@ const LIKERT_AGREEMENT_LABELS = ['Strongly Disagree', 'Disagree', 'Neutral', 'Ag
  * @param scaleLabels - Full label set, when present.
  * @param low - Legacy label for point 1.
  * @param high - Legacy label for point 5.
- * @returns Exactly {@link LIKERT_POINTS} non-empty labels.
+ * @returns 5–7 non-empty labels. A stored 6- or 7-point set is kept; shorter
+ *   sets fall back to the five IPIP defaults with endpoint overrides.
  */
 export function resolveLikertLabels(
   scaleLabels?: readonly (string | null | undefined)[] | null,
   low?: string | null,
   high?: string | null,
 ): string[] {
-  if (scaleLabels && scaleLabels.length > 0) {
+  if (scaleLabels && scaleLabels.length >= LIKERT_MIN_POINTS) {
+    const count = Math.min(scaleLabels.length, LIKERT_MAX_POINTS);
+    if (count > LIKERT_POINTS) {
+      return scaleLabels.slice(0, count).map((label, i) => label?.trim() || String(i + 1));
+    }
     return LIKERT_DEFAULT_LABELS.map((fallback, i) => scaleLabels[i]?.trim() || fallback);
   }
   const base: string[] = /agree/i.test(`${low ?? ''} ${high ?? ''}`)
@@ -246,7 +253,9 @@ export function validateQuestion(question: QuestionPayload): string[] {
     }
     case 'likert': {
       const labels = question.scale_labels.map((l) => l.trim());
-      if (labels.length !== LIKERT_POINTS) errors.push('Likert needs exactly five scale labels.');
+      if (labels.length < LIKERT_MIN_POINTS || labels.length > LIKERT_MAX_POINTS) {
+        errors.push('Likert needs between five and seven scale labels.');
+      }
       if (labels.some((l) => !l)) errors.push('Every Likert scale label must be filled in.');
       if (labels.some((l) => l.length > LIKERT_LABEL_MAX)) {
         errors.push(`Likert scale labels must be ${LIKERT_LABEL_MAX} characters or fewer.`);

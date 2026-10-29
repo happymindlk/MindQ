@@ -75,9 +75,10 @@ export function RunnerQuestionInput(props: RunnerQuestionInputProps) {
       return <ChoiceList {...props} multi={false} />;
     case 'likert': {
       const labels = resolveLikertLabels(question.scale_labels, question.likert_label_1, question.likert_label_5);
+      const cols = labels.length >= 7 ? 'sm:grid-cols-7' : labels.length === 6 ? 'sm:grid-cols-6' : 'sm:grid-cols-5';
       return (
         <div
-          className="mt-8 grid grid-cols-1 gap-2 sm:grid-cols-5"
+          className={`mt-8 grid grid-cols-1 gap-2 ${cols}`}
           role="radiogroup"
           aria-label="Likert scale"
         >
