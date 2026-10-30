@@ -91,7 +91,14 @@ describe('QuestionEditorModal', () => {
       await user.type(input, label);
     }
     await user.click(screen.getByRole('button', { name: 'Add question' }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ type: 'likert', scale_labels: custom }));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'likert',
+        scale_labels: custom,
+        scale_points: 5,
+        options: custom.map((label, index) => ({ label, value: index + 1 })),
+      }),
+    );
   });
 
   it('blocks saving a Likert item with a cleared label and can reset to defaults', async () => {
@@ -109,6 +116,22 @@ describe('QuestionEditorModal', () => {
 
     await user.click(reset);
     expect(screen.getByLabelText('Label for point 3')).toHaveValue('Neither Inaccurate nor Accurate');
+  });
+
+  it('applies the 7-point preset and keeps scale_points aligned on save', async () => {
+    const { user, onSave } = setup();
+    await user.selectOptions(screen.getByLabelText('Question type'), 'likert');
+    await user.type(screen.getByRole('textbox', { name: /prompt/i }), 'I take charge');
+    await user.click(screen.getByRole('button', { name: '7-point' }));
+    expect(within(screen.getByRole('list', { name: 'Scale points' })).getAllByRole('listitem')).toHaveLength(7);
+    await user.click(screen.getByRole('button', { name: 'Add question' }));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'likert',
+        scale_points: 7,
+        options: expect.arrayContaining([{ label: 'Totally Agree', value: 7 }]),
+      }),
+    );
   });
 
   it('limits technical modules to MCQ, open-ended, and CRT', () => {

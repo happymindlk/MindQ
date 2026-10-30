@@ -37,6 +37,21 @@ describe('RunnerQuestionInput likert', () => {
     );
   });
 
+  it('emits custom option values instead of the 1-based index', async () => {
+    const onChange = vi.fn();
+    const labels = ['Never', 'Rarely', 'Sometimes', 'Often', 'Always'];
+    render(
+      <RunnerQuestionInput
+        question={likert({ scale_labels: labels, scale_values: [0, 25, 50, 75, 100] })}
+        value={undefined}
+        disabled={false}
+        onChange={onChange}
+      />,
+    );
+    await userEvent.setup().click(screen.getByRole('radio', { name: /often/i }));
+    expect(onChange).toHaveBeenCalledWith(75);
+  });
+
   it('renders seven Personal Initiative anchors and emits 7', async () => {
     const onChange = vi.fn();
     const labels = [

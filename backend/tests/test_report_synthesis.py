@@ -102,6 +102,23 @@ def test_module_percentage_maps_seven_point_mean() -> None:
     assert module_percentage(None, {"PI": {"mean": 4.0, "n": 10}}, questions) == 50.0
 
 
+def test_module_percentage_uses_option_value_max() -> None:
+    questions = [
+        {
+            "type": "likert",
+            "options": [
+                {"label": "a", "value": 0},
+                {"label": "b", "value": 25},
+                {"label": "c", "value": 50},
+                {"label": "d", "value": 75},
+                {"label": "e", "value": 100},
+            ],
+        }
+    ]
+    assert module_percentage(None, {"F": {"mean": 100.0, "n": 1}}, questions) == 100.0
+    assert module_percentage(None, {"F": {"mean": 50.0, "n": 1}}, questions) == 50.0
+
+
 # --- build_module_outcomes ----------------------------------------------------
 
 

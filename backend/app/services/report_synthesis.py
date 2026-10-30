@@ -40,6 +40,7 @@ from app.services.scoring import (
     _extract_answer,
     _normalize_answer_set,
     likert_scale_max_from_questions,
+    likert_scale_min_from_questions,
     score_assessment_detailed,
 )
 
@@ -214,11 +215,12 @@ def module_percentage(
     if total_n == 0:
         return None
     scale_max = float(likert_scale_max_from_questions(questions)) if questions else observed_max
-    mean_rating = min(scale_max, max(LIKERT_MIN, weighted / total_n))
-    span = scale_max - LIKERT_MIN
+    scale_min = float(likert_scale_min_from_questions(questions)) if questions else LIKERT_MIN
+    mean_rating = min(scale_max, max(scale_min, weighted / total_n))
+    span = scale_max - scale_min
     if span <= 0:
         return None
-    return round((mean_rating - LIKERT_MIN) / span * 100, 1)
+    return round((mean_rating - scale_min) / span * 100, 1)
 
 
 def _as_float(value: Any) -> float | None:

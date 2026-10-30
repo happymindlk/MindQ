@@ -29,3 +29,5 @@ backend/uvicorn.log
 
 local_dump.sql
 *.sql
+
+docs/*.pdf

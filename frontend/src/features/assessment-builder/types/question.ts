@@ -19,7 +19,67 @@ export const LIKERT_DEFAULT_LABELS = [
   'Moderately Accurate',
   'Very Accurate',
 ] as const;
+export const LIKERT_7_DEFAULT_LABELS = [
+  'Totally Disagree',
+  'Disagree',
+  'Moderately Disagree',
+  'Neither disagree or agree',
+  'Moderately Agree',
+  'Agree',
+  'Totally Agree',
+] as const;
 const LIKERT_AGREEMENT_LABELS = ['Strongly Disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly Agree'] as const;
+
+export interface LikertOption {
+  label: string;
+  value: number;
+}
+
+/**
+ * Pair sequential integer values with Likert labels.
+ *
+ * @param labels - Display anchors in scale order.
+ * @returns Option rows with values `1..labels.length`.
+ */
+export function likertOptionsFromLabels(labels: readonly string[]): LikertOption[] {
+  return labels.map((label, index) => ({ label, value: index + 1 }));
+}
+
+/**
+ * 5- or 7-point preset used by the admin Likert builder.
+ *
+ * @param points - Preset length.
+ * @returns Default labels with values `1..points`.
+ */
+export function defaultLikertOptions(points: 5 | 7): LikertOption[] {
+  const labels = points === 7 ? LIKERT_7_DEFAULT_LABELS : LIKERT_DEFAULT_LABELS;
+  return likertOptionsFromLabels(labels);
+}
+
+/**
+ * Restore `{label, value}` rows from editor or legacy label-only payloads.
+ *
+ * @param question - Partial Likert payload.
+ * @returns 5–7 option rows.
+ */
+export function coerceLikertOptions(question: {
+  options?: LikertOption[] | null;
+  scale_labels?: readonly (string | null | undefined)[] | null;
+  scale_values?: readonly (number | null | undefined)[] | null;
+}): LikertOption[] {
+  if (question.options && question.options.length >= LIKERT_MIN_POINTS) {
+    return question.options.slice(0, LIKERT_MAX_POINTS).map((row, index) => ({
+      label: row.label,
+      value: Number.isInteger(row.value) ? row.value : index + 1,
+    }));
+  }
+  const labels = resolveLikertLabels(question.scale_labels);
+  const values = question.scale_values;
+  return labels.map((label, index) => ({
+    label,
+    value: Number.isInteger(values?.[index]) ? Number(values?.[index]) : index + 1,
+  }));
+}
 
 /**
  * Resolve the five display anchors for a Likert item, tolerating legacy rows
@@ -104,7 +164,10 @@ export interface McqQuestion extends QuestionBase {
 export interface LikertQuestion extends QuestionBase {
   type: 'likert';
   reverse_scored: boolean;
-  /** Display anchors for points 1–5. Presentation-only: scoring uses the index. */
+  /** Scored anchors. `scale_points` is always `options.length`. */
+  options: LikertOption[];
+  scale_points: number;
+  /** Mirrored labels for runner/legacy storage. */
   scale_labels: string[];
 }
 
@@ -182,13 +245,17 @@ export function createEmptyQuestion(
       };
     case 'mcq':
       return { ...shared, type, mode: 'single', options: ['', '', '', ''], correct_keys: [] };
-    case 'likert':
+    case 'likert': {
+      const options = defaultLikertOptions(5);
       return {
         ...shared,
         type,
         reverse_scored: false,
-        scale_labels: [...LIKERT_DEFAULT_LABELS],
+        options,
+        scale_points: options.length,
+        scale_labels: options.map((row) => row.label),
       };
+    }
     case 'crt':
       return { ...shared, type, accepted_answers: [''], match: 'exact' };
     case 'open_ended':
@@ -252,9 +319,14 @@ export function validateQuestion(question: QuestionPayload): string[] {
       break;
     }
     case 'likert': {
-      const labels = question.scale_labels.map((l) => l.trim());
-      if (labels.length < LIKERT_MIN_POINTS || labels.length > LIKERT_MAX_POINTS) {
-        errors.push('Likert needs between five and seven scale labels.');
+      const options = question.options ?? [];
+      const labels = options.map((row) => row.label.trim());
+      const values = options.map((row) => row.value);
+      if (options.length < LIKERT_MIN_POINTS || options.length > LIKERT_MAX_POINTS) {
+        errors.push('Likert needs between five and seven scale options.');
+      }
+      if (question.scale_points !== options.length) {
+        errors.push('Likert scale_points must equal the number of options.');
       }
       if (labels.some((l) => !l)) errors.push('Every Likert scale label must be filled in.');
       if (labels.some((l) => l.length > LIKERT_LABEL_MAX)) {
@@ -262,6 +334,12 @@ export function validateQuestion(question: QuestionPayload): string[] {
       }
       if (new Set(labels.map((l) => l.toLowerCase())).size !== labels.length) {
         errors.push('Likert scale labels must be unique.');
+      }
+      if (values.some((value) => !Number.isInteger(value))) {
+        errors.push('Every Likert option needs an integer value.');
+      }
+      if (new Set(values).size !== values.length) {
+        errors.push('Likert option values must be unique.');
       }
       break;
     }
@@ -306,8 +384,19 @@ export function toApiPayload(question: QuestionPayload): QuestionPayload {
         ...shared,
         accepted_answers: question.accepted_answers.map((a) => a.trim()).filter(Boolean),
       };
-    case 'likert':
-      return { ...question, ...shared, scale_labels: question.scale_labels.map((l) => l.trim()) };
+    case 'likert': {
+      const options = question.options.map((row) => ({
+        label: row.label.trim(),
+        value: row.value,
+      }));
+      return {
+        ...question,
+        ...shared,
+        options,
+        scale_points: options.length,
+        scale_labels: options.map((row) => row.label),
+      };
+    }
     case 'open_ended':
       return { ...question, ...shared, rubric: question.rubric.trim() };
   }

@@ -83,7 +83,8 @@ export function RunnerQuestionInput(props: RunnerQuestionInputProps) {
           aria-label="Likert scale"
         >
           {labels.map((label, i) => {
-            const num = i + 1;
+            const stored = question.scale_values?.[i];
+            const num = Number.isInteger(stored) ? Number(stored) : i + 1;
             const isSelected = value === num;
             return (
               <button
@@ -91,7 +92,7 @@ export function RunnerQuestionInput(props: RunnerQuestionInputProps) {
                 type="button"
                 role="radio"
                 aria-checked={isSelected}
-                aria-label={`${num} of ${labels.length}: ${label}`}
+                aria-label={`${i + 1} of ${labels.length}: ${label}`}
                 disabled={disabled}
                 onClick={() => onChange(num)}
                 className={`flex items-center gap-3 rounded-md px-4 py-3 text-left text-base transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-60 sm:flex-col sm:justify-start sm:gap-2 sm:px-2 sm:text-center ${

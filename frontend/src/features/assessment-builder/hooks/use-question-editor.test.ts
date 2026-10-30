@@ -3,6 +3,7 @@ import {
   DEFAULT_DISCLAIMER_TEXT,
   LIKERT_DEFAULT_LABELS,
   createEmptyQuestion,
+  likertOptionsFromLabels,
   resolveLikertLabels,
   toApiPayload,
   validateQuestion,
@@ -129,11 +130,39 @@ describe('likert scale labels', () => {
     const start = likert();
     const edited = questionEditorReducer(start, { kind: 'likert-label', index: 2, value: 'Unsure' }) as LikertQuestion;
     expect(edited.scale_labels[2]).toBe('Unsure');
+    expect(edited.options[2]?.label).toBe('Unsure');
     expect(edited.scale_labels.filter((l, i) => l !== start.scale_labels[i])).toHaveLength(1);
     expect(questionEditorReducer(edited, { kind: 'likert-label', index: 5, value: 'x' })).toBe(edited);
     expect(questionEditorReducer(edited, { kind: 'likert-label', index: -1, value: 'x' })).toBe(edited);
     const reset = questionEditorReducer(edited, { kind: 'likert-reset-labels' }) as LikertQuestion;
     expect(reset.scale_labels).toEqual([...LIKERT_DEFAULT_LABELS]);
+    expect(reset.scale_points).toBe(5);
+  });
+
+  it('adds and removes options, keeping scale_points in sync, and applies presets', () => {
+    let state = likert();
+    state = questionEditorReducer(state, { kind: 'likert-add-option' }) as LikertQuestion;
+    expect(state.options).toHaveLength(6);
+    expect(state.scale_points).toBe(6);
+    expect(state.options[5]).toEqual({ label: '', value: 6 });
+    state = questionEditorReducer(state, { kind: 'likert-add-option' }) as LikertQuestion;
+    expect(state.options).toHaveLength(7);
+    expect(questionEditorReducer(state, { kind: 'likert-add-option' })).toBe(state);
+    state = questionEditorReducer(state, { kind: 'likert-remove-option', index: 6 }) as LikertQuestion;
+    expect(state.scale_points).toBe(6);
+    const five = questionEditorReducer(state, { kind: 'likert-preset', points: 5 }) as LikertQuestion;
+    expect(five.scale_points).toBe(5);
+    expect(five.options.map((row) => row.value)).toEqual([1, 2, 3, 4, 5]);
+    const seven = questionEditorReducer(five, { kind: 'likert-preset', points: 7 }) as LikertQuestion;
+    expect(seven.scale_points).toBe(7);
+    expect(seven.options).toHaveLength(7);
+  });
+
+  it('edits an option value used for scoring', () => {
+    const start = likert();
+    const edited = questionEditorReducer(start, { kind: 'likert-option-value', index: 4, value: 10 }) as LikertQuestion;
+    expect(edited.options[4]?.value).toBe(10);
+    expect(edited.scale_points).toBe(5);
   });
 
   it('switching type away and back restores defaults rather than stale labels', () => {
@@ -144,13 +173,25 @@ describe('likert scale labels', () => {
   });
 
   it('rejects blank and duplicate labels, and trims on save', () => {
-    const blank = { ...likert(), scale_labels: ['a', ' ', 'c', 'd', 'e'] };
+    const blankOpts = likertOptionsFromLabels(['a', ' ', 'c', 'd', 'e']);
+    const blank = { ...likert(), options: blankOpts, scale_points: 5, scale_labels: blankOpts.map((row) => row.label) };
     expect(validateQuestion(blank)).toContain('Every Likert scale label must be filled in.');
-    const dupes = { ...likert(), scale_labels: ['a', 'A ', 'c', 'd', 'e'] };
+    const dupeOpts = likertOptionsFromLabels(['a', 'A ', 'c', 'd', 'e']);
+    const dupes = { ...likert(), options: dupeOpts, scale_points: 5, scale_labels: dupeOpts.map((row) => row.label) };
     expect(validateQuestion(dupes)).toContain('Likert scale labels must be unique.');
-    const padded = { ...likert(), scale_labels: [' Never', 'Rarely ', 'Sometimes', 'Often', 'Always'] };
+    const paddedOpts = likertOptionsFromLabels([' Never', 'Rarely ', 'Sometimes', 'Often', 'Always']);
+    const padded = { ...likert(), options: paddedOpts, scale_points: 5, scale_labels: paddedOpts.map((row) => row.label) };
     expect(validateQuestion(padded)).toEqual([]);
-    expect((toApiPayload(padded) as LikertQuestion).scale_labels).toEqual(['Never', 'Rarely', 'Sometimes', 'Often', 'Always']);
+    const saved = toApiPayload(padded) as LikertQuestion;
+    expect(saved.scale_labels).toEqual(['Never', 'Rarely', 'Sometimes', 'Often', 'Always']);
+    expect(saved.options).toEqual([
+      { label: 'Never', value: 1 },
+      { label: 'Rarely', value: 2 },
+      { label: 'Sometimes', value: 3 },
+      { label: 'Often', value: 4 },
+      { label: 'Always', value: 5 },
+    ]);
+    expect(saved.scale_points).toBe(5);
   });
 });
 

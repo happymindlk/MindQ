@@ -174,6 +174,38 @@ def test_likert_custom_labels_round_trip_and_mirror_endpoints():
     assert question_payload_adapter.validate_python(rebuilt).to_storage() == stored
 
 
+def test_likert_options_round_trip_sets_scale_points_from_length():
+    options = [
+        {"label": "Never", "value": 0},
+        {"label": "Rarely", "value": 25},
+        {"label": "Sometimes", "value": 50},
+        {"label": "Often", "value": 75},
+        {"label": "Always", "value": 100},
+    ]
+    stored = question_payload_adapter.validate_python(
+        {"type": "likert", "prompt": "Q", "options": options}
+    ).to_storage()
+    assert stored["scale_points"] == 5
+    assert stored["options"] == options
+    assert stored["scale_labels"] == [row["label"] for row in options]
+    rebuilt = payload_from_storage(stored)
+    assert rebuilt is not None
+    assert rebuilt["options"] == options
+    assert rebuilt["scale_points"] == 5
+
+
+def test_likert_rejects_duplicate_option_values():
+    options = [
+        {"label": "a", "value": 1},
+        {"label": "b", "value": 1},
+        {"label": "c", "value": 3},
+        {"label": "d", "value": 4},
+        {"label": "e", "value": 5},
+    ]
+    with pytest.raises(ValidationError, match="unique"):
+        question_payload_adapter.validate_python({"type": "likert", "prompt": "Q", "options": options})
+
+
 def test_likert_seven_point_round_trip():
     labels = [
         "Totally Disagree",

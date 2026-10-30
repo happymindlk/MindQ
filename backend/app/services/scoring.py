@@ -73,7 +73,11 @@ _WORD_NUMBERS = {
 
 
 def _parse_number(value: Any) -> float | None:
-    text = str(value or "").strip().replace(",", "").replace("$", "")
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().replace(",", "").replace("$", "")
     if not text:
         return None
     try:
@@ -130,17 +134,46 @@ def crt_credit(question: dict[str, Any], given: Any) -> float | None:
     return 0.0
 
 
-def likert_scale_max(question: dict[str, Any] | None) -> int:
-    """Return the inclusive upper bound of a Likert item.
+def _likert_option_values(question: dict[str, Any] | None) -> list[int] | None:
+    """Extract integer option values from stored Likert ``options``.
+
+    Args:
+        question: Stored question dict, or None.
+
+    Returns:
+        Values in display order, or None when the item has no value rows.
+    """
+    if not isinstance(question, dict):
+        return None
+    raw = question.get("options")
+    if not isinstance(raw, list) or not raw:
+        return None
+    values: list[int] = []
+    for row in raw:
+        candidate = row.get("value") if isinstance(row, dict) else row
+        if isinstance(candidate, bool) or not isinstance(candidate, (int, float)):
+            continue
+        if int(candidate) != candidate:
+            continue
+        values.append(int(candidate))
+    return values or None
+
+
+def likert_scale_bounds(question: dict[str, Any] | None) -> tuple[int, int]:
+    """Return ``(scale_min, scale_max)`` for a Likert item.
 
     Args:
         question: Stored Likert question, or None.
 
     Returns:
-        ``scale_points`` / label count when in 5–7, otherwise the 5-point default.
+        Min/max option values when present; otherwise ``1`` and the 5–7 point
+        length from ``scale_points`` / labels.
     """
+    values = _likert_option_values(question)
+    if values:
+        return min(values), max(values)
     if not isinstance(question, dict):
-        return LIKERT_MAX
+        return LIKERT_MIN, LIKERT_MAX
     points = question.get("scale_points")
     if isinstance(points, bool) or not isinstance(points, (int, float)):
         points = None
@@ -153,18 +186,42 @@ def likert_scale_max(question: dict[str, Any] | None) -> int:
         if isinstance(labels, (list, tuple)) and labels:
             points = len(labels)
     if points is None or not (LIKERT_MAX <= points <= LIKERT_MAX_POINTS):
-        return LIKERT_MAX
-    return points
+        return LIKERT_MIN, LIKERT_MAX
+    return LIKERT_MIN, points
+
+
+def likert_scale_max(question: dict[str, Any] | None) -> int:
+    """Return the inclusive upper bound of a Likert item.
+
+    Args:
+        question: Stored Likert question, or None.
+
+    Returns:
+        Max option value, or ``scale_points`` / label count when in 5–7.
+    """
+    return likert_scale_bounds(question)[1]
+
+
+def likert_scale_min(question: dict[str, Any] | None) -> int:
+    """Return the inclusive lower bound of a Likert item.
+
+    Args:
+        question: Stored Likert question, or None.
+
+    Returns:
+        Min option value, or 1 when the item uses sequential 1-based scoring.
+    """
+    return likert_scale_bounds(question)[0]
 
 
 def likert_scale_max_from_questions(questions: Iterable | None) -> int:
-    """Widest Likert scale among a stored question bank.
+    """Widest Likert upper bound among a stored question bank.
 
     Args:
         questions: Assessment or catalog questions.
 
     Returns:
-        5 unless a 6- or 7-point item is present.
+        5 unless a wider item (7-point, or custom values) is present.
     """
     widest = LIKERT_MAX
     for question in questions or []:
@@ -174,6 +231,26 @@ def likert_scale_max_from_questions(questions: Iterable | None) -> int:
             continue
         widest = max(widest, likert_scale_max(question))
     return widest
+
+
+def likert_scale_min_from_questions(questions: Iterable | None) -> int:
+    """Lowest Likert lower bound among a stored question bank.
+
+    Args:
+        questions: Assessment or catalog questions.
+
+    Returns:
+        1 unless an item defines a smaller option value.
+    """
+    lowest: int | None = None
+    for question in questions or []:
+        if not isinstance(question, dict):
+            continue
+        if str(question.get("type", "")).lower() != "likert":
+            continue
+        lo, _hi = likert_scale_bounds(question)
+        lowest = lo if lowest is None else min(lowest, lo)
+    return LIKERT_MIN if lowest is None else lowest
 
 
 def _option_letter(text: str) -> str | None:
@@ -273,30 +350,40 @@ def _mcq_credit(question: dict[str, Any], given: Any) -> float | None:
 
 
 def _likert_value(question: dict[str, Any], given: Any) -> float | None:
-    """Resolve a Likert response to its facet contribution.
+    """Resolve a Likert response to its scored option value.
 
-    Only the selected position counts; ``scale_labels`` are presentation-only so
-    admins can relabel anchors without changing historical or future scores.
+    Prefers a stored option ``value``; a 1-based index is accepted for legacy
+    responses that recorded the selected position instead of the point value.
 
     Args:
         question: Stored Likert question (``reverse_scored`` flag honoured).
-        given: Candidate response — the 1-based index of the chosen point.
+        given: Candidate response — option value or 1-based index.
 
     Returns:
-        The index (recoded ``(min + max) - x`` when reverse scored), or None
-        when the response is missing, non-integral, or outside the item scale.
+        The option value (recoded ``(min + max) - value`` when reverse scored),
+        or None when the response is missing, non-integral, or unmatched.
     """
     if isinstance(given, (list, tuple)):
         given = given[0] if given else None
     if isinstance(given, bool):
         return None
     number = _parse_number(given)
-    scale_max = likert_scale_max(question)
-    if number is None or not number.is_integer() or not (LIKERT_MIN <= number <= scale_max):
+    scale_min, scale_max = likert_scale_bounds(question)
+    if number is None or not number.is_integer():
+        return None
+    selected = int(number)
+    values = _likert_option_values(question)
+    if values and selected in values:
+        scored = selected
+    elif values and LIKERT_MIN <= selected <= len(values):
+        scored = values[selected - 1]
+    elif not values and scale_min <= selected <= scale_max:
+        scored = selected
+    else:
         return None
     if question.get("reverse_scored"):
-        number = (LIKERT_MIN + scale_max) - number
-    return float(number)
+        scored = (scale_min + scale_max) - scored
+    return float(scored)
 
 
 @dataclass
