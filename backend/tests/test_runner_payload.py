@@ -158,3 +158,29 @@ def test_runner_payload_exposes_custom_likert_labels_but_not_reverse_flag():
     question = payload.model_dump()["questions"][0]
     assert question["scale_labels"] == labels
     assert "reverse_scored" not in question
+
+
+def test_runner_payload_folds_likert_option_objects_into_values():
+    options = [
+        {"label": "Never", "value": 0},
+        {"label": "Rarely", "value": 25},
+        {"label": "Sometimes", "value": 50},
+        {"label": "Often", "value": 75},
+        {"label": "Always", "value": 100},
+    ]
+    payload = build_runner_payload(
+        assessment_id=uuid4(),
+        title="Personality",
+        description=None,
+        questions=[{"id": "l1", "text": "I plan ahead", "type": "likert", "options": options}],
+        time_limit_minutes=None,
+        duration_seconds=None,
+        timer_mode="flexible",
+        shuffle=False,
+        seed="cand:assess",
+    )
+    question = payload.model_dump()["questions"][0]
+    assert question["scale_labels"] == [row["label"] for row in options]
+    assert question["scale_values"] == [0, 25, 50, 75, 100]
+    assert question["options"] == []
+    assert "reverse_scored" not in question

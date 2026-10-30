@@ -1,0 +1,1 @@
+{"sessionId": "b4f72d", "runId": "post-fix", "hypothesisId": "A", "location": "test_email.py:test_template_buttons", "message": "button color presence", "data": {"invite_has_0078D4": false, "invite_has_7048E2": true, "share_has_0078D4": false, "share_has_7048E2": true}, "timestamp": 1793018099453.6658}

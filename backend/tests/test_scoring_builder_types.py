@@ -143,6 +143,29 @@ def test_seven_point_likert_accepts_6_and_7_and_reverse_recode():
     assert recoded.facet_scores["Personal Initiative"] == {"mean": 1.0, "n": 1}
 
 
+def test_likert_scores_custom_option_values_and_dynamic_reverse():
+    question = {
+        "id": "l1",
+        "type": "likert",
+        "facet": "F",
+        "scale_points": 5,
+        "options": [
+            {"label": "Never", "value": 0},
+            {"label": "Rarely", "value": 25},
+            {"label": "Sometimes", "value": 50},
+            {"label": "Often", "value": 75},
+            {"label": "Always", "value": 100},
+        ],
+    }
+    result = score_assessment_detailed([question], [_resp("l1", 75)])
+    assert result.facet_scores["F"] == {"mean": 75.0, "n": 1}
+    indexed = score_assessment_detailed([question], [_resp("l1", 2)])
+    assert indexed.facet_scores["F"] == {"mean": 25.0, "n": 1}
+    reversed_item = {**question, "reverse_scored": True}
+    recoded = score_assessment_detailed([reversed_item], [_resp("l1", 0)])
+    assert recoded.facet_scores["F"] == {"mean": 100.0, "n": 1}
+
+
 def test_mixed_bank_averages_only_gradable_items():
     questions = [SJT, MCQ_MULTI, CRT_NUMERIC, {"id": "o1", "type": "open"}]
     responses = [_resp("s1", "Help"), _resp("m1", ["2"]), _resp("c1", "5"), _resp("o1", "essay")]

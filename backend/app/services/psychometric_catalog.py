@@ -110,6 +110,24 @@ def _scale_labels(module: dict[str, Any]) -> list[str]:
     return [label for label in labels if label]
 
 
+def _scale_options(module: dict[str, Any]) -> list[dict[str, Any]]:
+    scale = module.get("responseScale") or []
+    options: list[dict[str, Any]] = []
+    for index, row in enumerate(scale):
+        if not isinstance(row, dict):
+            continue
+        label = str(row.get("label") or "").strip()
+        if not label:
+            continue
+        raw = row.get("value", index + 1)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or int(raw) != raw:
+            value = index + 1
+        else:
+            value = int(raw)
+        options.append({"label": label, "value": value})
+    return options
+
+
 def _option_text(option: dict[str, Any]) -> str:
     label = str(option.get("label") or "").strip()
     text = str(option.get("text") or "").strip()
@@ -132,7 +150,8 @@ def item_to_storage(module: dict[str, Any], item: dict[str, Any]) -> dict[str, A
     item_id = str(item["id"])
     text = str(item.get("text") or item.get("stem") or "").strip()
     if instrument == "likert":
-        labels = _scale_labels(module)
+        options = _scale_options(module)
+        labels = [row["label"] for row in options] or _scale_labels(module)
         facet = str(item.get("scale") or "").strip()
         if not facet:
             facet = str((module.get("scales") or [{}])[0].get("name") or "Personal Initiative")
@@ -145,8 +164,8 @@ def item_to_storage(module: dict[str, Any], item: dict[str, Any]) -> dict[str, A
             "evaluated_competency": facet,
             "reverse_scored": item.get("keying") == "-",
             "scale_labels": labels,
-            "scale_points": len(labels) or 5,
-            "options": [],
+            "scale_points": len(options) or len(labels) or 5,
+            "options": options,
             "likert_label_1": labels[0] if labels else None,
             "likert_label_5": labels[min(4, len(labels) - 1)] if labels else None,
         }

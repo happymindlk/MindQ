@@ -13,6 +13,7 @@ from app.services.scoring import (
     LIKERT_MIN,
     ScoreResult,
     likert_scale_max_from_questions,
+    likert_scale_min_from_questions,
 )
 
 SCORING_VERSION = "mindq-scoring-2.0.0"
@@ -108,19 +109,26 @@ _INITIATIVE_KEYS = frozenset(
 _IPC_OCTANTS = frozenset({"pa", "bc", "de", "fg", "hi", "jk", "lm", "no"})
 
 
-def likert_position_pct(mean: float, scale_max: float | None = None) -> float:
-    """Map a Likert mean onto 0–100.
+def likert_position_pct(
+    mean: float, scale_max: float | None = None, scale_min: float | None = None
+) -> float:
+    """Map a Likert mean onto 0–100 using the item's value range.
 
     Args:
         mean: Facet mean on the original scale.
-        scale_max: Inclusive upper bound (default 5, Personal Initiative uses 7).
+        scale_max: Inclusive upper bound (option values, default 5).
+        scale_min: Inclusive lower bound (option values, default 1).
 
     Returns:
         Percentage rounded to one decimal.
     """
-    hi = float(scale_max) if scale_max and scale_max > LIKERT_MIN else float(LIKERT_MAX)
-    clamped = min(hi, max(LIKERT_MIN, float(mean)))
-    return round((clamped - LIKERT_MIN) / (hi - LIKERT_MIN) * 100, 1)
+    lo = float(scale_min) if scale_min is not None else float(LIKERT_MIN)
+    hi = float(scale_max) if scale_max is not None and scale_max > lo else float(LIKERT_MAX)
+    span = hi - lo
+    if span <= 0:
+        return 0.0
+    clamped = min(hi, max(lo, float(mean)))
+    return round((clamped - lo) / span * 100, 1)
 
 
 def position_band(pct: float) -> str:
@@ -310,13 +318,17 @@ def classify_instrument(
 
 
 def big_five_subscales(
-    facet_scores: Mapping[str, Any], *, scale_max: float | None = None
+    facet_scores: Mapping[str, Any],
+    *,
+    scale_max: float | None = None,
+    scale_min: float | None = None,
 ) -> list[dict[str, Any]]:
     """Five IPIP-NEO-20 traits with Emotional stability flipped from Neuroticism.
 
     Args:
         facet_scores: Facet means keyed by trait name.
         scale_max: Likert upper bound used for 0–100 mapping.
+        scale_min: Likert lower bound used for 0–100 mapping.
 
     Returns:
         Ordered subscale dicts.
@@ -341,13 +353,14 @@ def big_five_subscales(
             n_mean = mapped.get("neuroticism")
             if n_mean is None:
                 continue
-            hi = float(scale_max) if scale_max and scale_max > LIKERT_MIN else float(LIKERT_MAX)
-            mean = (LIKERT_MIN + hi) - n_mean
+            lo = float(scale_min) if scale_min is not None else float(LIKERT_MIN)
+            hi = float(scale_max) if scale_max is not None and scale_max > lo else float(LIKERT_MAX)
+            mean = (lo + hi) - n_mean
         else:
             mean = mapped.get(trait)
             if mean is None:
                 continue
-        pct = likert_position_pct(mean, scale_max)
+        pct = likert_position_pct(mean, scale_max, scale_min)
         traits.append(
             {
                 "name": _BIG_FIVE_LABELS[trait],
@@ -361,7 +374,10 @@ def big_five_subscales(
 
 
 def hexaco_subscales(
-    facet_scores: Mapping[str, Any], *, scale_max: float | None = None
+    facet_scores: Mapping[str, Any],
+    *,
+    scale_max: float | None = None,
+    scale_min: float | None = None,
 ) -> list[dict[str, Any]]:
     """Honesty-Humility facet rows.
 
@@ -384,7 +400,7 @@ def hexaco_subscales(
         mean = mapped.get(key)
         if mean is None:
             continue
-        pct = likert_position_pct(mean, scale_max)
+        pct = likert_position_pct(mean, scale_max, scale_min)
         rows.append(
             {
                 "name": _HEXACO_LABELS[key],
@@ -398,13 +414,17 @@ def hexaco_subscales(
 
 
 def single_facet_subscales(
-    facet_scores: Mapping[str, Any], *, scale_max: float | None = None
+    facet_scores: Mapping[str, Any],
+    *,
+    scale_max: float | None = None,
+    scale_min: float | None = None,
 ) -> list[dict[str, Any]]:
     """Generic Likert facets mapped independently (never averaged together).
 
     Args:
         facet_scores: Facet means.
         scale_max: Likert upper bound used for 0–100 mapping.
+        scale_min: Likert lower bound used for 0–100 mapping.
 
     Returns:
         Subscale dicts in insertion order.
@@ -414,7 +434,7 @@ def single_facet_subscales(
         mean = _facet_mean(entry)
         if mean is None:
             continue
-        pct = likert_position_pct(mean, scale_max)
+        pct = likert_position_pct(mean, scale_max, scale_min)
         label = str(raw_key)
         if _norm_key(raw_key) in _INITIATIVE_KEYS:
             label = "Personal Initiative"
@@ -476,6 +496,7 @@ def build_score_details(
     """
     facets = result.facet_scores or {}
     scale_max = likert_scale_max_from_questions(questions)
+    scale_min = likert_scale_min_from_questions(questions)
     instrument = classify_instrument(facets, questions, derived_profile)
     if instrument == "mcq":
         instrument = "cognicheck" if category == "cognitive" else "ability"
@@ -488,7 +509,7 @@ def build_score_details(
 
     if instrument == "big_five":
         score_kind = "traits"
-        subscales = big_five_subscales(facets, scale_max=scale_max)
+        subscales = big_five_subscales(facets, scale_max=scale_max, scale_min=scale_min)
     elif instrument == "ipc":
         score_kind = "circumplex"
         data = {}
@@ -505,13 +526,13 @@ def build_score_details(
         band = str(intensity or "undifferentiated")
     elif instrument == "hexaco":
         score_kind = "domain"
-        subscales = hexaco_subscales(facets, scale_max=scale_max)
+        subscales = hexaco_subscales(facets, scale_max=scale_max, scale_min=scale_min)
         if subscales:
             module_pct = round(sum(s["position_pct"] for s in subscales) / len(subscales), 1)
             band = position_band(module_pct)
             display_score = f"{module_pct:g}"
     elif instrument in {"initiative", "likert"}:
-        subscales = single_facet_subscales(facets, scale_max=scale_max)
+        subscales = single_facet_subscales(facets, scale_max=scale_max, scale_min=scale_min)
         if len(subscales) == 1:
             score_kind = "domain"
             module_pct = subscales[0]["position_pct"]

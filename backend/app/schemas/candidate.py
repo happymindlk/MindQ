@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal, Optional
-from pydantic import BaseModel, EmailStr, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from app.schemas.question_payload import rewrite_local_media_url
 
@@ -153,6 +153,35 @@ class CandidateQuestion(BaseModel):
     likert_label_1: Optional[str] = None
     likert_label_5: Optional[str] = None
     scale_labels: Optional[list[str]] = None
+    scale_values: Optional[list[int]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def fold_likert_option_objects(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if str(data.get("type") or "").lower() != "likert":
+            return data
+        opts = data.get("options")
+        if not isinstance(opts, list) or not opts or not isinstance(opts[0], dict):
+            return data
+        folded = dict(data)
+        labels: list[str] = []
+        values: list[int] = []
+        for index, row in enumerate(opts):
+            if not isinstance(row, dict):
+                continue
+            labels.append(str(row.get("label") or "").strip())
+            raw = row.get("value", index + 1)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)) or int(raw) != raw:
+                values.append(index + 1)
+            else:
+                values.append(int(raw))
+        folded["options"] = []
+        if not folded.get("scale_labels"):
+            folded["scale_labels"] = labels
+        folded["scale_values"] = folded.get("scale_values") or values
+        return folded
 
     @field_validator("id", mode="before")
     @classmethod
@@ -162,7 +191,11 @@ class CandidateQuestion(BaseModel):
     @field_validator("options", mode="before")
     @classmethod
     def coerce_options(cls, value: Any) -> list:
-        return value or []
+        if not value:
+            return []
+        if isinstance(value, list) and value and isinstance(value[0], dict):
+            return [str(row.get("label") or row.get("text") or "") for row in value]
+        return value
 
     @field_validator("allow_multiple", mode="before")
     @classmethod

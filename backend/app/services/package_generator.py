@@ -20,6 +20,7 @@ from app.services.gemini_client import GeminiUnavailable, generate_content_async
 from app.models.assessment import Assessment
 from app.models.package import Package
 from app.prompts.package_builder import SYSTEM_INSTRUCTION, build_user_prompt
+from app.schemas.question_payload import coerce_likert_options, normalize_likert_labels
 from app.schemas.package_builder import (
     AssessmentPackageBlueprint,
     DifficultyLevel,
@@ -71,11 +72,15 @@ def blueprint_question_to_storage(item: QuestionItem, index: int) -> dict[str, A
     if item.question_type == QuestionType.likert:
         low = (item.likert_label_1 or "Strongly Disagree").strip()
         high = (item.likert_label_5 or "Strongly Agree").strip()
+        labels = normalize_likert_labels(None, low, high)
+        options = coerce_likert_options({"scale_labels": labels, "likert_label_1": low, "likert_label_5": high})
         return {
             "id": qid,
             "text": item.prompt.strip(),
             "type": "likert",
-            "options": [],
+            "options": options,
+            "scale_labels": labels,
+            "scale_points": len(options),
             "likert_label_1": low,
             "likert_label_5": high,
             "evaluated_competency": item.evaluated_competency,

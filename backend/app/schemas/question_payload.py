@@ -31,6 +31,15 @@ LIKERT_DEFAULT_LABELS: tuple[str, ...] = (
     "Moderately Accurate",
     "Very Accurate",
 )
+LIKERT_7_DEFAULT_LABELS: tuple[str, ...] = (
+    "Totally Disagree",
+    "Disagree",
+    "Moderately Disagree",
+    "Neither disagree or agree",
+    "Moderately Agree",
+    "Agree",
+    "Totally Agree",
+)
 LIKERT_AGREEMENT_LABELS: tuple[str, ...] = (
     "Strongly Disagree",
     "Disagree",
@@ -285,6 +294,79 @@ class McqPayload(_QuestionBase):
         }
 
 
+def likert_options_from_labels(labels: Iterable[str]) -> list[dict[str, Any]]:
+    """Pair sequential integer values with Likert labels.
+
+    Args:
+        labels: Display anchors in scale order.
+
+    Returns:
+        ``{"label", "value"}`` rows with values ``1..len(labels)``.
+    """
+    return [{"label": str(label), "value": index + 1} for index, label in enumerate(labels)]
+
+
+def _int_scale_value(raw: Any, fallback: int) -> int:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return fallback
+    if int(raw) != raw:
+        return fallback
+    return int(raw)
+
+
+def coerce_likert_options(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build Likert ``{label, value}`` rows from storage or editor input.
+
+    Args:
+        data: Payload or stored question dict.
+
+    Returns:
+        5–7 option dicts. Object ``options`` win; otherwise labels (including
+        legacy endpoints) are paired with ``1..N``.
+    """
+    raw = data.get("options")
+    parsed: list[dict[str, Any]] = []
+    if isinstance(raw, list) and raw:
+        if isinstance(raw[0], dict):
+            for index, row in enumerate(raw):
+                if not isinstance(row, dict):
+                    continue
+                label = str(row.get("label") or "").strip()
+                parsed.append({"label": label, "value": _int_scale_value(row.get("value"), index + 1)})
+        elif all(isinstance(row, str) for row in raw):
+            parsed = likert_options_from_labels([row.strip() for row in raw])
+        if parsed:
+            return parsed
+    stored_labels = data.get("scale_labels")
+    if isinstance(stored_labels, (list, tuple)) and stored_labels:
+        stripped = [label.strip() if isinstance(label, str) else str(label) for label in stored_labels]
+        if (
+            not (LIKERT_MIN_POINTS <= len(stripped) <= LIKERT_MAX_POINTS)
+            or any(not label for label in stripped)
+        ):
+            return likert_options_from_labels(stripped)
+        labels = normalize_likert_labels(
+            stored_labels,
+            data.get("likert_label_1"),
+            data.get("likert_label_5"),
+        )
+    else:
+        labels = normalize_likert_labels(
+            None,
+            data.get("likert_label_1"),
+            data.get("likert_label_5"),
+        )
+    values = data.get("scale_values")
+    options: list[dict[str, Any]] = []
+    for index, label in enumerate(labels):
+        fallback = index + 1
+        value = fallback
+        if isinstance(values, list) and index < len(values):
+            value = _int_scale_value(values[index], fallback)
+        options.append({"label": label, "value": value})
+    return options
+
+
 def normalize_likert_labels(
     labels: Any = None,
     low: Any = None,
@@ -324,66 +406,88 @@ def normalize_likert_labels(
     return resolved
 
 
-class LikertPayload(_QuestionBase):
-    """Likert item with admin-editable anchors (5-point default, up to 7).
+class LikertScaleOption(BaseModel):
+    """One Likert anchor: display label plus the integer scored for that choice."""
 
-    Scoring uses only the selected index (1–N, recoded ``(1+N) - x`` when
-    reverse scored), so labels are presentation-only and can be customised.
+    label: str = Field(max_length=LIKERT_LABEL_MAX)
+    value: int
+
+    @field_validator("label")
+    @classmethod
+    def _label_clean(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Every Likert scale label must be filled in")
+        if len(cleaned) > LIKERT_LABEL_MAX:
+            raise ValueError(f"Likert scale labels must be {LIKERT_LABEL_MAX} characters or fewer")
+        return cleaned
+
+
+class LikertPayload(_QuestionBase):
+    """Likert item with admin-editable anchors and integer point values (5–7).
+
+    Scoring uses each option's ``value``, recoded ``(min + max) - value`` when
+    reverse scored. ``scale_points`` always equals ``len(options)``.
     """
 
     type: Literal["likert"] = "likert"
     reverse_scored: bool = False
-    scale_labels: list[str] = Field(
-        default_factory=lambda: list(LIKERT_DEFAULT_LABELS),
+    options: list[LikertScaleOption] = Field(
+        default_factory=lambda: [
+            LikertScaleOption(label=label, value=index + 1)
+            for index, label in enumerate(LIKERT_DEFAULT_LABELS)
+        ],
         min_length=LIKERT_MIN_POINTS,
         max_length=LIKERT_MAX_POINTS,
     )
+    scale_points: int | None = None
+    scale_labels: list[str] | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _fold_legacy_labels(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
-        if "likert_label_1" not in data and "likert_label_5" not in data:
-            return data
         folded = dict(data)
-        low = folded.pop("likert_label_1", None)
-        high = folded.pop("likert_label_5", None)
-        if "scale_labels" not in folded:
-            folded["scale_labels"] = normalize_likert_labels(None, low, high)
+        folded["options"] = coerce_likert_options(folded)
+        folded.pop("likert_label_1", None)
+        folded.pop("likert_label_5", None)
         return folded
 
-    @field_validator("scale_labels")
-    @classmethod
-    def _labels_clean(cls, value: list[str]) -> list[str]:
-        cleaned = [label.strip() for label in value]
-        if any(not label for label in cleaned):
+    @model_validator(mode="after")
+    def _sync_scale(self) -> LikertPayload:
+        labels = [option.label for option in self.options]
+        if any(not label for label in labels):
             raise ValueError("Every Likert scale label must be filled in")
-        if any(len(label) > LIKERT_LABEL_MAX for label in cleaned):
-            raise ValueError(f"Likert scale labels must be {LIKERT_LABEL_MAX} characters or fewer")
-        if len({label.lower() for label in cleaned}) != len(cleaned):
+        if len({label.lower() for label in labels}) != len(labels):
             raise ValueError("Likert scale labels must be unique")
-        return cleaned
+        values = [option.value for option in self.options]
+        if len(set(values)) != len(values):
+            raise ValueError("Likert option values must be unique")
+        self.scale_labels = labels
+        self.scale_points = len(self.options)
+        return self
 
     def to_storage(self) -> dict[str, Any]:
         """Serialize into portal storage shape.
 
         Returns:
-            Question dict with the reverse flag kept server-side. Endpoint
+            Question dict with ``options`` as ``{label, value}`` rows. Endpoint
             labels are mirrored into ``likert_label_1``/``likert_label_5`` for
             legacy report and package consumers.
         """
-        points = len(self.scale_labels)
+        labels = [option.label for option in self.options]
+        points = len(self.options)
         return {
             **self._base_storage(),
             "type": "likert",
             "builder_type": "likert",
-            "options": [],
+            "options": [{"label": option.label, "value": option.value} for option in self.options],
             "scale_points": points,
             "reverse_scored": self.reverse_scored,
-            "scale_labels": list(self.scale_labels),
-            "likert_label_1": self.scale_labels[0],
-            "likert_label_5": self.scale_labels[min(4, points - 1)],
+            "scale_labels": labels,
+            "likert_label_1": labels[0],
+            "likert_label_5": labels[min(4, points - 1)],
         }
 
 
@@ -480,8 +584,11 @@ def payload_from_storage(stored: dict[str, Any]) -> dict[str, Any] | None:
         "show_disclaimer": bool(stored.get("show_disclaimer")),
         "disclaimer_text": str(stored.get("disclaimer_text") or DEFAULT_DISCLAIMER_TEXT),
     }
-    options = [str(o) for o in (stored.get("options") or [])]
+    raw_options = stored.get("options") or []
+    options = [str(o) for o in raw_options] if raw_options and not isinstance(raw_options[0], dict) else []
     if builder == "sjt":
+        if not options and raw_options:
+            options = [str(row.get("text") or row.get("label") or "") for row in raw_options if isinstance(row, dict)]
         weights = list(stored.get("option_weights") or [])
         return {
             **base,
@@ -506,15 +613,14 @@ def payload_from_storage(stored: dict[str, Any]) -> dict[str, Any] | None:
             "correct_keys": [int(k) for k in keys],
         }
     if builder == "likert":
+        likert_options = coerce_likert_options(stored)
         return {
             **base,
             "type": "likert",
             "reverse_scored": bool(stored.get("reverse_scored")),
-            "scale_labels": normalize_likert_labels(
-                stored.get("scale_labels"),
-                stored.get("likert_label_1"),
-                stored.get("likert_label_5"),
-            ),
+            "options": likert_options,
+            "scale_points": len(likert_options),
+            "scale_labels": [row["label"] for row in likert_options],
         }
     if builder == "crt":
         return {
