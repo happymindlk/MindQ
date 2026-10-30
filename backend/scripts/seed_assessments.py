@@ -17,13 +17,12 @@ import sys
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import bindparam, delete, or_, select, text
+from sqlalchemy.dialects.postgresql import ARRAY, UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.assessment import Assessment
-from app.models.candidate_progress import CandidateProgress
-from app.models.candidate_response import CandidateResponse
 from app.models.global_module import MODULE_STATUS_DRAFT, MODULE_STATUS_PUBLISHED, GlobalModule
 from app.models.package_module import PackageModule
 from app.models.template_question import TemplateQuestion
@@ -168,8 +167,22 @@ async def _lineage_ids(session: AsyncSession, module: GlobalModule) -> list[UUID
     return list(ids)
 
 
+def _uuid_id_array():
+    """Bind a Python list of UUIDs as a Postgres uuid[].
+
+    Returns:
+        A unique ``:ids`` bind parameter for one statement.
+    """
+    return bindparam("ids", type_=ARRAY(PG_UUID(as_uuid=True)))
+
+
 async def _wipe_child_rows(session: AsyncSession, assessment_ids: list[UUID]) -> tuple[int, int]:
-    """Delete responses and reset progress for QA snapshots.
+    """Delete responses and reset progress without loading ORM models.
+
+    Targeted SQL avoids ``SELECT *`` on ``candidate_progress``, which fails when
+    QA is missing later columns (``score_details``, ``scoring_version``). Reset
+    only baseline fields that exist from the initial schema plus scoring
+    profiles (``facet_scores``, ``derived_profile``).
 
     Args:
         session: Open transaction.
@@ -180,27 +193,29 @@ async def _wipe_child_rows(session: AsyncSession, assessment_ids: list[UUID]) ->
     """
     if not assessment_ids:
         return 0, 0
+    params = {"ids": list(assessment_ids)}
     deleted = await session.execute(
-        delete(CandidateResponse).where(CandidateResponse.assessment_id.in_(assessment_ids))
+        text("DELETE FROM candidate_responses WHERE assessment_id = ANY(:ids)").bindparams(
+            _uuid_id_array()
+        ),
+        params,
     )
-    progress_rows = (
-        await session.execute(
-            select(CandidateProgress).where(CandidateProgress.assessment_id.in_(assessment_ids))
-        )
-    ).scalars().all()
-    for row in progress_rows:
-        row.status = "NOT_STARTED"
-        row.started_at = None
-        row.completed_at = None
-        row.score = None
-        row.client_duration_seconds = None
-        row.server_duration_seconds = None
-        row.overtime = False
-        row.facet_scores = None
-        row.derived_profile = None
-        row.score_details = None
-        row.scoring_version = None
-    return int(deleted.rowcount or 0), len(progress_rows)
+    reset = await session.execute(
+        text(
+            """
+            UPDATE candidate_progress
+               SET status = 'NOT_STARTED',
+                   started_at = NULL,
+                   completed_at = NULL,
+                   score = NULL,
+                   facet_scores = NULL,
+                   derived_profile = NULL
+             WHERE assessment_id = ANY(:ids)
+            """
+        ).bindparams(_uuid_id_array()),
+        params,
+    )
+    return int(deleted.rowcount or 0), int(reset.rowcount or 0)
 
 
 async def _replace_questions(

@@ -23,6 +23,19 @@ def _facet_sum(facet_scores: dict, key: str) -> float:
     raise AssertionError(f"missing facet {key} in {list(facet_scores)}")
 
 
+def test_seed_wipe_sql_does_not_touch_optional_progress_columns():
+    import inspect
+
+    from scripts.seed_assessments import _wipe_child_rows
+
+    source = inspect.getsource(_wipe_child_rows)
+    assert "select(CandidateProgress)" not in source
+    assert "score_details =" not in source
+    assert "scoring_version =" not in source
+    assert "DELETE FROM candidate_responses" in source
+    assert "UPDATE candidate_progress" in source
+
+
 def test_seed_timer_minutes_round_up():
     from scripts.seed_assessments import _minutes
 
