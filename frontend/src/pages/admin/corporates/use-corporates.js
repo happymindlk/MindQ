@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { adminApi } from '../../../lib/adminApi';
+import { useCachedQuery } from '../../../hooks/use-cached-query';
+
+export const CORPORATES_QUERY_KEY = 'admin:corporates';
 
 /**
  * @typedef {object} CorporateRow
@@ -60,14 +63,11 @@ export function filterCorporates(rows, keyword) {
  *   error: string | null,
  *   reload: () => Promise<void>,
  *   saveCorporate: (input: SaveCorporateInput) => Promise<SaveCorporateResult>,
+ *   deleteCorporate: (corporate: CorporateRow) => Promise<void>,
  * }}
  */
 export function useCorporates() {
-  const [corporates, setCorporates] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
   const mountedRef = useRef(true);
-
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -75,58 +75,58 @@ export function useCorporates() {
     };
   }, []);
 
-  const reload = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const rows = await adminApi.listCorporates();
-      if (mountedRef.current) setCorporates(sortByName(rows));
-    } catch (err) {
-      if (mountedRef.current) setError(err.message || 'Failed to load corporates');
-    } finally {
-      if (mountedRef.current) setIsLoading(false);
-    }
-  }, []);
+  const fetcher = useCallback(async () => sortByName(await adminApi.listCorporates()), []);
+  const { data, error, isLoading, reload, mutate } = useCachedQuery(CORPORATES_QUERY_KEY, fetcher);
 
-  useEffect(() => {
-    reload();
-  }, [reload]);
+  const saveCorporate = useCallback(
+    async ({ id, name, contactEmail, allowedHrEmails, logoFile }) => {
+      const saved = id
+        ? await adminApi.updateCompany(id, {
+            name,
+            contact_email: contactEmail,
+            allowed_hr_emails: allowedHrEmails || [],
+          })
+        : await adminApi.createCompany({ name, contactEmail, allowedHrEmails });
 
-  const saveCorporate = useCallback(async ({ id, name, contactEmail, allowedHrEmails, logoFile }) => {
-    const saved = id
-      ? await adminApi.updateCompany(id, {
-          name,
-          contact_email: contactEmail,
-          allowed_hr_emails: allowedHrEmails || [],
-        })
-      : await adminApi.createCompany({ name, contactEmail, allowedHrEmails });
-
-    const corporate = { ...saved };
-    let logoError = null;
-    if (logoFile) {
-      try {
-        corporate.logo_url = await adminApi.uploadCompanyLogo(saved.id, logoFile);
-      } catch (err) {
-        logoError = err.message || 'Logo upload failed';
+      const corporate = { ...saved };
+      let logoError = null;
+      if (logoFile) {
+        try {
+          corporate.logo_url = await adminApi.uploadCompanyLogo(saved.id, logoFile);
+        } catch (err) {
+          logoError = err.message || 'Logo upload failed';
+        }
       }
-    }
 
-    if (mountedRef.current) {
-      setCorporates((prev) => {
-        const existing = prev.find((c) => c.id === corporate.id);
-        const merged = { package_count: 0, candidate_count: 0, ...existing, ...corporate };
-        return sortByName([...prev.filter((c) => c.id !== corporate.id), merged]);
-      });
-    }
-    return { corporate, logoError };
-  }, []);
+      if (mountedRef.current) {
+        mutate((prev) => {
+          const rows = Array.isArray(prev) ? prev : [];
+          const existing = rows.find((c) => c.id === corporate.id);
+          const merged = { package_count: 0, candidate_count: 0, ...existing, ...corporate };
+          return sortByName([...rows.filter((c) => c.id !== corporate.id), merged]);
+        });
+      }
+      return { corporate, logoError };
+    },
+    [mutate],
+  );
 
-  const deleteCorporate = useCallback(async (corporate) => {
-    await adminApi.deleteCompany(corporate.id);
-    if (mountedRef.current) {
-      setCorporates((prev) => prev.filter((c) => c.id !== corporate.id));
-    }
-  }, []);
+  const deleteCorporate = useCallback(
+    async (corporate) => {
+      await adminApi.deleteCompany(corporate.id);
+      if (mountedRef.current) {
+        mutate((prev) => (Array.isArray(prev) ? prev.filter((c) => c.id !== corporate.id) : []));
+      }
+    },
+    [mutate],
+  );
 
-  return { corporates, isLoading, error, reload, saveCorporate, deleteCorporate };
+  return {
+    corporates: Array.isArray(data) ? data : [],
+    isLoading,
+    error,
+    reload,
+    saveCorporate,
+    deleteCorporate,
+  };
 }
