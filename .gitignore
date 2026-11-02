@@ -31,3 +31,4 @@ local_dump.sql
 *.sql
 
 docs/*.pdf
+docs/*.docx
