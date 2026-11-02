@@ -142,7 +142,7 @@ def _progress(assessment, status="COMPLETED", score=None, facet_scores=None):
     )
 
 
-def test_build_module_outcomes_keeps_only_completed_and_keys_sequentially() -> None:
+def test_build_module_outcomes_masks_scores_until_package_complete() -> None:
     done = _assessment("SQL")
     pending = _assessment("Python")
     likert = _assessment("Big Five", kind="psychometric", questions=[{"type": "likert"}])
@@ -156,11 +156,37 @@ def test_build_module_outcomes_keeps_only_completed_and_keys_sequentially() -> N
         [],
         {},
     )
+    assert [(o.key, o.title, o.category, o.score, o.status) for o in outcomes] == [
+        ("A1", "SQL", "technical", None, "COMPLETED"),
+        ("A2", "Python", "technical", None, "IN_PROGRESS"),
+        ("A3", "Big Five", "personality", None, "COMPLETED"),
+    ]
+    assert all(o.scores_released is False for o in outcomes)
+    assert all(o.subscales == () for o in outcomes)
+
+
+def test_build_module_outcomes_releases_scores_when_package_complete() -> None:
+    done = _assessment("SQL")
+    likert = _assessment(
+        "Big Five",
+        kind="psychometric",
+        questions=[{"type": "likert", "facet": "O"}],
+    )
+    outcomes = build_module_outcomes(
+        [done, likert],
+        [
+            _progress(done, score=62.5),
+            _progress(likert, facet_scores={"O": {"mean": 3.0, "n": 2}}),
+        ],
+        [],
+        {},
+    )
     assert [(o.key, o.title, o.category, o.score) for o in outcomes] == [
         ("A1", "SQL", "technical", 62.5),
         ("A2", "Big Five", "personality", None),
     ]
     assert outcomes[1].score_kind == "traits"
+    assert all(o.scores_released for o in outcomes)
 
 
 def test_build_module_outcomes_uses_catalog_category() -> None:

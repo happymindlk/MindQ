@@ -56,6 +56,7 @@ IPC_DISPLAY_NAMES: dict[str, str] = {
 _BIG_FIVE_KEYS: dict[str, str] = {
     "extraversion": "extraversion",
     "surgency": "extraversion",
+    "surgency or extraversion": "extraversion",
     "e": "extraversion",
     "agreeableness": "agreeableness",
     "a": "agreeableness",
@@ -65,6 +66,7 @@ _BIG_FIVE_KEYS: dict[str, str] = {
     "n": "neuroticism",
     "intellect": "intellect",
     "imagination": "intellect",
+    "i": "intellect",
     "openness": "intellect",
     "o": "intellect",
     "intellect or imagination": "intellect",
@@ -73,10 +75,10 @@ _BIG_FIVE_KEYS: dict[str, str] = {
 }
 
 _BIG_FIVE_LABELS: dict[str, str] = {
-    "extraversion": "Extraversion",
+    "extraversion": "Surgency or Extraversion",
     "agreeableness": "Agreeableness",
     "conscientiousness": "Conscientiousness",
-    "emotional_stability": "Emotional stability",
+    "neuroticism": "Neuroticism",
     "intellect": "Intellect or Imagination",
 }
 
@@ -323,15 +325,15 @@ def big_five_subscales(
     scale_max: float | None = None,
     scale_min: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Five IPIP-NEO-20 traits with Emotional stability flipped from Neuroticism.
+    """Five Mini-IPIP traits using official facet labels (no Neuroticism flip).
 
     Args:
-        facet_scores: Facet means keyed by trait name.
+        facet_scores: Facet means keyed by trait name or letter (``E``/``I``…).
         scale_max: Likert upper bound used for 0–100 mapping.
         scale_min: Likert lower bound used for 0–100 mapping.
 
     Returns:
-        Ordered subscale dicts.
+        Ordered subscale dicts for all five facets when present.
     """
     mapped: dict[str, float] = {}
     for raw_key, entry in facet_scores.items():
@@ -345,21 +347,13 @@ def big_five_subscales(
         "extraversion",
         "agreeableness",
         "conscientiousness",
-        "emotional_stability",
+        "neuroticism",
         "intellect",
     )
     for trait in order:
-        if trait == "emotional_stability":
-            n_mean = mapped.get("neuroticism")
-            if n_mean is None:
-                continue
-            lo = float(scale_min) if scale_min is not None else float(LIKERT_MIN)
-            hi = float(scale_max) if scale_max is not None and scale_max > lo else float(LIKERT_MAX)
-            mean = (lo + hi) - n_mean
-        else:
-            mean = mapped.get(trait)
-            if mean is None:
-                continue
+        mean = mapped.get(trait)
+        if mean is None:
+            continue
         pct = likert_position_pct(mean, scale_max, scale_min)
         traits.append(
             {
@@ -438,15 +432,20 @@ def single_facet_subscales(
         label = str(raw_key)
         if _norm_key(raw_key) in _INITIATIVE_KEYS:
             label = "Personal Initiative"
-        rows.append(
-            {
-                "name": label,
-                "mean": round(mean, 3),
-                "position_pct": pct,
-                "band": position_band(pct),
-                "band_label": position_band_label(pct),
-            }
-        )
+        row: dict[str, Any] = {
+            "name": label,
+            "mean": round(mean, 3),
+            "position_pct": pct,
+            "band": position_band(pct),
+            "band_label": position_band_label(pct),
+        }
+        if isinstance(entry, Mapping):
+            raw_sum = entry.get("sum")
+            if isinstance(raw_sum, (int, float)) and not isinstance(raw_sum, bool):
+                row["sum"] = round(float(raw_sum), 3)
+            elif isinstance(entry.get("n"), int) and entry["n"] > 0:
+                row["sum"] = round(mean * int(entry["n"]), 3)
+        rows.append(row)
     return rows
 
 
@@ -572,6 +571,12 @@ def build_score_details(
         details["crt"] = {"correct": result.crt_correct, "total": result.crt_total}
     if result.sjt_max:
         details["sjt"] = {"points": result.sjt_points, "maximum": result.sjt_max}
+    if instrument == "initiative" and subscales:
+        primary = subscales[0]
+        details["mean"] = primary.get("mean")
+        details["sum"] = primary.get("sum")
+        details["scale_max"] = scale_max
+        details["scale_min"] = scale_min
     return details
 
 

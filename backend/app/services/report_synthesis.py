@@ -72,15 +72,17 @@ FALLBACK_SENTENCES: dict[Band, str] = {
 
 @dataclass(frozen=True)
 class ModuleOutcome:
-    """One completed assessment resolved for reporting.
+    """One package assessment resolved for reporting.
 
     Attributes:
         key: Stable prompt key (``A1``, ``A2``…) used to merge Gemini prose.
         id: Assessment id.
         title: Assessment title shown to HR.
         category: Resolved competency category.
-        score: Percentage (0–100), or None when nothing was gradable.
+        score: Percentage (0–100), or None when masked / ungradable.
         completed_at: Completion timestamp.
+        status: Progress status (``COMPLETED``, ``PENDING``, …).
+        scores_released: False until every package assessment is COMPLETED.
     """
 
     key: str
@@ -96,6 +98,8 @@ class ModuleOutcome:
     subscales: tuple[dict[str, Any], ...] = ()
     instrument: str | None = None
     completeness: dict[str, Any] | None = None
+    status: str = COMPLETED_STATUS
+    scores_released: bool = True
 
 
 def question_type(question: Mapping[str, Any]) -> str:
@@ -300,13 +304,48 @@ async def load_catalog_categories(
     return {row.id: row.assessment_category for row in rows.all()}
 
 
+def _progress_status(prog: CandidateProgress | None) -> str:
+    if prog is None:
+        return "PENDING"
+    status = str(prog.status or "").strip().upper() or "PENDING"
+    if status == "NOT_STARTED":
+        return "PENDING"
+    return status
+
+
+def package_scores_released(
+    assessments: Sequence[Assessment],
+    progresses: Iterable[CandidateProgress],
+) -> bool:
+    """True only when every package assessment is marked COMPLETED.
+
+    Args:
+        assessments: Package assessments.
+        progresses: Candidate progress rows.
+
+    Returns:
+        Whether HR/admin numerical scores may be released.
+    """
+    if not assessments:
+        return False
+    progress_by_id = {p.assessment_id: p for p in progresses}
+    return all(
+        _progress_status(progress_by_id.get(assessment.id)) == COMPLETED_STATUS
+        for assessment in assessments
+    )
+
+
 def build_module_outcomes(
     assessments: Sequence[Assessment],
     progresses: Iterable[CandidateProgress],
     responses: Iterable[CandidateResponse],
     catalog_categories: Mapping[UUID, str | None],
 ) -> list[ModuleOutcome]:
-    """Resolve every *completed* assessment into a scored outcome.
+    """Resolve package assessments into report outcomes.
+
+    Numerical scores, subscales, and bands are released only when every
+    assessment in the package is ``COMPLETED``. Until then, modules are still
+    listed with status indicators but score fields are masked as ``null``.
 
     Args:
         assessments: Package assessments in display order.
@@ -317,16 +356,17 @@ def build_module_outcomes(
     Returns:
         Outcomes in assessment order, keyed ``A1``…``An``.
     """
-    progress_by_id = {p.assessment_id: p for p in progresses}
+    progress_rows = list(progresses)
+    progress_by_id = {p.assessment_id: p for p in progress_rows}
     responses_by_assessment: dict[UUID, dict[str, Any]] = {}
     for row in responses:
         responses_by_assessment.setdefault(row.assessment_id, {})[str(row.question_id)] = row.response
 
+    released = package_scores_released(assessments, progress_rows)
     outcomes: list[ModuleOutcome] = []
     for assessment in assessments:
         prog = progress_by_id.get(assessment.id)
-        if prog is None or str(prog.status or "").upper() != COMPLETED_STATUS:
-            continue
+        status = _progress_status(prog)
         category = resolve_category(
             assessment.module_kind,
             catalog_categories.get(assessment.global_module_id)
@@ -334,6 +374,21 @@ def build_module_outcomes(
             else None,
             assessment.questions,
         )
+        if not released or status != COMPLETED_STATUS or prog is None:
+            outcomes.append(
+                ModuleOutcome(
+                    key=f"A{len(outcomes) + 1}",
+                    id=assessment.id,
+                    title=assessment.title,
+                    category=category,
+                    score=None,
+                    completed_at=getattr(prog, "completed_at", None) if prog is not None else None,
+                    status=status,
+                    scores_released=False,
+                )
+            )
+            continue
+
         details = getattr(prog, "score_details", None)
         if not isinstance(details, dict) or details.get("scoring_version") != SCORING_VERSION:
             details = _live_score_details(assessment, prog, responses_by_assessment.get(assessment.id, {}))
@@ -358,6 +413,8 @@ def build_module_outcomes(
                 subscales=tuple(details.get("subscales") or ()),
                 instrument=details.get("instrument"),
                 completeness=details.get("completeness"),
+                status=status,
+                scores_released=True,
             )
         )
     return outcomes
@@ -404,8 +461,10 @@ def fallback_performance_summary(candidate_name: str, outcome: ModuleOutcome) ->
         outcome: Scored module outcome.
 
     Returns:
-        One sentence.
+        One sentence, or empty string while package scores are withheld.
     """
+    if not outcome.scores_released:
+        return ""
     first = _first_name(candidate_name)
     if outcome.score_kind == "traits" and outcome.subscales:
         parts = [
@@ -450,14 +509,20 @@ def performance_summaries(
         Assessment id → sentence, for scored outcomes only.
     """
     sentences = synthesis.summaries_by_key() if synthesis else {}
-    return {
-        o.id: sentences.get(o.key) or fallback_performance_summary(candidate_name, o)
-        for o in outcomes
-        if _has_breakdown_row(o)
-    }
+    out: dict[UUID, str] = {}
+    for o in outcomes:
+        if not _has_breakdown_row(o):
+            continue
+        if not o.scores_released:
+            out[o.id] = ""
+            continue
+        out[o.id] = sentences.get(o.key) or fallback_performance_summary(candidate_name, o)
+    return out
 
 
 def _has_breakdown_row(outcome: ModuleOutcome) -> bool:
+    if not outcome.scores_released:
+        return True
     return (
         outcome.score is not None
         or bool(outcome.subscales)
@@ -511,6 +576,8 @@ def build_category_summaries(
         Pillar summaries in category order.
     """
     outcome_list = list(outcomes)
+    if outcome_list and not all(o.scores_released for o in outcome_list):
+        return []
     prose = synthesis.summaries_by_category() if synthesis else {}
     summaries: list[CategorySummaryItem] = []
     for key in CATEGORY_ORDER:
@@ -534,10 +601,11 @@ def build_competency_breakdown(
 ) -> list[AssessmentBreakdownItem]:
     """Merge sentences onto server-computed scores.
 
-    Unscored outcomes are excluded (a breakdown row always has a real score).
+    When package scores are withheld, rows still appear with status and null
+    numerical fields. Released packages omit modules with nothing to report.
 
     Args:
-        outcomes: Completed module outcomes.
+        outcomes: Module outcomes (possibly score-masked).
         summaries: Output of ``performance_summaries``.
 
     Returns:
@@ -551,14 +619,16 @@ def build_competency_breakdown(
             assessment_name=o.title,
             score=(
                 max(0.0, min(100.0, o.score))
-                if o.score is not None
+                if o.scores_released and o.score is not None
                 else None
             ),
-            display_score=o.display_score,
-            band=o.band_label or o.band,
-            score_kind=o.score_kind,
-            subscales=list(o.subscales),
-            performance_summary=summaries[o.id],
+            display_score=o.display_score if o.scores_released else None,
+            band=(o.band_label or o.band) if o.scores_released else None,
+            score_kind=o.score_kind if o.scores_released else None,
+            subscales=list(o.subscales) if o.scores_released else [],
+            performance_summary=summaries[o.id] if o.scores_released else None,
+            status=o.status,
+            scores_released=o.scores_released,
         )
         for o in scored
     ]
@@ -587,7 +657,7 @@ def prompt_assessments(outcomes: Iterable[ModuleOutcome]) -> list[dict[str, Any]
             "completeness": o.completeness,
         }
         for o in outcomes
-        if _has_breakdown_row(o)
+        if o.scores_released and _has_breakdown_row(o)
     ]
 
 

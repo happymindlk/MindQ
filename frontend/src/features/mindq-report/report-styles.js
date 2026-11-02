@@ -107,17 +107,28 @@ export const REPORT_CSS = `
 .mq-score-item { padding: 8px 0; border-top: 1px solid #f3f4f6; }
 .mq-score-item:first-child { border-top: 0; padding-top: 0; }
 .mq-score-row {
-  display: grid; grid-template-columns: minmax(0, 220px) 1fr 56px; align-items: center; gap: 16px;
+  display: grid; grid-template-columns: minmax(0, 220px) 1fr max-content; align-items: center; gap: 16px;
 }
 .mq-score-name { color: #111827; font-weight: 600; overflow-wrap: anywhere; }
 .mq-score-value {
-  text-align: right; font-variant-numeric: tabular-nums; color: #374151; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: flex-end; gap: 0;
+  padding: 4px 10px; border-radius: 999px; background: #f3eefc;
+  color: #7048E2; font-weight: 700; font-size: 12px;
+  font-variant-numeric: tabular-nums; white-space: nowrap; min-width: fit-content;
+  hyphens: none; overflow-wrap: normal; word-break: keep-all;
 }
 .mq-score-summary { margin-top: 4px !important; font-size: 12.5px; color: #4b5563; }
 .mq-subscales { list-style: none; margin: 8px 0 0; padding: 0; }
 .mq-subscale-row {
-  display: grid; grid-template-columns: minmax(0, 220px) 1fr 120px; align-items: center; gap: 16px;
+  display: grid; grid-template-columns: minmax(0, 220px) 1fr max-content; align-items: center; gap: 16px;
   padding: 4px 0; font-size: 12px; color: #4b5563;
+}
+.mq-subscale-value {
+  display: inline-flex; align-items: center; justify-content: flex-end;
+  padding: 4px 10px; border-radius: 999px; background: #f3f4f6;
+  color: #374151; font-weight: 600; font-size: 12px;
+  font-variant-numeric: tabular-nums; white-space: nowrap; min-width: fit-content;
+  hyphens: none; overflow-wrap: normal; word-break: keep-all;
 }
 .mq-bar-track { height: 8px; border-radius: 999px; background: #e5e7eb; overflow: hidden; }
 .mq-bar-fill { height: 100%; border-radius: 999px; background: #7048E2; }
@@ -132,8 +143,11 @@ export const REPORT_CSS = `
 .mq-q-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .mq-q-index { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; }
 .mq-score-badge {
-  display: inline-block; padding: 4px 8px; border-radius: 999px; background: #f3eefc;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 4px 10px; border-radius: 999px; background: #f3eefc;
   color: #7048E2; font-weight: 700; font-size: 12px;
+  font-variant-numeric: tabular-nums; white-space: nowrap; min-width: fit-content;
+  hyphens: none; overflow-wrap: normal; word-break: keep-all;
 }
 .mq-q-prompt { margin-bottom: 8px !important; font-size: 15px; font-weight: 700; color: #111827; }
 .mq-chip {
@@ -171,19 +185,47 @@ export const REPORT_CSS = `
 .mindq-report [data-pdf-block], .mq-score-item {
   break-inside: avoid; page-break-inside: avoid; break-after: auto; page-break-after: auto;
 }
-.mq-print-footer-space { display: none; }
+.mq-print-footer-space,
+.mq-print-footer-spacer {
+  display: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  font-size: 0 !important;
+  line-height: 0 !important;
+  color: transparent !important;
+}
 
 @media print {
-  @page { size: A4; margin: 12mm 12mm 10mm; }
+  @page {
+    size: A4;
+    margin: 15mm 15mm 20mm 15mm;
+  }
   .mindq-report { width: 100%; max-width: none; padding: 0; }
   /* A CSS table footer repeats on every printed page, reserving room for the fixed footer. */
   .mq-print-frame { display: table; width: 100%; border-collapse: collapse; }
   .mq-print-body { display: table-row-group; }
-  .mq-print-footer-space { display: table-footer-group; }
-  .mq-print-footer-spacer { height: ${PRINT_FOOTER_HEIGHT_MM}mm; }
+  .mq-print-footer-space {
+    display: table-footer-group !important;
+    height: auto !important;
+    overflow: visible !important;
+    color: transparent !important;
+  }
+  .mq-print-footer-spacer {
+    display: block !important;
+    height: ${PRINT_FOOTER_HEIGHT_MM}mm !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    overflow: hidden !important;
+  }
   .mq-footer {
     position: fixed; left: 0; right: 0; bottom: 0; margin: 0; padding: 8px 0 0;
     min-height: ${PRINT_FOOTER_HEIGHT_MM - 2}mm;
+  }
+  .mq-score-badge, .mq-score-value, .mq-subscale-value {
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .mq-dash-card, .mq-sr-strengths, .mq-sr-risks, .mq-bar-fill, .mq-logo-fallback, .mq-brand img {
     -webkit-print-color-adjust: exact; print-color-adjust: exact;

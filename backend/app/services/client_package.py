@@ -1722,13 +1722,18 @@ class ClientPackageService:
             )
         ).scalar_one_or_none()
 
+        completed = sum(1 for p in progress_rows if p.status == "COMPLETED")
+        total = len(assessments)
+        scores_released = total > 0 and completed == total
+
         technical_assessments: list[ClientScorecardAssessment] = []
         scores: list[float] = []
         for assessment in assessments:
             if (assessment.module_kind or TECHNICAL) == PSYCHOMETRIC:
                 continue
             prog = progress_by_id.get(assessment.id)
-            score = float(prog.score) if prog and prog.score is not None else None
+            raw_score = float(prog.score) if prog and prog.score is not None else None
+            score = raw_score if scores_released else None
             if score is not None:
                 scores.append(score)
             technical_assessments.append(
@@ -1742,11 +1747,11 @@ class ClientPackageService:
                 )
             )
 
-        evaluated = evaluation_is_ok(eval_row)
+        evaluated = evaluation_is_ok(eval_row) if scores_released else False
         payload = eval_row.payload if evaluated and eval_row is not None else None
         sanitized: dict[str, Any] | None = None
         summary = None
-        if payload:
+        if payload and scores_released:
             sanitized = {
                 "executive_summary": payload.get("executive_summary"),
                 "strengths": payload.get("strengths") or [],
@@ -1754,10 +1759,6 @@ class ClientPackageService:
             }
             summary = sanitized["executive_summary"]
 
-        completed = sum(
-            1 for p in progress_rows if p.status == "COMPLETED"
-        )
-        total = len(assessments)
         return ClientScorecardResponse(
             candidate_id=candidate.id,
             full_name=candidate.full_name,

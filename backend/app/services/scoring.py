@@ -392,7 +392,7 @@ class ScoreResult:
 
     Attributes:
         score: Percentage over gradable items, or None when nothing is gradable.
-        facet_scores: ``{facet: {"mean": float, "n": int}}`` from Likert items.
+        facet_scores: ``{facet: {"mean": float, "n": int, "sum": float}}`` from Likert items.
         gradable_count: Number of items that contributed to ``score``.
         items_total: Recognized items in the bank.
         items_answered: Items with a usable response.
@@ -504,7 +504,11 @@ def score_assessment_detailed(questions: Optional[list], responses: Iterable) ->
         earned += credit
 
     facet_scores = {
-        facet: {"mean": round(sum(values) / len(values), 3), "n": len(values)}
+        facet: {
+            "mean": round(sum(values) / len(values), 3),
+            "n": len(values),
+            "sum": round(sum(values), 3),
+        }
         for facet, values in facet_totals.items()
     }
     score = round(earned / gradable * 100, 2) if gradable else None

@@ -232,16 +232,19 @@ function CategoryBreakdown({ group }) {
             </div>
             {row.subscales.length > 0 && (
               <ul className="mq-subscales">
-                {row.subscales.map((facet) => (
-                  <li key={facet.name} className="mq-subscale-row">
-                    <span>{facet.name}</span>
-                    {facet.positionPct != null ? <ScoreBar score={facet.positionPct} /> : <span />}
-                    <span>
-                      {facet.positionPct != null ? formatScore(facet.positionPct) : ''}
-                      {facet.band ? ` · ${facet.band}` : ''}
-                    </span>
-                  </li>
-                ))}
+                {row.subscales.map((facet) => {
+                  const facetValue =
+                    facet.positionPct != null
+                      ? `${formatScore(facet.positionPct)}${facet.band ? ` · ${facet.band}` : ''}`
+                      : facet.band || '';
+                  return (
+                    <li key={facet.name} className="mq-subscale-row">
+                      <span>{facet.name}</span>
+                      {facet.positionPct != null ? <ScoreBar score={facet.positionPct} /> : <span />}
+                      {facetValue ? <span className="mq-subscale-value">{facetValue}</span> : <span />}
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {row.summary && <p className="mq-score-summary">{row.summary}</p>}
@@ -454,9 +457,9 @@ export default function MindQReport({ data, logoSrc }) {
             </section>
           )}
         </div>
-        {/* Print-only: a repeating table footer reserves room under the fixed footer on every page. */}
-        <div className="mq-print-footer-space" aria-hidden="true">
-          <div className="mq-print-footer-spacer" />
+        {/* Print-only spacer — stripped from PDF rasterization; empty so print engines emit no glyphs. */}
+        <div className="mq-print-footer-space" data-pdf-print-only aria-hidden="true">
+          <div className="mq-print-footer-spacer" data-pdf-print-only />
         </div>
       </div>
 
