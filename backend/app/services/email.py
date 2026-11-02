@@ -459,7 +459,7 @@ def render_hr_completion_html(
       <p style="{_BODY_STYLE}margin:0 0 20px;">
         Hello <strong style="color:#1F2937;">{greeting}</strong>,
         <strong style="color:#1F2937;">{cand}</strong> ({email}) has finished
-        <strong style="color:#1F2937;">{title}</strong>.
+        <strong style="color:#1F2937;">{title} Assessment Package</strong>.
         Their report is ready to review and download from the HR Tracker.
       </p>
       <div style="margin:0 0 8px;padding:14px 16px;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;color:#4B5563;">
@@ -528,7 +528,7 @@ def render_package_share_html(
         "text-decoration:none;border-radius:8px;font-weight:700;font-size:13px;"
     )
     body_html = f"""
-      <h1 style="{_HEADING_STYLE}">{title} is ready to share</h1>
+      <h1 style="{_HEADING_STYLE}">{title} Assessment Package is ready to share</h1>
       <p style="{_BODY_STYLE}margin:0 0 24px;">
         Hello <strong style="color:#1F2937;">{company}</strong>, your assessment is live. Forward the candidate details below to applicants, and use the HR portal to track results.
       </p>
