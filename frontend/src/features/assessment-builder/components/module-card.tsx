@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import type { ReactNode } from 'react';
-import { Archive, Layers, ListChecks, Lock, ShieldAlert, Shuffle, Timer, TimerOff } from 'lucide-react';
-import { CATEGORY_LABELS, formatDuration, statusLabel } from '../types/module';
+import { Archive, Layers, ListChecks, Lock, ShieldAlert, Shuffle, TimerOff } from 'lucide-react';
+import { CATEGORY_LABELS, formatDurationBadge, statusLabel } from '../types/module';
 import type { AssessmentCategory, ModuleKind, ModuleStatus, TimerMode } from '../types/module';
 import { Pill } from './primitives';
 import type { Tone } from './primitives';
@@ -69,11 +69,6 @@ function ModuleCardImpl({ module, active = false, onOpen, onArchive, trailing, c
         <Pill tone="indigo" icon={<Layers className="h-3 w-3" aria-hidden />} title="Sub-dimensions">
           {module.facetCount} {module.facetCount === 1 ? 'facet' : 'facets'}
         </Pill>
-        <Pill
-          icon={module.durationSeconds ? <Timer className="h-3 w-3" aria-hidden /> : <TimerOff className="h-3 w-3" aria-hidden />}
-        >
-          {formatDuration(module.durationSeconds)}
-        </Pill>
         <Pill icon={<ListChecks className="h-3 w-3" aria-hidden />}>
           {module.questionCount} {module.questionCount === 1 ? 'Item' : 'Items'}
         </Pill>
@@ -88,13 +83,25 @@ function ModuleCardImpl({ module, active = false, onOpen, onArchive, trailing, c
       </div>
 
       {!compact && (
-        <div className="mt-3 flex items-center justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800/80">
+        <div className="mt-3 flex items-end justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800/80">
           <Pill
             tone={locked ? 'cyan' : 'amber'}
             icon={locked ? <Lock className="h-3 w-3" aria-hidden /> : undefined}
           >
             {statusLabel({ status, version: module.version, isLocked: locked })}
           </Pill>
+          <div className="flex flex-col items-end gap-1.5">
+            {formatDurationBadge(module.durationSeconds) ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                {formatDurationBadge(module.durationSeconds)}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                <TimerOff className="h-3 w-3" aria-hidden />
+                Untimed
+              </span>
+            )}
+          </div>
         </div>
       )}
     </>

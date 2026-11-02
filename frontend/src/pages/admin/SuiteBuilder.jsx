@@ -25,6 +25,7 @@ import {
   insertRoleBriefTemplate,
 } from '../../features/suite-builder/role-brief-template';
 import {
+  createDraftIdGate,
   createDraftSaveController,
   isAbortError,
   isPackageSaveAllowed,
@@ -302,7 +303,8 @@ export default function SuiteBuilder() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const loadPackageId = routePackageId || searchParams.get('packageId');
+  const loadPackageId =
+    routePackageId || searchParams.get('packageId') || searchParams.get('draftId');
   const [modules, setModules] = useState([]);
   const [corporates, setCorporates] = useState([]);
   const [search, setSearch] = useState('');
@@ -359,6 +361,8 @@ export default function SuiteBuilder() {
   const skipSave = useRef(true);
   const skipCacheWrite = useRef(true);
   const draftSave = useRef(createDraftSaveController());
+  /** Retains the server draft id across concurrent autosaves (tab blur / debounce races). */
+  const draftIdGate = useRef(createDraftIdGate(loadPackageId || null));
   /** Once true, the editor is leaving after publish — block any residual saves. */
   const publishLeaving = useRef(false);
   const hydratedPackageIdRef = useRef(null);
@@ -750,6 +754,11 @@ export default function SuiteBuilder() {
     [openTime, closeTime],
   );
 
+  // Keep the gate aligned when route hydration / first create updates packageId.
+  useEffect(() => {
+    if (packageId) draftIdGate.current.setId(packageId);
+  }, [packageId]);
+
   // Read the latest form via formSnapshotRef so this callback identity stays
   // stable; field edits schedule via a separate effect without recreating persist.
   const persist = useCallback(async () => {
@@ -764,91 +773,92 @@ export default function SuiteBuilder() {
     ) {
       return null;
     }
-    setSaveState('saving');
-    const signal = draftSave.current.beginRequest();
-    const schedulePayload = {
-      open_time: fromSriLankaInputValue(snap.openTime),
-      close_time: fromSriLankaInputValue(snap.closeTime),
+
+    const buildPayload = (source) => {
+      const schedulePayload = {
+        open_time: fromSriLankaInputValue(source.openTime),
+        close_time: fromSriLankaInputValue(source.closeTime),
+      };
+      const customPayload = (source.customQuestions || [])
+        .filter((q) => String(q.prompt || '').trim())
+        .map((q) => ({
+          id: q.id || undefined,
+          prompt: q.prompt,
+          question_type: q.question_type,
+          options: (q.options || []).filter(Boolean),
+          correct_answer_or_rubric: q.correct_answer_or_rubric || '',
+          evaluated_competency: q.evaluated_competency || 'Technical',
+          weight: Number(q.weight) || 3,
+        }));
+      const overridesPayload = {};
+      (source.cartIds || []).forEach((id) => {
+        if (Array.isArray(source.moduleOverrides?.[id])) {
+          overridesPayload[id] = source.moduleOverrides[id];
+        }
+      });
+      return {
+        corporate_id: source.corporateId,
+        title: String(source.title).trim(),
+        description: source.description,
+        ...schedulePayload,
+        target_role: String(source.targetRole || '').trim() || null,
+        module_ids: source.cartIds,
+        custom_questions: customPayload,
+        module_question_overrides: overridesPayload,
+      };
     };
-    const customPayload = (snap.customQuestions || [])
-      .filter((q) => String(q.prompt || '').trim())
-      .map((q) => ({
-        id: q.id || undefined,
-        prompt: q.prompt,
-        question_type: q.question_type,
-        options: (q.options || []).filter(Boolean),
-        correct_answer_or_rubric: q.correct_answer_or_rubric || '',
-        evaluated_competency: q.evaluated_competency || 'Technical',
-        weight: Number(q.weight) || 3,
-      }));
-    const overridesPayload = {};
-    (snap.cartIds || []).forEach((id) => {
-      if (Array.isArray(snap.moduleOverrides?.[id])) {
-        overridesPayload[id] = snap.moduleOverrides[id];
-      }
-    });
-    const pkgId = packageId;
+
+    setSaveState('saving');
+    const gate = draftIdGate.current;
     try {
-      let saved;
-      if (pkgId) {
-        saved = await adminApi.updateAdminPackage(
-          pkgId,
-          {
-            title: String(snap.title).trim(),
-            description: snap.description,
-            ...schedulePayload,
-            target_role: String(snap.targetRole || '').trim() || null,
-            corporate_id: snap.corporateId,
-            module_ids: snap.cartIds,
-            custom_questions: customPayload,
-            module_question_overrides: overridesPayload,
-          },
-          { signal },
-        );
-      } else {
-        saved = await adminApi.saveDraftPackage(
-          {
-            corporate_id: snap.corporateId,
-            title: String(snap.title).trim(),
-            description: snap.description,
-            ...schedulePayload,
-            target_role: String(snap.targetRole || '').trim() || null,
-            module_ids: snap.cartIds,
-            custom_questions: customPayload,
-            module_question_overrides: overridesPayload,
-          },
-          null,
-          { signal },
-        );
-      }
-      if (publishLeaving.current) return null;
-      if (saved.id !== pkgId) setPackageId(saved.id);
-      setSaveState('saved');
-      if (!loadPackageId && saved.id) {
-        writeSuiteDraft(null, {
-          corporateId: snap.corporateId,
-          title: snap.title,
-          description: snap.description,
-          targetRole: snap.targetRole,
-          openTime: snap.openTime,
-          closeTime: snap.closeTime,
-          cartIds: snap.cartIds,
-          moduleOverrides: snap.moduleOverrides,
-          customQuestions: snap.customQuestions,
+      let pkgId = gate.getId();
+      if (!pkgId) {
+        // First create is not abortable — aborting mid-POST leaves orphan drafts while
+        // React state still has no id, so the next blur would POST again.
+        pkgId = await gate.ensureCreated(async () => {
+          const created = await adminApi.saveDraftPackage(buildPayload(snap), null);
+          return created;
         });
-        migrateSuiteDraft(saved.id);
-        skipSave.current = true;
-        skipCacheWrite.current = true;
-        navigate(`/admin/packages/edit/${saved.id}`, { replace: true });
+        if (publishLeaving.current) return null;
+        setPackageId(pkgId);
+        if (!loadPackageId && pkgId) {
+          writeSuiteDraft(null, {
+            corporateId: snap.corporateId,
+            title: snap.title,
+            description: snap.description,
+            targetRole: snap.targetRole,
+            openTime: snap.openTime,
+            closeTime: snap.closeTime,
+            cartIds: snap.cartIds,
+            moduleOverrides: snap.moduleOverrides,
+            customQuestions: snap.customQuestions,
+          });
+          migrateSuiteDraft(pkgId);
+          skipSave.current = true;
+          skipCacheWrite.current = true;
+          navigate(`/admin/packages/edit/${pkgId}?draftId=${pkgId}`, { replace: true });
+        }
       }
-      return saved;
+
+      // Always PUT the latest snapshot once we have an id (covers waiters whose
+      // form advanced while the shared create was in flight).
+      const latest = formSnapshotRef.current;
+      const signal = draftSave.current.beginRequest();
+      const saved = await adminApi.saveDraftPackage(buildPayload(latest), pkgId, { signal });
+      if (publishLeaving.current) return null;
+      if (saved?.id && saved.id !== pkgId) {
+        gate.setId(saved.id);
+        setPackageId(saved.id);
+      }
+      setSaveState('saved');
+      return saved || { id: pkgId };
     } catch (err) {
       if (isAbortError(err) || publishLeaving.current) return null;
       console.error(err);
       setSaveState('error');
       throw err;
     }
-  }, [locked, packageId, loadPackageId, navigate]);
+  }, [locked, loadPackageId, navigate]);
 
   useEffect(() => {
     if (skipSave.current) {
