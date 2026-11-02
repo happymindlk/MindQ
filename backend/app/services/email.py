@@ -739,6 +739,58 @@ async def send_admin_otp_email(to_email: str, otp: str) -> None:
     )
 
 
+def render_admin_password_reset_html(reset_url: str) -> str:
+    """Build the HTML body for an admin password-reset email.
+
+    Args:
+        reset_url: One-time recovery ``action_link`` from Auth Admin.
+
+    Returns:
+        Full HTML document ready for SES.
+    """
+    safe_url = html.escape(reset_url, quote=True)
+    body = f"""
+      <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#111827;">
+        Reset your MindQ admin password
+      </h1>
+      <p style="margin:0 0 20px;font-size:14px;line-height:1.55;color:#4B5563;">
+        We received a request to reset the password for your Admin Portal account.
+        This link expires after a short time and can be used once.
+      </p>
+      <p style="margin:0 0 24px;">
+        <a href="{safe_url}"
+           style="display:inline-block;padding:12px 18px;background:#4F46E5;color:#FFFFFF;
+                  text-decoration:none;border-radius:8px;font-size:14px;font-weight:600;">
+          Choose a new password
+        </a>
+      </p>
+      <p style="margin:0;font-size:12px;line-height:1.5;color:#6B7280;">
+        If you did not request this, you can ignore this email. Your password will stay the same.
+      </p>
+    """
+    return _light_email_shell(body)
+
+
+async def send_admin_password_reset_email(to_email: str, reset_url: str) -> None:
+    """Email an admin a one-time password-recovery link via SES.
+
+    Args:
+        to_email: Ops admin inbox.
+        reset_url: Absolute recovery action link.
+
+    Raises:
+        RuntimeError: When SES delivery fails (no silent fallback for resets).
+    """
+    result = await send_transactional_email_async(
+        to_email,
+        "Reset your MindQ admin password",
+        render_admin_password_reset_html(reset_url),
+        raise_on_error=True,
+    )
+    if not result:
+        raise RuntimeError("Password reset email was not sent")
+
+
 async def send_hr_otp_email(to_email: str, otp: str) -> None:
     """Deliver an HR/client sign-in code (see ``_send_portal_otp_email``).
 

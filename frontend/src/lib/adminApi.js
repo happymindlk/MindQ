@@ -103,7 +103,7 @@ export const adminApi = {
 
   /**
    * Upload a corporate logo via FastAPI → Cloudflare R2.
-   * Returns the public object URL (does not persist to Postgres).
+   * Backend persists ``corporates.logo_url`` and returns the public object URL.
    */
   async uploadCorporateLogo(corporateId, file) {
     const formData = new FormData();

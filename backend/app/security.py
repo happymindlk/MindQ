@@ -142,6 +142,8 @@ admin_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
 # OTP guesses. The 3-strike lock is stored on the challenge row; this only
 # slows a single IP that is cycling stolen temp tokens.
 admin_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
+# Forgot-password emails — keep tight to limit SES abuse / inbox flooding.
+admin_forgot_password_limiter = RateLimiter(max_requests=5, window_seconds=15 * 60)
 # Candidate OTP request/verify mirror the admin budgets; per-email send caps
 # and the 3-strike lock live on the challenge row.
 candidate_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)

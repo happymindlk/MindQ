@@ -284,7 +284,7 @@ def test_logo_upload_stores_on_r2_and_persists_url():
     session.commit.assert_awaited_once()
     company_id, filename, raw, content_type = upload.call_args.args
     assert company_id == corp.id
-    assert filename.startswith("My-Logo") and filename.endswith(".png")
+    assert filename.startswith(f"{corp.id}_") and filename.endswith(".png")
     assert raw == PNG
     assert content_type == "image/png"
 

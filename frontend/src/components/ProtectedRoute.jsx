@@ -19,10 +19,16 @@ export default function ProtectedRoute({ children }) {
         <SessionLockModal
           variant="password"
           email={lockedEmail}
-          onUnlock={unlockSession}
+          onUnlock={async (password) => {
+            // Idle unlock used to leave the user on whatever route they timed
+            // out on (often /admin/history). Always land on the dashboard.
+            await unlockSession(password);
+            navigate('/admin/dashboard', { replace: true });
+          }}
           onSwitchAccount={() => {
             clearLock();
-            navigate('/admin/login', { replace: true, state: { from: location } });
+            // Do not restore a stale `from` path after timeout → switch account.
+            navigate('/admin/login', { replace: true });
           }}
         />
       </div>
