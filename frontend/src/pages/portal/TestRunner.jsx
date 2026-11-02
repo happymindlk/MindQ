@@ -8,6 +8,8 @@ import { api } from '../../api/client';
 import { readDraft, writeDraft, clearDraft, mergeAnswers } from '../../lib/assessment-draft';
 import { AssessmentRunner } from '../../features/assessment-runner/assessment-runner';
 import { useToast } from '../../components/ui/useToast';
+import { invalidateQuery } from '../../lib/query-cache';
+import { CANDIDATE_DASHBOARD_KEY } from '../../features/candidate-dashboard/module-status';
 
 const LOCKED_DETAIL = 'Assessment already completed. Modifications are locked.';
 
@@ -66,6 +68,8 @@ export default function TestRunner() {
           total_module_duration_seconds ?? null,
         );
         if (result.status === 200) clearDraft(candidateId, testId);
+        // Drop stale package status before the success screen / dashboard return.
+        invalidateQuery(CANDIDATE_DASHBOARD_KEY);
       },
     }),
     [testId, candidateId],
@@ -76,13 +80,18 @@ export default function TestRunner() {
     [candidateId, testId],
   );
 
-  const backToDashboard = useCallback(() => navigate('/portal/dashboard'), [navigate]);
+  const backToDashboard = useCallback(() => {
+    invalidateQuery(CANDIDATE_DASHBOARD_KEY);
+    navigate('/portal/dashboard');
+  }, [navigate]);
 
   const onSubmitted = useCallback(() => {
+    invalidateQuery(CANDIDATE_DASHBOARD_KEY);
     setPhase('complete');
   }, []);
 
   const onTimeExpired = useCallback(() => {
+    invalidateQuery(CANDIDATE_DASHBOARD_KEY);
     toast({
       title: 'Time expired',
       description: 'Your time for this test has ended. Your answers were automatically submitted.',

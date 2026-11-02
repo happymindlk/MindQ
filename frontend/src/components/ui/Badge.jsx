@@ -48,7 +48,7 @@ const dotColors = {
   locked: 'bg-neutral-400',
 };
 
-const pulseVariants = new Set(['success', 'completed']);
+const pulseVariants = new Set(['success', 'completed', 'active', 'scoring']);
 
 /**
  * Status badge with semantic variants for Admin and Client views.

@@ -398,6 +398,9 @@ async def test_dashboard_reports_closed_window_and_launchable_flags():
     assert by_title["CogniCheck (based on ICAR-16)"]["time_limit_seconds"] == 1200
     assert by_title["Mini-IPIP"]["duration_seconds"] == 240
     assert by_title["C"]["time_limit_seconds"] is None
+    assert by_title["CogniCheck (based on ICAR-16)"]["status"] == "not_started"
+    assert by_title["Mini-IPIP"]["status"] == "in_progress"
+    assert by_title["C"]["status"] == "completed"
 
 
 # --- ops schedule + update preservation ------------------------------------------

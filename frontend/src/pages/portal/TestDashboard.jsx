@@ -13,10 +13,12 @@ import {
   usePackageWindow,
 } from '../../features/candidate-dashboard/use-package-window';
 import { resolveTestDurationSeconds } from '../../features/candidate-dashboard/catalog-duration';
+import {
+  CANDIDATE_DASHBOARD_KEY,
+  normalizeModuleStatus,
+} from '../../features/candidate-dashboard/module-status';
 import { formatDurationBadge } from '../../features/assessment-builder/types/module';
 import { useCachedQuery } from '../../hooks/use-cached-query';
-
-const CANDIDATE_DASHBOARD_KEY = 'portal:candidate-dashboard';
 
 export default function TestDashboard() {
   const navigate = useNavigate();
@@ -26,7 +28,7 @@ export default function TestDashboard() {
     error: loadError,
     isLoading,
     reload: loadDashboard,
-  } = useCachedQuery(CANDIDATE_DASHBOARD_KEY, fetcher);
+  } = useCachedQuery(CANDIDATE_DASHBOARD_KEY, fetcher, { staleTime: 0 });
 
   const windowState = usePackageWindow(
     dashboardData?.window_state,
@@ -66,7 +68,9 @@ export default function TestDashboard() {
   }
 
   const { candidate_name, tests } = dashboardData;
-  const remainingTests = tests.filter((t) => t.status !== 'completed').length;
+  const remainingTests = tests.filter(
+    (t) => normalizeModuleStatus(t.status) !== 'completed',
+  ).length;
 
   return (
     <div className="w-full py-6 space-y-4">
@@ -114,9 +118,9 @@ export default function TestDashboard() {
               key={test.id}
               title={test.title}
               description={test.description}
-              status={test.status}
+              status={normalizeModuleStatus(test.status)}
               durationLabel={formatDurationBadge(resolveTestDurationSeconds(test))}
-              lockedReason={lockedReasonFor(test.status, windowState)}
+              lockedReason={lockedReasonFor(normalizeModuleStatus(test.status), windowState)}
               onClick={() => navigate(`/portal/test/${test.id}`)}
             />
           ))}

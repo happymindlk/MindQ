@@ -77,6 +77,10 @@ describe('TestDashboard deadline', () => {
 
     expect(screen.getByText('3 mins')).toBeInTheDocument();
     expect(screen.getByText('4 mins')).toBeInTheDocument();
+    expect(screen.getByText('Not started')).toBeInTheDocument();
+    expect(screen.getByText('In Progress')).toBeInTheDocument();
+    expect(screen.getAllByText('Completed').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByRole('button', { name: /sql/i })).not.toBeInTheDocument();
 
     await userEvent.setup().click(screen.getByRole('button', { name: /cognitive reflection/i }));
     expect(navigate).toHaveBeenCalledWith('/portal/test/t1');
