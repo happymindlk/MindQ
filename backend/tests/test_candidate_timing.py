@@ -150,7 +150,7 @@ async def test_submit_in_time_stores_elapsed_and_facets(monkeypatch):
 
     assert complete is True
     assert float(added[0].elapsed_seconds) == 7.46
-    assert result.facet_scores == {"Pace": {"mean": 4.0, "n": 1}}
+    assert result.facet_scores == {"Pace": {"mean": 4.0, "n": 1, "sum": 4.0}}
     assert result.derived_profile is None
     assert result.overtime is False
     assert result.client_duration_seconds is None
@@ -231,4 +231,4 @@ async def test_resolver_crash_does_not_block_submission(monkeypatch):
     result = await _submit_ipc(monkeypatch, _ipc_rows("PA"))
     assert result.status == "COMPLETED"
     assert result.derived_profile is None
-    assert result.facet_scores["PA"] == {"mean": 5.0, "n": 4}
+    assert result.facet_scores["PA"] == {"mean": 5.0, "n": 4, "sum": 20.0}
