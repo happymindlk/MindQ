@@ -120,6 +120,60 @@ describe('MindQReport', () => {
     expect(within(items[0]).getByText('90%')).toBeInTheDocument();
     expect(within(items[0]).getByText('Numerical Reasoning summary sentence.')).toBeInTheDocument();
     expect(items[0].querySelector('.mq-bar-fill')).toHaveStyle({ width: '90%' });
+    expect(items[0].querySelector('.mq-score-value')).toHaveClass('mq-score-value');
+  });
+
+  it('keeps instrument score and band labels on one nowrap badge line', () => {
+    const { container } = render(
+      <MindQReport
+        data={{
+          ...BASE,
+          competency_breakdown: [
+            {
+              category: 'Personality',
+              assessment_name: 'Work Style Inventory',
+              score: null,
+              display_score: '100',
+              band: 'Very high',
+              performance_summary: 'Elevated drive.',
+              subscales: [
+                {
+                  name: 'Reflective',
+                  mean: 2,
+                  position_pct: null,
+                  band_label: 'Mostly reflective',
+                },
+              ],
+            },
+            {
+              category: 'Behavioral',
+              assessment_name: 'CRT',
+              score: null,
+              display_score: '2 of 3',
+              band: 'Mostly reflective',
+              performance_summary: 'Mostly reflective answers.',
+            },
+            {
+              category: 'Behavioral',
+              assessment_name: 'SJT',
+              score: null,
+              display_score: '16/24',
+              band: 'Generally sound',
+              performance_summary: 'Generally sound judgment.',
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText('100 · Very high')).toBeInTheDocument();
+    expect(screen.getByText('2 of 3 · Mostly reflective')).toBeInTheDocument();
+    expect(screen.getByText('16/24 · Generally sound')).toBeInTheDocument();
+    container.querySelectorAll('.mq-score-value').forEach((badge) => {
+      expect(badge.textContent).not.toMatch(/\n/);
+      expect(badge.textContent.trim().length).toBeGreaterThan(0);
+    });
+    expect(container.querySelector('.mq-subscale-value')).toHaveTextContent('Mostly reflective');
+    expect(container.querySelector('[data-pdf-print-only]')).toBeTruthy();
   });
 
   it('renders pillar summaries for psychometric categories only', () => {

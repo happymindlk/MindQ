@@ -8,7 +8,10 @@ import { computePageSlices } from './pdf-pagination';
 import { reportFilename } from './report-filename';
 import { REPORT_WIDTH_PX } from './report-styles';
 
-const PAGE_MARGIN_MM = 10;
+/** Match `@page` margins in report-styles.js: 15mm 15mm 20mm 15mm. */
+const PAGE_MARGIN_X_MM = 15;
+const PAGE_MARGIN_TOP_MM = 15;
+const PAGE_MARGIN_BOTTOM_MM = 20;
 const FOOTER_GAP_MM = 3;
 const PAGE_NUMBER_BAND_MM = 4;
 const MAX_CANVAS_HEIGHT_PX = 30000;
@@ -57,6 +60,19 @@ function toXmlCompatibleHtml(html) {
     .replace(/<br>/gi, '<br/>')
     .replace(/<hr>/gi, '<hr/>')
     .replace(/<img([^>]*?)(?<!\/)>/gi, '<img$1/>');
+}
+
+/**
+ * Clone the on-screen report for SVG capture, dropping print-only spacer nodes
+ * that can leave stray glyphs when foreignObject rasterizes `display:none` trees.
+ *
+ * @param {HTMLElement} root
+ * @returns {string}
+ */
+function reportHtmlForPdf(root) {
+  const clone = /** @type {HTMLElement} */ (root.cloneNode(true));
+  clone.querySelectorAll('[data-pdf-print-only]').forEach((el) => el.remove());
+  return clone.outerHTML;
 }
 
 /**
@@ -189,7 +205,7 @@ function canvasToPdfBlob(canvas, scale, widthPx, layout) {
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const usableWidth = pageWidth - PAGE_MARGIN_MM * 2;
+  const usableWidth = pageWidth - PAGE_MARGIN_X_MM * 2;
   const mmPerPx = usableWidth / widthPx;
 
   const footerHeightPx = layout.footer ? layout.footer.bottom - layout.footer.top : 0;
@@ -200,7 +216,12 @@ function canvasToPdfBlob(canvas, scale, widthPx, layout) {
       : null;
 
   const usableHeight =
-    pageHeight - PAGE_MARGIN_MM * 2 - footerHeightMm - FOOTER_GAP_MM - PAGE_NUMBER_BAND_MM;
+    pageHeight -
+    PAGE_MARGIN_TOP_MM -
+    PAGE_MARGIN_BOTTOM_MM -
+    footerHeightMm -
+    FOOTER_GAP_MM -
+    PAGE_NUMBER_BAND_MM;
   const pageHeightPx = usableHeight / mmPerPx;
 
   const slices = computePageSlices(layout.contentHeight, pageHeightPx, layout.breakpoints, {
@@ -214,18 +235,18 @@ function canvasToPdfBlob(canvas, scale, widthPx, layout) {
     pdf.addImage(
       pageCanvas.toDataURL('image/jpeg', 0.95),
       'JPEG',
-      PAGE_MARGIN_MM,
-      PAGE_MARGIN_MM,
+      PAGE_MARGIN_X_MM,
+      PAGE_MARGIN_TOP_MM,
       usableWidth,
       sliceHeightPx * mmPerPx,
     );
 
-    const pageNumberY = pageHeight - PAGE_MARGIN_MM;
+    const pageNumberY = pageHeight - PAGE_MARGIN_BOTTOM_MM;
     if (footerImage) {
       pdf.addImage(
         footerImage,
         'JPEG',
-        PAGE_MARGIN_MM,
+        PAGE_MARGIN_X_MM,
         pageNumberY - PAGE_NUMBER_BAND_MM - footerHeightMm,
         usableWidth,
         footerHeightMm,
@@ -234,7 +255,7 @@ function canvasToPdfBlob(canvas, scale, widthPx, layout) {
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(8);
     pdf.setTextColor(107, 114, 128);
-    pdf.text(`Page ${index + 1} of ${slices.length}`, pageWidth - PAGE_MARGIN_MM, pageNumberY, {
+    pdf.text(`Page ${index + 1} of ${slices.length}`, pageWidth - PAGE_MARGIN_X_MM, pageNumberY, {
       align: 'right',
     });
   });
@@ -280,7 +301,7 @@ export async function renderReportPdf(data) {
     const heightPx = Math.max(element.scrollHeight || 0, 200);
     const scale = Math.min(2, MAX_CANVAS_HEIGHT_PX / heightPx);
     const layout = measureReportLayout(element);
-    const canvas = await rasterizeReportHtml(element.outerHTML, widthPx, heightPx, scale);
+    const canvas = await rasterizeReportHtml(reportHtmlForPdf(element), widthPx, heightPx, scale);
     return {
       blob: canvasToPdfBlob(canvas, scale, widthPx, layout),
       filename: reportFilename(data.candidate_full_name),
