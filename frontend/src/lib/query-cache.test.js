@@ -15,8 +15,8 @@ describe('query-cache', () => {
 
   it('returns cached data within staleTime without awaiting a second network call', async () => {
     const fetcher = vi.fn(async () => ({ ok: true }));
-    const first = await cachedQuery('k1', fetcher, { staleTime: 60_000 });
-    const second = await cachedQuery('k1', fetcher, { staleTime: 60_000 });
+    const first = await cachedQuery('k1', fetcher, { staleTime: 60000 });
+    const second = await cachedQuery('k1', fetcher, { staleTime: 60000 });
     expect(first).toEqual({ ok: true });
     expect(second).toEqual({ ok: true });
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -42,6 +42,6 @@ describe('query-cache', () => {
   it('exposes peek/fresh helpers', () => {
     setQuery('peek', 42);
     expect(peekQuery('peek')).toBe(42);
-    expect(isQueryFresh('peek', 60_000)).toBe(true);
+    expect(isQueryFresh('peek', 60000)).toBe(true);
   });
 });
