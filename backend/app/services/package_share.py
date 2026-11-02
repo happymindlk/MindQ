@@ -20,6 +20,7 @@ from app.schemas.client_package import (
 )
 from app.services.email import (
     candidate_portal_link,
+    format_package_label,
     hr_portal_login_link,
     render_package_share_html,
     send_transactional_email,
@@ -218,7 +219,7 @@ async def share_package(
         access_code=package.access_code,
         origin=origin,
     )
-    subject = f"Assessment access: {package.title}"
+    subject = f"Assessment access: {format_package_label(package.title)}"
     candidate_link = candidate_portal_link(package.access_code, origin=origin)
     logger.info(
         "[INVITE DISPATCHED] Candidate=%s Code=%s Link=%s",

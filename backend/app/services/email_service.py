@@ -7,6 +7,7 @@ from datetime import datetime
 from app.services.email import (
     _assessment_invite_link,
     clean_recipient_email,
+    format_package_label,
     render_candidate_invite_html,
     render_candidate_nudge_html,
     render_hr_completion_html,
@@ -38,7 +39,8 @@ class EmailService:
         Returns:
             True when SES accepted the message; False when unconfigured or failed.
         """
-        subject = f"Friendly Reminder: Complete your {package_title} assessment"
+        label = format_package_label(package_title)
+        subject = f"Friendly Reminder: Complete your {label}"
         html_body = render_candidate_nudge_html(
             candidate_name=name,
             package_title=package_title,
@@ -89,7 +91,8 @@ class EmailService:
             link,
         )
         company = (corporate_name or "").strip() or "Assess Pulse"
-        subject = f"{company} invited you: {package_title}"
+        label = format_package_label(package_title)
+        subject = f"{company} invited you: {label}"
         html_body = render_candidate_invite_html(
             candidate_name=name,
             package_title=package_title,
@@ -154,7 +157,8 @@ class EmailService:
         Returns:
             True when SES accepted the message; False when unconfigured or failed.
         """
-        subject = f"Report ready: {candidate_name} completed {package_title}"
+        label = format_package_label(package_title)
+        subject = f"Report ready: {candidate_name} completed {label}"
         html_body = render_hr_completion_html(
             hr_name=hr_name,
             candidate_name=candidate_name,
