@@ -1,6 +1,7 @@
 import React from 'react';
 import Badge from './Badge';
 import { ArrowRight, CheckCircle, Clock, FileText, Lock } from 'lucide-react';
+import { normalizeModuleStatus } from '../../features/candidate-dashboard/module-status';
 
 /**
  * Compact assessment status tile for the candidate dashboard.
@@ -8,7 +9,7 @@ import { ArrowRight, CheckCircle, Clock, FileText, Lock } from 'lucide-react';
  * @param {object} props
  * @param {string} props.title
  * @param {string | null} [props.description]
- * @param {'not_started' | 'in_progress' | 'completed'} props.status
+ * @param {string} props.status Raw or normalized progress status.
  * @param {() => void} [props.onClick]
  * @param {string | null} [props.lockedReason] When set, the tile cannot be launched and shows why.
  * @param {string | null} [props.durationLabel] Optional duration badge (e.g. `⏱ 4 mins`).
@@ -21,13 +22,14 @@ export default function StatusTile({
   lockedReason = null,
   durationLabel = null,
 }) {
-  const isCompleted = status === 'completed';
-  const isInProgress = status === 'in_progress';
+  const lifecycle = normalizeModuleStatus(status);
+  const isCompleted = lifecycle === 'completed';
+  const isInProgress = lifecycle === 'in_progress';
   const isLocked = !isCompleted && Boolean(lockedReason);
   const interactive = !isCompleted && !isLocked && typeof onClick === 'function';
 
   const icon = isCompleted ? (
-    <CheckCircle className="h-5 w-5" />
+    <CheckCircle className="h-5 w-5 text-emerald-500" />
   ) : isLocked ? (
     <Lock className="h-5 w-5" />
   ) : isInProgress ? (
@@ -45,7 +47,7 @@ export default function StatusTile({
       In Progress
     </Badge>
   ) : (
-    <Badge variant="pending">Not started</Badge>
+    <Badge variant="neutral">Not started</Badge>
   );
 
   return (
@@ -66,6 +68,7 @@ export default function StatusTile({
       className={`
         flex min-h-[9.5rem] flex-col rounded-lg border border-slate-200 bg-surface p-3 dark:border-neutral-800
         ${isInProgress && !isLocked ? 'border-blue-500/40' : ''}
+        ${isCompleted ? 'border-emerald-500/20' : ''}
         ${isLocked ? 'opacity-70' : ''}
         ${
           interactive
@@ -95,8 +98,17 @@ export default function StatusTile({
 
       <div className="mt-4 flex items-end justify-between gap-2">
         <div className="min-w-0">
+          {isCompleted && (
+            <span className="cursor-not-allowed text-xs font-medium text-slate-400 dark:text-slate-500">
+              Completed
+            </span>
+          )}
           {interactive && (
-            <div className="flex items-center text-xs font-medium text-primary-text">
+            <div
+              className={`flex items-center text-xs font-semibold ${
+                isInProgress ? 'text-blue-600 dark:text-blue-400' : 'text-primary-text'
+              }`}
+            >
               {isInProgress ? 'Continue test' : 'Start test'}
               <ArrowRight className="ml-1 h-3.5 w-3.5" />
             </div>

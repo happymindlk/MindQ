@@ -36,6 +36,27 @@ from app.exceptions import (
 logger = logging.getLogger(__name__)
 
 COMPLETED_STATUS = "COMPLETED"
+IN_PROGRESS_STATUS = "IN_PROGRESS"
+NOT_STARTED_STATUS = "NOT_STARTED"
+
+_DASHBOARD_STATUS = {
+    COMPLETED_STATUS: "completed",
+    IN_PROGRESS_STATUS: "in_progress",
+    NOT_STARTED_STATUS: "not_started",
+}
+
+
+def _dashboard_module_status(raw: str | None) -> str:
+    """Map a progress row status to the candidate dashboard lifecycle string.
+
+    Args:
+        raw: Stored ``candidate_progress.status`` (or None when no row).
+
+    Returns:
+        One of ``not_started``, ``in_progress``, ``completed``.
+    """
+    key = str(raw or NOT_STARTED_STATUS).strip().upper().replace("-", "_")
+    return _DASHBOARD_STATUS.get(key, "not_started")
 
 
 def _elapsed_decimal(value: float | None) -> Decimal | None:
@@ -415,7 +436,9 @@ class CandidateService:
             tests = []
             for a in assessments:
                 progress = progress_map.get(a.id)
-                status = (progress.status if progress else "NOT_STARTED").lower()
+                status = _dashboard_module_status(
+                    progress.status if progress else NOT_STARTED_STATUS
+                )
                 started = progress is not None and progress.started_at is not None
                 # Mirrors require_writable_assessment so the UI never offers a launch the API rejects.
                 launchable = status != "completed" and (

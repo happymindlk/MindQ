@@ -13,7 +13,7 @@ export const ADMIN_KEEP_PATTERNS = [
 ];
 
 export const PORTAL_KEEP_PATTERNS = [
-  { key: 'portal-dashboard', path: '/portal/dashboard', end: true },
+  // Dashboard remounts so post-submit status is never served from a frozen tree.
   { key: 'portal-guidelines', path: '/portal/guidelines', end: true },
 ];
 

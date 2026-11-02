@@ -31,9 +31,13 @@ export function computeWindowState(
  * @returns Short reason for the tile, or `null` when it can be launched/viewed.
  */
 export function lockedReasonFor(status: string, state: WindowState): string | null {
-  if (status === 'completed') return null;
+  const normalized = String(status || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]/g, '_');
+  if (normalized === 'completed') return null;
   if (state === 'not_open') return 'Not open yet';
-  if (state === 'closed' && status !== 'in_progress') return 'Assessment closed';
+  if (state === 'closed' && normalized !== 'in_progress') return 'Assessment closed';
   return null;
 }
 
