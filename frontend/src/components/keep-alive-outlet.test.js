@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ADMIN_KEEP_PATTERNS, resolveKeepAliveKey } from './keep-alive-outlet';
+import { ADMIN_KEEP_PATTERNS, resolveKeepAliveKey } from './keep-alive-routes';
 
 describe('resolveKeepAliveKey', () => {
   it('maps primary admin tabs onto stable keep keys', () => {

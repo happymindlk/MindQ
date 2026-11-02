@@ -1,45 +1,13 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { matchPath, useLocation, useOutlet } from 'react-router-dom';
-
-/**
- * Primary admin nav routes that are safe to keep mounted across tab switches.
- * Parameterized detail/edit routes are excluded so they remount cleanly.
- */
-const ADMIN_KEEP = [
-  { key: 'admin-home', path: '/admin', end: true },
-  { key: 'admin-home', path: '/admin/dashboard', end: true },
-  { key: 'admin-library', path: '/admin/library', end: false },
-  { key: 'admin-suite-create', path: '/admin/packages/create', end: true },
-  { key: 'admin-history', path: '/admin/history', end: false },
-];
-
-const PORTAL_KEEP = [
-  { key: 'portal-dashboard', path: '/portal/dashboard', end: true },
-  { key: 'portal-guidelines', path: '/portal/guidelines', end: true },
-];
-
-const CLIENT_KEEP = [{ key: 'client-dashboard', path: '/client/dashboard', end: true }];
-
-/**
- * @param {string} pathname
- * @param {{ key: string, path: string, end: boolean }[]} patterns
- * @returns {string | null}
- */
-export function resolveKeepAliveKey(pathname, patterns) {
-  for (const pattern of patterns) {
-    if (matchPath({ path: pattern.path, end: pattern.end }, pathname)) {
-      return pattern.key;
-    }
-  }
-  return null;
-}
+import { useLocation, useOutlet } from 'react-router-dom';
+import { ADMIN_KEEP_PATTERNS, resolveKeepAliveKey } from './keep-alive-routes';
 
 /**
  * Preserve visited tab trees with CSS hide/show so switching back is instant.
  *
  * @param {{ patterns?: { key: string, path: string, end: boolean }[] }} [props]
  */
-export default function KeepAliveOutlet({ patterns = ADMIN_KEEP }) {
+export default function KeepAliveOutlet({ patterns = ADMIN_KEEP_PATTERNS }) {
   const outlet = useOutlet();
   const { pathname } = useLocation();
   const keepKey = resolveKeepAliveKey(pathname, patterns);
@@ -78,7 +46,3 @@ export default function KeepAliveOutlet({ patterns = ADMIN_KEEP }) {
     </>
   );
 }
-
-export const ADMIN_KEEP_PATTERNS = ADMIN_KEEP;
-export const PORTAL_KEEP_PATTERNS = PORTAL_KEEP;
-export const CLIENT_KEEP_PATTERNS = CLIENT_KEEP;

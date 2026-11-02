@@ -5,7 +5,8 @@ import SupportModal from './SupportModal';
 import ToastProvider from './ui/Toast';
 import RouteErrorBoundary from './route-error-boundary';
 import ThemeToggle from './ThemeToggle';
-import KeepAliveOutlet, { PORTAL_KEEP_PATTERNS } from './keep-alive-outlet';
+import KeepAliveOutlet from './keep-alive-outlet';
+import { PORTAL_KEEP_PATTERNS } from './keep-alive-routes';
 
 /**
  * Candidate assessment shell. Shares Design System tokens with admin Operate surfaces.
