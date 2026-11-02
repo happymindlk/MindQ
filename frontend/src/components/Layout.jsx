@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Outlet, NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   // Building2, // Corporates nav hidden for stakeholder demo
@@ -15,7 +15,11 @@ import ToastProvider from './ui/Toast';
 import ThemeToggle from './ThemeToggle';
 import UserMenu from './user-menu';
 import RouteErrorBoundary from './route-error-boundary';
+import KeepAliveOutlet, { ADMIN_KEEP_PATTERNS } from './keep-alive-outlet';
 import { useIdleTimer } from '../hooks/use-idle-timer';
+import { cachedQuery } from '../lib/query-cache';
+import { adminApi } from '../lib/adminApi';
+import { libraryApi } from '../features/assessment-builder/api/library-api';
 
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
@@ -142,6 +146,16 @@ export default function Layout() {
                   }
                 `}
                 onClick={() => setSidebarOpen(false)}
+                onMouseEnter={() => {
+                  // Prefetch adjacent tab payloads so the click paints from cache.
+                  if (item.href === '/admin' || item.href === '/admin/dashboard') {
+                    void cachedQuery('admin:corporates', () => adminApi.listCorporates()).catch(() => undefined);
+                  } else if (item.href === '/admin/library') {
+                    void cachedQuery('admin:library-modules', () => libraryApi.listModules()).catch(() => undefined);
+                  } else if (item.href === '/admin/history') {
+                    void cachedQuery('admin:corporates', () => adminApi.listCorporates()).catch(() => undefined);
+                  }
+                }}
               >
                 <item.icon className="w-4 h-4 shrink-0" />
                 {item.name}
@@ -183,7 +197,7 @@ export default function Layout() {
 
           <main className="flex-1 overflow-y-auto p-3 sm:p-4">
             <RouteErrorBoundary>
-              <Outlet />
+              <KeepAliveOutlet patterns={ADMIN_KEEP_PATTERNS} />
             </RouteErrorBoundary>
           </main>
         </div>

@@ -1,10 +1,11 @@
 import React from 'react';
-import { Outlet, Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import BrandLogo from './BrandLogo';
 import ToastProvider from './ui/Toast';
 import RouteErrorBoundary from './route-error-boundary';
 import ThemeToggle from './ThemeToggle';
+import KeepAliveOutlet, { CLIENT_KEEP_PATTERNS } from './keep-alive-outlet';
 import CorporateLogo from '../pages/admin/corporates/corporate-logo';
 import { useClientSession } from '../pages/client/use-client-session';
 import { useIdleTimer } from '../hooks/use-idle-timer';
@@ -53,7 +54,7 @@ export default function ClientLayout() {
         </header>
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6">
           <RouteErrorBoundary>
-            <Outlet />
+            <KeepAliveOutlet patterns={CLIENT_KEEP_PATTERNS} />
           </RouteErrorBoundary>
         </main>
       </div>

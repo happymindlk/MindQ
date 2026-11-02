@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TestDashboard from './TestDashboard';
 import { api } from '../../api/client';
+import { invalidateQuery } from '../../lib/query-cache';
 
 const navigate = vi.fn();
 
@@ -33,6 +34,7 @@ function renderDashboard() {
 
 beforeEach(() => {
   navigate.mockReset();
+  invalidateQuery();
   vi.mocked(api.candidate.getDashboard).mockReset();
 });
 

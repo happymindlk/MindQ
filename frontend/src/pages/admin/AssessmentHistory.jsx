@@ -18,6 +18,7 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { adminApi, maskEmail } from '../../lib/adminApi';
+import { cachedQuery } from '../../lib/query-cache';
 import { downloadMindQReport } from '../../features/mindq-report/render-report-pdf';
 import { formatDate } from '../../lib/format-date';
 import DeadlineLabel from '../../features/package-schedule/deadline-label';
@@ -147,7 +148,7 @@ export default function AssessmentHistory() {
     setLoadingCompanies(true);
     setError(null);
     try {
-      const rows = await adminApi.listCorporates();
+      const rows = await cachedQuery('admin:corporates', () => adminApi.listCorporates());
       setCompanies(rows || []);
       const seeded = {};
       (rows || []).forEach((c) => {

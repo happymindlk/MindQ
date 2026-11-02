@@ -1,10 +1,11 @@
 import React from 'react';
-import { Outlet, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import BrandLogo from './BrandLogo';
 import SupportModal from './SupportModal';
 import ToastProvider from './ui/Toast';
 import RouteErrorBoundary from './route-error-boundary';
 import ThemeToggle from './ThemeToggle';
+import KeepAliveOutlet, { PORTAL_KEEP_PATTERNS } from './keep-alive-outlet';
 
 /**
  * Candidate assessment shell. Shares Design System tokens with admin Operate surfaces.
@@ -36,7 +37,7 @@ export default function PortalLayout() {
         <main className="flex-1 flex flex-col items-center p-3 sm:p-4">
           <div className="w-full max-w-3xl flex-1 flex flex-col">
             <RouteErrorBoundary>
-              <Outlet />
+              <KeepAliveOutlet patterns={PORTAL_KEEP_PATTERNS} />
             </RouteErrorBoundary>
           </div>
         </main>

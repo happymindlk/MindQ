@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { libraryApi } from '../api/library-api';
 import type { AssessmentModule, AssessmentModuleDetail, ModuleCreateInput } from '../types/module';
+import { useCachedQuery } from '../../../hooks/use-cached-query';
+
+export const LIBRARY_MODULES_QUERY_KEY = 'admin:library-modules';
 
 export interface ModuleLibraryState {
   modules: AssessmentModule[];
@@ -12,10 +15,6 @@ export interface ModuleLibraryState {
   upsertLocal: (module: AssessmentModule) => void;
 }
 
-function errorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message ? err.message : fallback;
-}
-
 /**
  * Library list state. Mutations update the local list optimistically from the
  * server response so the hub never needs a full refetch after an edit.
@@ -23,37 +22,24 @@ function errorMessage(err: unknown, fallback: string): string {
  * @returns Modules plus create/archive/refresh actions.
  */
 export function useModuleLibrary(): ModuleLibraryState {
-  const [modules, setModules] = useState<AssessmentModule[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const requestRef = useRef(0);
+  const fetcher = useCallback(() => libraryApi.listModules(), []);
+  const { data, error, isLoading, reload, mutate } = useCachedQuery<AssessmentModule[]>(
+    LIBRARY_MODULES_QUERY_KEY,
+    fetcher,
+  );
 
-  const refresh = useCallback(async () => {
-    const requestId = ++requestRef.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const rows = await libraryApi.listModules();
-      if (requestId === requestRef.current) setModules(rows);
-    } catch (err) {
-      if (requestId === requestRef.current) setError(errorMessage(err, 'Could not load the assessment library.'));
-    } finally {
-      if (requestId === requestRef.current) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const upsertLocal = useCallback((module: AssessmentModule) => {
-    setModules((prev) => {
-      const index = prev.findIndex((m) => m.id === module.id);
-      if (!module.isActive) return prev.filter((m) => m.id !== module.id);
-      if (index === -1) return [...prev, module];
-      return prev.map((m) => (m.id === module.id ? module : m));
-    });
-  }, []);
+  const upsertLocal = useCallback(
+    (module: AssessmentModule) => {
+      mutate((prev) => {
+        const rows = Array.isArray(prev) ? prev : [];
+        const index = rows.findIndex((m) => m.id === module.id);
+        if (!module.isActive) return rows.filter((m) => m.id !== module.id);
+        if (index === -1) return [...rows, module];
+        return rows.map((m) => (m.id === module.id ? module : m));
+      });
+    },
+    [mutate],
+  );
 
   const createModule = useCallback(
     async (input: ModuleCreateInput) => {
@@ -64,10 +50,21 @@ export function useModuleLibrary(): ModuleLibraryState {
     [upsertLocal],
   );
 
-  const archiveModule = useCallback(async (id: string) => {
-    await libraryApi.archiveModule(id);
-    setModules((prev) => prev.filter((m) => m.id !== id));
-  }, []);
+  const archiveModule = useCallback(
+    async (id: string) => {
+      await libraryApi.archiveModule(id);
+      mutate((prev) => (Array.isArray(prev) ? prev.filter((m) => m.id !== id) : []));
+    },
+    [mutate],
+  );
 
-  return { modules, loading, error, refresh, createModule, archiveModule, upsertLocal };
+  return {
+    modules: Array.isArray(data) ? data : [],
+    loading: isLoading,
+    error: error || null,
+    refresh: reload,
+    createModule,
+    archiveModule,
+    upsertLocal,
+  };
 }

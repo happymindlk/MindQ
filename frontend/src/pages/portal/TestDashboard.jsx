@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { RefreshCw, FileText } from 'lucide-react';
 import StatusTile from '../../components/ui/StatusTile';
@@ -13,31 +13,19 @@ import {
   usePackageWindow,
 } from '../../features/candidate-dashboard/use-package-window';
 import { formatDurationBadge } from '../../features/assessment-builder/types/module';
+import { useCachedQuery } from '../../hooks/use-cached-query';
+
+const CANDIDATE_DASHBOARD_KEY = 'portal:candidate-dashboard';
 
 export default function TestDashboard() {
   const navigate = useNavigate();
-  const [dashboardData, setDashboardData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
-
-  const loadDashboard = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      const data = await api.candidate.getDashboard();
-      setDashboardData(data);
-    } catch (err) {
-      console.error('Failed to load dashboard:', err);
-      setLoadError(err.message || 'Failed to load assessment data');
-      setDashboardData(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
+  const fetcher = useCallback(() => api.candidate.getDashboard(), []);
+  const {
+    data: dashboardData,
+    error: loadError,
+    isLoading,
+    reload: loadDashboard,
+  } = useCachedQuery(CANDIDATE_DASHBOARD_KEY, fetcher);
 
   const windowState = usePackageWindow(
     dashboardData?.window_state,
