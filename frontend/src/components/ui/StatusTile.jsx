@@ -11,8 +11,16 @@ import { ArrowRight, CheckCircle, Clock, FileText, Lock } from 'lucide-react';
  * @param {'not_started' | 'in_progress' | 'completed'} props.status
  * @param {() => void} [props.onClick]
  * @param {string | null} [props.lockedReason] When set, the tile cannot be launched and shows why.
+ * @param {string | null} [props.durationLabel] Optional duration badge (e.g. `⏱ 4 mins`).
  */
-export default function StatusTile({ title, description, status, onClick, lockedReason = null }) {
+export default function StatusTile({
+  title,
+  description,
+  status,
+  onClick,
+  lockedReason = null,
+  durationLabel = null,
+}) {
   const isCompleted = status === 'completed';
   const isInProgress = status === 'in_progress';
   const isLocked = !isCompleted && Boolean(lockedReason);
@@ -74,7 +82,14 @@ export default function StatusTile({ title, description, status, onClick, locked
       </div>
 
       <div className="mt-3">
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          {durationLabel && (
+            <span className="inline-flex items-center rounded-full border border-border bg-surface-raised px-2 py-0.5 text-[11px] font-medium text-muted">
+              {durationLabel}
+            </span>
+          )}
+        </div>
         {description && (
           <p className="mt-1 text-xs text-muted line-clamp-2 leading-relaxed">{description}</p>
         )}

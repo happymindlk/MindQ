@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import NoReturn
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +13,7 @@ from app.schemas.response import ResponseSave, ResponseSubmit
 from app.services.candidate_service import CandidateService
 from app.services.package_service import PackageService
 from app.services.email_service import EmailService
-from app.services.background import score_ai_for_candidate
+from app.services.background import finalize_and_score_ai, persist_assessment_started
 from app.services.runner_payload import build_runner_payload
 from app.auth import get_current_candidate
 from app.exceptions import (
@@ -59,6 +60,7 @@ async def get_dashboard(
 @router.get("/test/{assessment_id}", response_model=CandidateTestResponse)
 async def get_test(
     assessment_id: UUID,
+    background_tasks: BackgroundTasks,
     candidate: Candidate = Depends(get_current_candidate),
     db: AsyncSession = Depends(get_db),
 ):
@@ -66,7 +68,8 @@ async def get_test(
         assessment, progress = await CandidateService.require_writable_assessment(
             db, candidate, assessment_id
         )
-        progress = await CandidateService.ensure_started(db, candidate, assessment, progress)
+        # Load answers without waiting on the IN_PROGRESS commit; start the clock
+        # optimistically and persist status in the background.
         answers = await CandidateService.get_saved_answers(db, candidate.id, assessment_id)
     except (
         AssessmentNotFoundError,
@@ -75,6 +78,18 @@ async def get_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
+
+    started_at = getattr(progress, "started_at", None) if progress else None
+    if started_at is None:
+        started_at = datetime.now(timezone.utc)
+        background_tasks.add_task(
+            persist_assessment_started,
+            candidate.id,
+            assessment.id,
+            candidate.corporate_id,
+            started_at,
+        )
+
     return build_runner_payload(
         assessment_id=assessment.id,
         title=assessment.title,
@@ -86,7 +101,7 @@ async def get_test(
         shuffle=bool(getattr(assessment, "shuffle_questions", False)),
         seed=f"{candidate.id}:{assessment.id}",
         answers=answers,
-        started_at=getattr(progress, "started_at", None),
+        started_at=started_at,
         module_kind=getattr(assessment, "module_kind", None),
         show_top_disclaimer=bool(getattr(assessment, "show_top_disclaimer", False)),
         top_disclaimer_text=getattr(assessment, "top_disclaimer_text", None),
@@ -140,8 +155,8 @@ async def submit_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
-    # Do not block the candidate on Gemini; item eval + JD fit run in the background.
-    background_tasks.add_task(score_ai_for_candidate, candidate.id, assessment_id)
+    # Acknowledge after responses are written; scoring + Gemini run after the response.
+    background_tasks.add_task(finalize_and_score_ai, candidate.id, assessment_id)
     if package_complete:
         package = await PackageService.get_package(db, candidate.package_id)
         corporate = (

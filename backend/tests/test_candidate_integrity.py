@@ -147,12 +147,8 @@ async def test_get_test_response_omits_answer_keys(candidate_client, monkeypatch
         assert aid == assessment_id
         return {"q1": "4"}
 
-    async def ensure_started(session, candidate, assessment, progress):
-        return SimpleNamespace(started_at=None)
-
     monkeypatch.setattr(CandidateService, "require_writable_assessment", require_writable)
     monkeypatch.setattr(CandidateService, "get_saved_answers", saved_answers)
-    monkeypatch.setattr(CandidateService, "ensure_started", ensure_started)
     response = await client.get(f"/api/v1/candidate/test/{assessment_id}")
     assert response.status_code == 200
     body = response.json()
@@ -161,6 +157,7 @@ async def test_get_test_response_omits_answer_keys(candidate_client, monkeypatch
     assert "correct_answer" not in question
     assert "is_correct" not in question
     assert body["answers"] == {"q1": "4"}
+    assert body["started_at"] is not None
 
 
 @pytest.mark.asyncio
@@ -179,12 +176,8 @@ async def test_get_test_carries_module_notices_at_test_level(candidate_client, m
     async def saved_answers(session, candidate_id, aid):
         return {}
 
-    async def ensure_started(session, candidate, assessment, progress):
-        return SimpleNamespace(started_at=None)
-
     monkeypatch.setattr(CandidateService, "require_writable_assessment", require_writable)
     monkeypatch.setattr(CandidateService, "get_saved_answers", saved_answers)
-    monkeypatch.setattr(CandidateService, "ensure_started", ensure_started)
     response = await client.get(f"/api/v1/candidate/test/{assessment_id}")
     assert response.status_code == 200
     body = response.json()
@@ -256,12 +249,8 @@ async def test_get_test_never_leaks_weights_rationale_or_keys(candidate_client, 
     async def saved_answers(session, candidate_id, aid):
         return {}
 
-    async def ensure_started(session, candidate, assessment, progress):
-        return SimpleNamespace(started_at=None)
-
     monkeypatch.setattr(CandidateService, "require_writable_assessment", require_writable)
     monkeypatch.setattr(CandidateService, "get_saved_answers", saved_answers)
-    monkeypatch.setattr(CandidateService, "ensure_started", ensure_started)
     response = await client.get(f"/api/v1/candidate/test/{assessment_id}")
     assert response.status_code == 200
     body = response.json()
@@ -408,7 +397,7 @@ async def test_submit_passes_pending_responses_atomically(candidate_client, monk
         return None
 
     monkeypatch.setattr(
-        "app.api.v1.candidate.score_ai_for_candidate",
+        "app.api.v1.candidate.finalize_and_score_ai",
         _noop_score,
     )
     response = await client.post(

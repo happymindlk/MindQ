@@ -413,6 +413,8 @@ class CandidateService:
                         "description": a.description,
                         "status": status,
                         "launchable": launchable,
+                        "duration_seconds": _assessment_duration(a),
+                        "time_limit_seconds": _assessment_duration(a),
                     }
                 )
 
@@ -708,16 +710,18 @@ class CandidateService:
         pending_responses: list[ResponseSave] | None = None,
         client_duration_seconds: float | None = None,
     ):
-        """Persist optional pending answers, score, and mark COMPLETED atomically.
+        """Persist pending answers and mark COMPLETED without blocking on scoring.
 
         Strict modules past their deadline still finalize, but late pending
-        answers are discarded so only work saved in time counts.
+        answers are discarded so only work saved in time counts. Facet scores,
+        derived profiles, and score_details are filled by
+        ``finalize_submission_scores`` (BackgroundTasks).
 
         Args:
             session: Async database session.
             candidate: Authenticated candidate.
             assessment_id: Assessment being submitted.
-            pending_responses: Optional answer payloads upserted before scoring.
+            pending_responses: Optional answer payloads upserted before complete.
             client_duration_seconds: Client-measured total module time (advisory).
 
         Returns:
@@ -768,18 +772,6 @@ class CandidateService:
 
         await session.flush()
 
-        responses = (
-            await session.execute(
-                select(CandidateResponse).where(
-                    CandidateResponse.candidate_id == candidate.id,
-                    CandidateResponse.assessment_id == assessment.id,
-                )
-            )
-        ).scalars().all()
-
-        # Score against the stored question bank (includes keys the client never sees).
-        result = score_assessment_detailed(assessment.questions, responses)
-
         if not progress:
             progress = CandidateProgress(
                 corporate_id=candidate.corporate_id,
@@ -792,8 +784,70 @@ class CandidateService:
         if progress.started_at is not None:
             server_seconds = max(0.0, (now - progress.started_at).total_seconds())
 
+        # Acknowledge completion immediately; scoring runs in BackgroundTasks.
         progress.status = COMPLETED_STATUS
         progress.completed_at = now
+        progress.client_duration_seconds = _elapsed_decimal(client_duration_seconds)
+        if server_seconds is not None:
+            progress.server_duration_seconds = _elapsed_decimal(server_seconds)
+            duration = _assessment_duration(assessment)
+            progress.overtime = bool(duration and server_seconds > duration)
+
+        try:
+            await session.commit()
+        except IntegrityError as exc:
+            # A concurrent first-time submit inserted the progress row first.
+            await session.rollback()
+            raise AssessmentAlreadySubmittedError() from exc
+        await session.refresh(progress)
+        package_complete = await CandidateService.is_package_complete(session, candidate)
+        return progress, package_complete
+
+    @staticmethod
+    async def finalize_submission_scores(
+        session: AsyncSession,
+        candidate: Candidate,
+        assessment_id: UUID,
+    ) -> CandidateProgress | None:
+        """Score a completed attempt and persist facets / profile / score_details.
+
+        Safe to retry: skips when the attempt is missing or not COMPLETED.
+
+        Args:
+            session: Async database session.
+            candidate: Candidate who submitted.
+            assessment_id: Assessment that was submitted.
+
+        Returns:
+            Updated progress row, or None when nothing to score.
+        """
+        assessment = await CandidateService.get_assessment_for_candidate(
+            session, candidate, assessment_id
+        )
+        if assessment is None:
+            return None
+        progress = await CandidateService._get_progress(session, candidate.id, assessment_id)
+        if progress is None or progress.status != COMPLETED_STATUS:
+            return None
+
+        responses = (
+            await session.execute(
+                select(CandidateResponse).where(
+                    CandidateResponse.candidate_id == candidate.id,
+                    CandidateResponse.assessment_id == assessment.id,
+                )
+            )
+        ).scalars().all()
+
+        result = score_assessment_detailed(assessment.questions, responses)
+        server_seconds: float | None = None
+        if progress.server_duration_seconds is not None:
+            server_seconds = float(progress.server_duration_seconds)
+        elif progress.started_at is not None and progress.completed_at is not None:
+            server_seconds = max(
+                0.0, (progress.completed_at - progress.started_at).total_seconds()
+            )
+
         progress.score = result.score
         progress.facet_scores = result.facet_scores or None
         progress.derived_profile = derive_profile_payload(
@@ -811,21 +865,9 @@ class CandidateService:
                 else "technical"
             ),
         )
-        progress.client_duration_seconds = _elapsed_decimal(client_duration_seconds)
-        if server_seconds is not None:
-            progress.server_duration_seconds = _elapsed_decimal(server_seconds)
-            duration = _assessment_duration(assessment)
-            progress.overtime = bool(duration and server_seconds > duration)
-
-        try:
-            await session.commit()
-        except IntegrityError as exc:
-            # A concurrent first-time submit inserted the progress row first.
-            await session.rollback()
-            raise AssessmentAlreadySubmittedError() from exc
+        await session.commit()
         await session.refresh(progress)
-        package_complete = await CandidateService.is_package_complete(session, candidate)
-        return progress, package_complete
+        return progress
 
     @staticmethod
     async def is_package_complete(session: AsyncSession, candidate: Candidate) -> bool:

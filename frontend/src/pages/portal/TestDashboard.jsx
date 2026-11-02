@@ -12,6 +12,7 @@ import {
   lockedReasonFor,
   usePackageWindow,
 } from '../../features/candidate-dashboard/use-package-window';
+import { formatDurationBadge } from '../../features/assessment-builder/types/module';
 
 export default function TestDashboard() {
   const navigate = useNavigate();
@@ -125,6 +126,9 @@ export default function TestDashboard() {
               title={test.title}
               description={test.description}
               status={test.status}
+              durationLabel={formatDurationBadge(
+                test.duration_seconds ?? test.time_limit_seconds ?? null,
+              )}
               lockedReason={lockedReasonFor(test.status, windowState)}
               onClick={() => navigate(`/portal/test/${test.id}`)}
             />
