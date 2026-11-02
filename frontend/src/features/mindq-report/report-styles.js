@@ -120,7 +120,9 @@ export const REPORT_CSS = `
 .mq-score-summary { margin-top: 4px !important; font-size: 12.5px; color: #4b5563; }
 .mq-subscales { list-style: none; margin: 8px 0 0; padding: 0; }
 .mq-subscale-row {
-  display: grid; grid-template-columns: minmax(0, 220px) 1fr max-content; align-items: center; gap: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 200px) minmax(72px, 1fr) max-content;
+  align-items: center; gap: 16px;
   padding: 4px 0; font-size: 12px; color: #4b5563;
 }
 .mq-subscale-value {
@@ -130,8 +132,14 @@ export const REPORT_CSS = `
   font-variant-numeric: tabular-nums; white-space: nowrap; min-width: fit-content;
   hyphens: none; overflow-wrap: normal; word-break: keep-all;
 }
-.mq-bar-track { height: 8px; border-radius: 999px; background: #e5e7eb; overflow: hidden; }
-.mq-bar-fill { height: 100%; border-radius: 999px; background: #7048E2; }
+.mq-bar-track {
+  height: 8px; width: 100%; min-width: 72px; border-radius: 999px; background: #e5e7eb;
+  overflow: hidden; position: relative;
+}
+.mq-bar-fill {
+  display: block; height: 100%; min-height: 8px; border-radius: 999px; background: #7048E2;
+  max-width: 100%;
+}
 .mq-strengths-risks { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 .mq-sr-col { border-radius: 8px; padding: 16px; border: 1px solid #e5e7eb; }
 .mq-sr-strengths { background: #f0fdf4; border-color: #86efac; }
