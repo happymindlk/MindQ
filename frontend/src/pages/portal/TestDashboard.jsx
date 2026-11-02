@@ -12,6 +12,7 @@ import {
   lockedReasonFor,
   usePackageWindow,
 } from '../../features/candidate-dashboard/use-package-window';
+import { resolveTestDurationSeconds } from '../../features/candidate-dashboard/catalog-duration';
 import { formatDurationBadge } from '../../features/assessment-builder/types/module';
 import { useCachedQuery } from '../../hooks/use-cached-query';
 
@@ -114,9 +115,7 @@ export default function TestDashboard() {
               title={test.title}
               description={test.description}
               status={test.status}
-              durationLabel={formatDurationBadge(
-                test.duration_seconds ?? test.time_limit_seconds ?? null,
-              )}
+              durationLabel={formatDurationBadge(resolveTestDurationSeconds(test))}
               lockedReason={lockedReasonFor(test.status, windowState)}
               onClick={() => navigate(`/portal/test/${test.id}`)}
             />

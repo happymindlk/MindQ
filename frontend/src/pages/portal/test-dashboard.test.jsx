@@ -19,9 +19,30 @@ vi.mock('../../api/client', () => ({
 }));
 
 const tests = [
-  { id: 't1', title: 'Cognitive', description: null, status: 'not_started', launchable: false },
-  { id: 't2', title: 'Personality', description: null, status: 'in_progress', launchable: true },
-  { id: 't3', title: 'SQL', description: null, status: 'completed', launchable: false },
+  {
+    id: 't1',
+    title: 'Cognitive Reflection Test',
+    description: null,
+    status: 'not_started',
+    launchable: false,
+    duration_seconds: null,
+    time_limit_seconds: null,
+  },
+  {
+    id: 't2',
+    title: 'Mini-IPIP (Big Five, 20 items)',
+    description: null,
+    status: 'in_progress',
+    launchable: true,
+    duration_seconds: 240,
+  },
+  {
+    id: 't3',
+    title: 'SQL',
+    description: null,
+    status: 'completed',
+    launchable: false,
+  },
 ];
 
 function renderDashboard() {
@@ -54,7 +75,10 @@ describe('TestDashboard deadline', () => {
     );
     expect(screen.queryByText('Assessment Closed')).not.toBeInTheDocument();
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /cognitive/i }));
+    expect(screen.getByText('3 mins')).toBeInTheDocument();
+    expect(screen.getByText('4 mins')).toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: /cognitive reflection/i }));
     expect(navigate).toHaveBeenCalledWith('/portal/test/t1');
   });
 
@@ -74,11 +98,11 @@ describe('TestDashboard deadline', () => {
     );
 
     const user = userEvent.setup();
-    await user.click(screen.getByText('Cognitive'));
+    await user.click(screen.getByText('Cognitive Reflection Test'));
     expect(navigate).not.toHaveBeenCalled();
     expect(screen.getByText('Assessment closed')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /personality/i }));
+    await user.click(screen.getByRole('button', { name: /mini-ipip/i }));
     expect(navigate).toHaveBeenCalledWith('/portal/test/t2');
   });
 
@@ -95,7 +119,7 @@ describe('TestDashboard deadline', () => {
     const greeting = await screen.findByText(/hello, ada lovelace/i);
     const beforeYouBegin = screen.getByText('Before You Begin');
     const counter = screen.getByText(/you have 2 tests remaining in your assessment suite\./i);
-    const firstTest = screen.getByText('Cognitive');
+    const firstTest = screen.getByText('Cognitive Reflection Test');
 
     expect(greeting.compareDocumentPosition(beforeYouBegin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(beforeYouBegin.compareDocumentPosition(counter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

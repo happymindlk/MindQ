@@ -22,6 +22,7 @@ from app.services.package_window import (
     window_state,
 )
 from app.services.runner_payload import effective_duration_seconds, strict_deadline
+from app.services.psychometric_catalog import catalog_duration_seconds
 from app.services.instrument_results import SCORING_VERSION, build_score_details
 from app.services.profiles import ItemResult, ProfileInputs, resolve_profile
 from app.services.scoring import ScoreResult, _extract_answer, score_assessment_detailed
@@ -91,9 +92,23 @@ def derive_profile_payload(
 
 
 def _assessment_duration(assessment: Assessment) -> int | None:
-    return effective_duration_seconds(
+    """Resolve module duration, falling back to catalog defaults for legacy rows.
+
+    Args:
+        assessment: Package assessment (or SimpleNamespace in tests).
+
+    Returns:
+        Duration in seconds, or None when untimed / unrecognized.
+    """
+    resolved = effective_duration_seconds(
         getattr(assessment, "duration_seconds", None),
         getattr(assessment, "time_limit_minutes", None),
+    )
+    if resolved:
+        return resolved
+    return catalog_duration_seconds(
+        title=getattr(assessment, "title", None),
+        scoring_profile=getattr(assessment, "scoring_profile", None),
     )
 
 
