@@ -99,8 +99,8 @@ def test_reverse_likert_recodes_and_aggregates_facets():
     ]
     responses = [_resp("l1", 5), _resp("l2", 1), _resp("l3", 2), _resp("l4", "9")]
     result = score_assessment_detailed(questions, responses)
-    assert result.facet_scores["Extraversion"] == {"mean": 5.0, "n": 2}
-    assert result.facet_scores["H:Sinc"] == {"mean": 2.0, "n": 1}
+    assert result.facet_scores["Extraversion"] == {"mean": 5.0, "n": 2, "sum": 10.0}
+    assert result.facet_scores["H:Sinc"] == {"mean": 2.0, "n": 1, "sum": 2.0}
     assert result.score is None
     assert result.gradable_count == 0
 
@@ -118,7 +118,7 @@ def test_likert_scores_selected_index_regardless_of_labels(answer, reverse, expe
         if labels is not None:
             question["scale_labels"] = labels
         result = score_assessment_detailed([question], [_resp("l1", answer)])
-        assert result.facet_scores["F"] == {"mean": expected, "n": 1}
+        assert result.facet_scores["F"] == {"mean": expected, "n": 1, "sum": expected}
 
 
 @pytest.mark.parametrize("answer", ["Always", "Very Accurate", 0, 6, 2.5, "3.5", True, None, []])
@@ -137,10 +137,10 @@ def test_seven_point_likert_accepts_6_and_7_and_reverse_recode():
         "scale_labels": ["1", "2", "3", "4", "5", "6", "7"],
     }
     result = score_assessment_detailed([question], [_resp("p1", 7)])
-    assert result.facet_scores["Personal Initiative"] == {"mean": 7.0, "n": 1}
+    assert result.facet_scores["Personal Initiative"] == {"mean": 7.0, "n": 1, "sum": 7.0}
     reversed_item = {**question, "id": "p2", "reverse_scored": True}
     recoded = score_assessment_detailed([reversed_item], [_resp("p2", 7)])
-    assert recoded.facet_scores["Personal Initiative"] == {"mean": 1.0, "n": 1}
+    assert recoded.facet_scores["Personal Initiative"] == {"mean": 1.0, "n": 1, "sum": 1.0}
 
 
 def test_likert_scores_custom_option_values_and_dynamic_reverse():
@@ -158,12 +158,12 @@ def test_likert_scores_custom_option_values_and_dynamic_reverse():
         ],
     }
     result = score_assessment_detailed([question], [_resp("l1", 75)])
-    assert result.facet_scores["F"] == {"mean": 75.0, "n": 1}
+    assert result.facet_scores["F"] == {"mean": 75.0, "n": 1, "sum": 75.0}
     indexed = score_assessment_detailed([question], [_resp("l1", 2)])
-    assert indexed.facet_scores["F"] == {"mean": 25.0, "n": 1}
+    assert indexed.facet_scores["F"] == {"mean": 25.0, "n": 1, "sum": 25.0}
     reversed_item = {**question, "reverse_scored": True}
     recoded = score_assessment_detailed([reversed_item], [_resp("l1", 0)])
-    assert recoded.facet_scores["F"] == {"mean": 100.0, "n": 1}
+    assert recoded.facet_scores["F"] == {"mean": 100.0, "n": 1, "sum": 100.0}
 
 
 def test_mixed_bank_averages_only_gradable_items():

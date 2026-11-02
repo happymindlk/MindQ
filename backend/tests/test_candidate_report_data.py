@@ -160,7 +160,7 @@ def _full_fixture(candidate_id, corp_id):
             position=2,
         ),
         SimpleNamespace(
-            id=pending_id, title="Not Started", module_kind="technical",
+            id=pending_id, title="Wrap-up Tech", module_kind="technical",
             global_module_id=None, questions=[], position=3,
         ),
     ]
@@ -176,7 +176,7 @@ def _full_fixture(candidate_id, corp_id):
             assessment_id=custom_id, score=90, status="COMPLETED", completed_at=DONE, facet_scores=None
         ),
         SimpleNamespace(
-            assessment_id=pending_id, score=None, status="IN_PROGRESS", completed_at=None, facet_scores=None
+            assessment_id=pending_id, score=55, status="COMPLETED", completed_at=DONE, facet_scores=None
         ),
     ]
     responses = [
@@ -231,7 +231,7 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
     assert body["candidate_full_name"] == "Pat Lee"
     assert body["candidate_email"] == "pat@ex.com"
     assert body["target_role"] == "Data Analyst"
-    assert body["total_assessments_completed"] == 3
+    assert body["total_assessments_completed"] == 4
     assert body["category_averages"] is None
     assert body["executive_summary"] == "Strong SQL fundamentals with calm temperament."
     assert body["strengths"] == ["Solid indexing rationale."]
@@ -244,10 +244,11 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
         ("Personality", "Big Five", None),
         ("Technical", "SQL Basics", 80.0),
         ("Technical", "Custom Technical", 90.0),
+        ("Technical", "Wrap-up Tech", 55.0),
     ]
     assert breakdown[0]["score_kind"] == "traits"
-    assert breakdown[0]["subscales"][0]["name"] == "Emotional stability"
-    assert breakdown[0]["subscales"][0]["position_pct"] == 25.0
+    assert breakdown[0]["subscales"][0]["name"] == "Neuroticism"
+    assert breakdown[0]["subscales"][0]["position_pct"] == 75.0
     assert breakdown[1]["performance_summary"] == "Strong SQL."
     assert breakdown[2]["performance_summary"].startswith("Pat scored 90% on Custom Technical")
     assert body["category_summaries"] == [
@@ -267,7 +268,7 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
     assert "I stay calm" not in str(body)
 
     passed = synthesis_stub["calls"][0]["outcomes"]
-    assert [o.key for o in passed] == ["A1", "A2", "A3"]
+    assert [o.key for o in passed] == ["A1", "A2", "A3", "A4"]
 
 
 def test_report_data_falls_back_when_synthesis_fails(app, corp_id, candidate_id, synthesis_stub):
@@ -280,7 +281,7 @@ def test_report_data_falls_back_when_synthesis_fails(app, corp_id, candidate_id,
     assert body["executive_summary"] == ""
     assert body["strengths"] == []
     assert body["risks_and_antipatterns"] == []
-    assert len(body["competency_breakdown"]) == 3
+    assert len(body["competency_breakdown"]) == 4
     assert all(b["performance_summary"] for b in body["competency_breakdown"])
     # Pillar summaries fall back to server-computed prose when synthesis fails.
     assert [s["category"] for s in body["category_summaries"]] == ["Personality"]

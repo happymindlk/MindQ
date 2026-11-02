@@ -16,13 +16,18 @@ class SubscaleScore(BaseModel):
 
     name: str
     mean: float | None = None
+    sum: float | None = None
     position_pct: float | None = None
     band: str | None = None
     band_label: str | None = None
 
 
 class AssessmentBreakdownItem(BaseModel):
-    """One completed assessment in the competency breakdown."""
+    """One package assessment in the competency breakdown.
+
+    Numerical fields stay null until the candidate's entire package is
+    ``COMPLETED`` (``scores_released=False``).
+    """
 
     category: ReportCategory
     assessment_name: str
@@ -31,8 +36,10 @@ class AssessmentBreakdownItem(BaseModel):
     band: str | None = None
     score_kind: str | None = None
     subscales: list[SubscaleScore] = Field(default_factory=list)
-    # Exactly one concise sentence on how the candidate performed on this test.
-    performance_summary: str
+    # Concise sentence on performance; null while scores are withheld.
+    performance_summary: str | None = None
+    status: str | None = None
+    scores_released: bool = True
 
 
 PsychometricCategory = Literal["Cognitive", "Personality", "Behavioral"]

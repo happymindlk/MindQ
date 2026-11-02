@@ -29,24 +29,32 @@ def test_all_threes_big_five_are_moderate_fifty():
     }
     rows = big_five_subscales(facets)
     assert [r["name"] for r in rows] == [
-        "Extraversion",
+        "Surgency or Extraversion",
         "Agreeableness",
         "Conscientiousness",
-        "Emotional stability",
+        "Neuroticism",
         "Intellect or Imagination",
     ]
     assert all(r["position_pct"] == 50.0 and r["band"] == "moderate" for r in rows)
 
 
-def test_neuroticism_four_is_emotional_stability_low():
+def test_letter_i_maps_to_intellect_or_imagination():
+    rows = big_five_subscales({"I": {"mean": 4.0, "n": 4}, "E": {"mean": 2.0, "n": 4}})
+    assert [r["name"] for r in rows] == [
+        "Surgency or Extraversion",
+        "Intellect or Imagination",
+    ]
+
+
+def test_neuroticism_four_stays_neuroticism_high():
     rows = big_five_subscales({"Neuroticism": {"mean": 4.0, "n": 4}})
     assert rows == [
         {
-            "name": "Emotional stability",
-            "mean": 2.0,
-            "position_pct": 25.0,
-            "band": "low",
-            "band_label": "Low",
+            "name": "Neuroticism",
+            "mean": 4.0,
+            "position_pct": 75.0,
+            "band": "high",
+            "band_label": "High",
         }
     ]
 

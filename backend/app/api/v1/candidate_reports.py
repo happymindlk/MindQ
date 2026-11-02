@@ -361,51 +361,71 @@ async def build_technical_report_data(
             )
 
     catalog = await load_catalog_categories(db, assessments)
+    progress_for_report = _progress_with_facet_scores(assessments, progress_rows)
     outcomes = build_module_outcomes(
         assessments,
-        _progress_with_facet_scores(assessments, progress_rows),
+        progress_for_report,
         response_rows,
         catalog,
     )
+    scores_released = bool(outcomes) and all(o.scores_released for o in outcomes)
 
     synthesis: ReportSynthesis | None = None
     synthesis_status = "pending"
-    try:
-        synthesis, status = await JdScoringService.get_or_evaluate(
-            db,
-            candidate=candidate,
-            package=package,
-            assessments=assessments,
-            progresses=progress_rows,
-            responses=response_rows,
-            outcomes=outcomes,
-        )
-        synthesis_status = "ok" if synthesis is not None else status
-    except Exception:
-        logger.exception("report_data_synthesis_failed candidate_id=%s", candidate.id)
-        synthesis_status = "failed"
-    if synthesis_status not in ("ok", "failed", "skipped"):
+    if scores_released:
+        try:
+            synthesis, status = await JdScoringService.get_or_evaluate(
+                db,
+                candidate=candidate,
+                package=package,
+                assessments=assessments,
+                progresses=progress_rows,
+                responses=response_rows,
+                outcomes=outcomes,
+            )
+            synthesis_status = "ok" if synthesis is not None else status
+        except Exception:
+            logger.exception("report_data_synthesis_failed candidate_id=%s", candidate.id)
+            synthesis_status = "failed"
+        if synthesis_status not in ("ok", "failed", "skipped"):
+            synthesis_status = "pending"
+    else:
         synthesis_status = "pending"
 
     summaries = performance_summaries(candidate.full_name, outcomes, synthesis)
     breakdown = build_competency_breakdown(outcomes, summaries)
 
-    completed_times = [o.completed_at for o in outcomes if o.completed_at is not None]
+    completed_times = [
+        o.completed_at
+        for o in outcomes
+        if o.status == "COMPLETED" and o.completed_at is not None
+    ]
+    completed_count = sum(1 for o in outcomes if o.status == "COMPLETED")
     return MindQReportResponse(
         candidate_id=candidate.id,
         company_name=corporate.name if corporate else "",
         company_logo_url=_safe_logo_url(getattr(corporate, "logo_url", None) if corporate else None),
-        completed_at=max(completed_times) if completed_times else None,
+        completed_at=max(completed_times) if completed_times and scores_released else None,
         synthesis_status=synthesis_status,  # type: ignore[arg-type]
         candidate_full_name=candidate.full_name,
         candidate_email=candidate.email,
         target_role=(package.target_role or package.title or "") if package else "",
-        total_assessments_completed=len(outcomes),
+        total_assessments_completed=completed_count,
         category_averages=compute_category_averages(outcomes),
-        executive_summary=synthesis.executive_summary if synthesis else "",
-        strengths=synthesis.strengths if synthesis else [],
-        risks_and_antipatterns=synthesis.risks_and_antipatterns if synthesis else [],
+        executive_summary=(synthesis.executive_summary if synthesis and scores_released else ""),
+        strengths=(synthesis.strengths if synthesis and scores_released else []),
+        risks_and_antipatterns=(
+            synthesis.risks_and_antipatterns if synthesis and scores_released else []
+        ),
         competency_breakdown=breakdown,
-        category_summaries=build_category_summaries(candidate.full_name, outcomes, synthesis),
-        custom_questions=_custom_questions(assessments, responses_by_assessment, summaries),
+        category_summaries=(
+            build_category_summaries(candidate.full_name, outcomes, synthesis)
+            if scores_released
+            else []
+        ),
+        custom_questions=(
+            _custom_questions(assessments, responses_by_assessment, summaries)
+            if scores_released
+            else []
+        ),
     )
