@@ -37,14 +37,24 @@ class LogoValidationError(ValueError):
 
 
 def validate_logo_upload(
-    content_type: str | None, raw: bytes, original_filename: str | None
+    content_type: str | None,
+    raw: bytes,
+    original_filename: str | None,
+    *,
+    corporate_id: UUID | None = None,
 ) -> tuple[str, str]:
     """Validate a logo upload and derive a safe, timestamped object filename.
+
+    When ``corporate_id`` is provided the object name is
+    ``{corporate_id}_{unix_ts}.{ext}`` so each upload is uniquely versioned
+    and browser/CDN caches cannot serve a previous logo for the same key.
 
     Args:
         content_type: MIME type reported by the client (parameters ignored).
         raw: Uploaded file bytes.
-        original_filename: Client-supplied filename, used only for the stem.
+        original_filename: Client-supplied filename; used only as a stem
+            fallback when ``corporate_id`` is omitted.
+        corporate_id: Tenant id preferred for the versioned object name.
 
     Returns:
         Tuple of ``(filename, normalized_content_type)``.
@@ -62,10 +72,14 @@ def validate_logo_upload(
     if _sniff_image_type(raw) != LOGO_ALLOWED_TYPES[normalized]:
         raise LogoValidationError("File content does not match the declared image type")
 
+    ext = LOGO_ALLOWED_TYPES[normalized]
+    stamp = int(time())
+    if corporate_id is not None:
+        return f"{corporate_id}_{stamp}.{ext}", normalized
+
     original = (original_filename or "logo").rsplit(".", 1)[0]
     stem = _SAFE_STEM.sub("-", original).strip("-._") or "logo"
-    ext = LOGO_ALLOWED_TYPES[normalized]
-    return f"{stem}-{int(time())}.{ext}", normalized
+    return f"{stem}-{stamp}.{ext}", normalized
 
 
 def _sniff_image_type(raw: bytes) -> str | None:

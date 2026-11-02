@@ -71,3 +71,36 @@ class AdminTokenResponse(BaseModel):
     token_type: Literal["bearer"] = "bearer"
     expires_in: int = Field(gt=0)
     user: AdminProfile
+
+
+class AdminForgotPasswordRequest(BaseModel):
+    """Self-serve password reset request for an ops admin email."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+
+
+class AdminForgotPasswordResponse(BaseModel):
+    """Enumeration-safe confirmation after a reset request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: str
+
+
+class AdminChangePasswordRequest(BaseModel):
+    """Authenticated password change that requires the current password."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    current_password: SecretStr = Field(min_length=1, max_length=256)
+    new_password: SecretStr = Field(min_length=8, max_length=256)
+
+
+class AdminChangePasswordResponse(BaseModel):
+    """Empty success body for password change."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: str = "Password updated."

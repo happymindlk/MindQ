@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { cacheBustUrl } from '../../../lib/cache-bust-url';
 import { companyInitials } from './corporate-initials';
 
 const SIZES = {
@@ -17,17 +18,18 @@ const SIZES = {
  */
 export default function CorporateLogo({ name, logoUrl, size = 'md' }) {
   const [failed, setFailed] = useState(false);
+  const displayUrl = useMemo(() => (logoUrl ? cacheBustUrl(logoUrl) : ''), [logoUrl]);
 
   useEffect(() => {
     setFailed(false);
-  }, [logoUrl]);
+  }, [displayUrl]);
 
   const box = SIZES[size] ?? SIZES.md;
 
-  if (logoUrl && !failed) {
+  if (displayUrl && !failed) {
     return (
       <img
-        src={logoUrl}
+        src={displayUrl}
         alt=""
         onError={() => setFailed(true)}
         className={`${box} shrink-0 rounded-md border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 object-contain p-1`}

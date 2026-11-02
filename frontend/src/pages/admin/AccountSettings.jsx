@@ -7,7 +7,7 @@ import { useToast } from '../../components/ui/useToast';
 import { friendlyErrorMessage } from '../../lib/friendly-error';
 import { MIN_PASSWORD_LENGTH, useChangePassword } from './use-change-password';
 
-function PasswordField({ label, value, onChange, error, disabled, hint }) {
+function PasswordField({ label, value, onChange, error, disabled, hint, autoComplete }) {
   const id = useId();
   const [visible, setVisible] = useState(false);
 
@@ -20,7 +20,7 @@ function PasswordField({ label, value, onChange, error, disabled, hint }) {
         <Input
           id={id}
           type={visible ? 'text' : 'password'}
-          autoComplete="new-password"
+          autoComplete={autoComplete || 'new-password'}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           disabled={disabled}
@@ -48,8 +48,10 @@ function PasswordField({ label, value, onChange, error, disabled, hint }) {
 export default function AccountSettings() {
   const { toast } = useToast();
   const {
+    currentPassword,
     newPassword,
     confirmPassword,
+    setCurrentPassword,
     setNewPassword,
     setConfirmPassword,
     fieldErrors,
@@ -77,7 +79,8 @@ export default function AccountSettings() {
     }
   };
 
-  const canSubmit = Boolean(newPassword && confirmPassword) && !isSubmitting;
+  const canSubmit =
+    Boolean(currentPassword && newPassword && confirmPassword) && !isSubmitting;
 
   return (
     <div className="space-y-6">
@@ -99,12 +102,20 @@ export default function AccountSettings() {
               Change Password
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              You stay signed in on this device after updating.
+              Confirm your current password, then choose a new one. Other devices are signed out.
             </p>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} noValidate className="px-4 py-4 space-y-4">
+          <PasswordField
+            label="Current Password"
+            value={currentPassword}
+            onChange={setCurrentPassword}
+            error={fieldErrors.currentPassword}
+            disabled={isSubmitting}
+            autoComplete="current-password"
+          />
           <PasswordField
             label="New Password"
             value={newPassword}
@@ -112,6 +123,7 @@ export default function AccountSettings() {
             error={fieldErrors.newPassword}
             disabled={isSubmitting}
             hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}
+            autoComplete="new-password"
           />
           <PasswordField
             label="Confirm New Password"
@@ -119,6 +131,7 @@ export default function AccountSettings() {
             onChange={setConfirmPassword}
             error={fieldErrors.confirmPassword}
             disabled={isSubmitting}
+            autoComplete="new-password"
           />
           <div className="flex justify-end pt-2">
             <Button type="submit" variant="primary" isLoading={isSubmitting} disabled={!canSubmit}>

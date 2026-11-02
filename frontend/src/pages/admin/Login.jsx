@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight, ArrowLeft } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
@@ -75,6 +75,15 @@ export default function AdminLogin() {
                 onChange={(event) => login.setPassword(event.target.value)}
                 required
               />
+
+              <div className="flex justify-end -mt-2">
+                <Link
+                  to="/admin/forgot-password"
+                  className="text-sm text-primary-text hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-sm"
+                >
+                  Forgot password?
+                </Link>
+              </div>
 
               {login.error && (
                 <div role="alert" className="text-sm text-danger bg-danger/10 border border-danger/20 rounded-lg px-3 py-2">

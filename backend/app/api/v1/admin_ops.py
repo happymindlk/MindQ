@@ -148,7 +148,9 @@ async def upload_company_logo(
 
     raw = await file.read()
     try:
-        filename, content_type = validate_logo_upload(file.content_type, raw, file.filename)
+        filename, content_type = validate_logo_upload(
+            file.content_type, raw, file.filename, corporate_id=company_id
+        )
     except LogoValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

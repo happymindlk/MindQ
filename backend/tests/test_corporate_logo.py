@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from uuid import uuid4
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.corporates import router
 from app.auth import HRUserContext, get_current_hr_user
+from app.database import get_db
 
 
 @pytest.fixture
@@ -25,17 +26,26 @@ def app(corp_id):
     async def _hr():
         return HRUserContext(user_id=uuid4(), corporate_id=corp_id, email="hr@test.com")
 
+    async def _db():
+        yield None
+
     application.dependency_overrides[get_current_hr_user] = _hr
+    application.dependency_overrides[get_db] = _db
     return application
 
 
 def test_logo_upload_returns_public_url(app, corp_id):
     client = TestClient(app)
-    public = f"https://cdn.example.com/logos/{corp_id}/logo-1.png"
+    public = f"https://cdn.example.com/logos/{corp_id}/{corp_id}_1.png"
+    persisted = type("Corp", (), {"logo_url": public})()
 
     with (
         patch("app.api.v1.corporates.settings") as settings,
         patch("app.api.v1.corporates.upload_logo", return_value=public) as upload,
+        patch(
+            "app.api.v1.corporates.ClientPackageService.set_company_logo",
+            new=AsyncMock(return_value=persisted),
+        ) as persist,
     ):
         settings.r2_configured = True
         settings.r2_public_base = "https://cdn.example.com"
@@ -47,8 +57,10 @@ def test_logo_upload_returns_public_url(app, corp_id):
     assert res.status_code == 200
     assert res.json()["logo_url"] == public
     upload.assert_called_once()
+    persist.assert_awaited_once()
     args = upload.call_args.args
     assert args[0] == corp_id
+    assert args[1].startswith(f"{corp_id}_")
     assert args[1].endswith(".png")
     assert args[2].startswith(b"\x89PNG")
     assert args[3] == "image/png"

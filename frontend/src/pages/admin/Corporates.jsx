@@ -4,6 +4,9 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import PageHeader from '../../components/ui/PageHeader';
 import { adminApi } from '../../lib/adminApi';
+import { cacheBustUrl } from '../../lib/cache-bust-url';
+import { invalidateQuery } from '../../lib/query-cache';
+import { CORPORATES_QUERY_KEY } from './corporates/use-corporates';
 
 const DEFAULT_BRAND = '#7C3AED';
 const PREVIEW_CANVAS = '#0A0A0A';
@@ -292,8 +295,12 @@ export default function Corporates() {
     setIsUploading(true);
     setError(null);
     try {
+      // Backend writes corporates.logo_url immediately; local state + cache bust
+      // so the preview refreshes even if a CDN still has the previous object.
       const publicUrl = await adminApi.uploadCorporateLogo(corporate.id, file);
       setLogoUrl(publicUrl);
+      setCorporate((prev) => (prev ? { ...prev, logo_url: publicUrl } : prev));
+      invalidateQuery(CORPORATES_QUERY_KEY);
     } catch (err) {
       setError(err.message || 'Logo upload failed');
     } finally {
@@ -301,6 +308,11 @@ export default function Corporates() {
       e.target.value = '';
     }
   };
+
+  const previewLogoUrl = useMemo(
+    () => (logoUrl ? cacheBustUrl(logoUrl) : ''),
+    [logoUrl],
+  );
 
   const handleSave = async () => {
     if (!corporate?.id) return;
@@ -326,12 +338,12 @@ export default function Corporates() {
   const previewProps = useMemo(
     () => ({
       companyName: corporate?.name,
-      logoUrl,
+      logoUrl: previewLogoUrl,
       brandColor,
       contactEmail,
       contactPhone,
     }),
-    [corporate?.name, logoUrl, brandColor, contactEmail, contactPhone],
+    [corporate?.name, previewLogoUrl, brandColor, contactEmail, contactPhone],
   );
 
   return (
@@ -396,9 +408,9 @@ export default function Corporates() {
                 Corporate logo
               </label>
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                {logoUrl ? (
+                {previewLogoUrl ? (
                   <img
-                    src={logoUrl}
+                    src={previewLogoUrl}
                     alt="Corporate logo"
                     className="h-12 w-auto max-w-[160px] object-contain rounded-md bg-canvas p-1 border border-border"
                   />
@@ -410,7 +422,7 @@ export default function Corporates() {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  accept="image/png,image/jpeg,image/webp"
                   className="sr-only"
                   onChange={handleLogoUpload}
                   disabled={!corporate?.id || isUploading}

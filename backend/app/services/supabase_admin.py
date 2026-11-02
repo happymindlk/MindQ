@@ -196,6 +196,77 @@ def ensure_auth_user(email: str) -> UUID:
     return user_id
 
 
+def generate_password_recovery_link(email: str, redirect_to: str) -> str:
+    """Create a one-time password-recovery action link via Auth Admin.
+
+    The link is intended for delivery through our own SES template so we do
+    not depend on Supabase SMTP. The browser lands on ``redirect_to`` with a
+    recovery session in the URL hash after GoTrue verifies the token.
+
+    Args:
+        email: Auth user email to recover.
+        redirect_to: Absolute frontend URL (must be on the Auth redirect allow-list).
+
+    Returns:
+        Absolute ``action_link`` the user can open to set a new password.
+
+    Raises:
+        SupabaseAdminError: Missing config, Auth API failure, or missing link.
+    """
+    normalized = _normalize_email(email)
+    destination = (redirect_to or "").strip()
+    if not destination.startswith("http"):
+        raise SupabaseAdminError("redirect_to must be an absolute http(s) URL")
+
+    client = _admin_client()
+    payload: dict[str, Any] = {
+        "type": "recovery",
+        "email": normalized,
+        "options": {"redirect_to": destination},
+    }
+    try:
+        try:
+            response = client.auth.admin.generate_link(payload)
+        except TypeError:
+            response = client.auth.admin.generate_link(
+                {"type": "recovery", "email": normalized, "redirect_to": destination}
+            )
+    except Exception as exc:
+        message = str(exc).strip() or "Password recovery link generation failed"
+        raise SupabaseAdminError(message[:500]) from exc
+
+    data = _as_dict(response)
+    properties = _as_dict(data.get("properties") or getattr(response, "properties", None))
+    action_link = (
+        properties.get("action_link")
+        or data.get("action_link")
+        or getattr(response, "action_link", None)
+    )
+    if not action_link or not isinstance(action_link, str):
+        raise SupabaseAdminError("Auth Admin returned no recovery action_link")
+    return action_link.strip()
+
+
+def update_user_password(user_id: UUID, password: str) -> None:
+    """Set a new password for an Auth user via the service-role Admin API.
+
+    Args:
+        user_id: ``auth.users.id``.
+        password: Plain new password (validated by the caller).
+
+    Raises:
+        SupabaseAdminError: Missing config or Auth Admin rejection.
+    """
+    if not password or len(password) < 8:
+        raise SupabaseAdminError("Password must be at least 8 characters")
+    client = _admin_client()
+    try:
+        client.auth.admin.update_user_by_id(str(user_id), {"password": password})
+    except Exception as exc:
+        message = str(exc).strip() or "Password update failed"
+        raise SupabaseAdminError(message[:500]) from exc
+
+
 def invite_hr_user_by_email(email: str, redirect_to: str | None = None) -> UUID:
     """Send a Supabase Auth invite and return the Auth user id.
 

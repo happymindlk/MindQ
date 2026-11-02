@@ -124,14 +124,18 @@ async def verify_supabase_password(email: str, password: str) -> SupabasePasswor
     )
 
 
-async def revoke_supabase_session(access_token: str) -> None:
-    """Best-effort logout of a session that must not survive a failed second factor.
+async def revoke_supabase_session(access_token: str, *, scope: str = "local") -> None:
+    """Best-effort logout of a session (local tab or every device).
 
     Args:
-        access_token: Access token from the password grant. Not logged.
+        access_token: Access token to revoke. Not logged.
+        scope: GoTrue logout scope — ``local`` (this session) or ``global``
+            (all refresh tokens for the user). Use ``global`` after a
+            password change so stolen sessions cannot linger.
     """
     if not access_token:
         return
+    normalized_scope = scope if scope in {"local", "global", "others"} else "local"
     try:
         key = _api_key()
     except SupabaseAuthUnavailable:
@@ -140,7 +144,7 @@ async def revoke_supabase_session(access_token: str) -> None:
             extra={"event": "admin_session_revoke_unconfigured"},
         )
         return
-    url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/logout?scope=local"
+    url = f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/logout?scope={normalized_scope}"
     headers = {"apikey": key, "Authorization": f"Bearer {access_token}"}
     try:
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:

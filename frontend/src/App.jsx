@@ -10,6 +10,8 @@ import ClientLayout from './components/ClientLayout';
 import PortalLayout from './components/PortalLayout';
 
 import AdminLogin from './pages/admin/Login';
+import ForgotPassword from './pages/admin/ForgotPassword';
+import ResetPassword from './pages/admin/ResetPassword';
 import Dashboard from './pages/admin/Dashboard';
 import Corporates from './pages/admin/Corporates';
 import CorporateDetail from './pages/admin/corporates/corporate-detail';
@@ -43,7 +45,7 @@ function AssessmentRedirect() {
 
 /**
  * `/` is the product entry, not a client bounce.
- * Unauthenticated → /admin/login. Ops/admin → /admin/history. HR → /client/*.
+ * Unauthenticated → /admin/login. Ops/admin → /admin/dashboard. HR → /client/*.
  */
 function RootRedirect() {
   const { session, corporateId, loading, isOps } = useAuth();
@@ -65,7 +67,7 @@ function RootRedirect() {
   }
 
   if (isOps) {
-    return <Navigate to="/admin/history" replace />;
+    return <Navigate to="/admin/dashboard" replace />;
   }
 
   return <Navigate to="/client/dashboard" replace />;
@@ -80,6 +82,8 @@ function App() {
           <Route path="/" element={<RootRedirect />} />
 
           <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin/forgot-password" element={<ForgotPassword />} />
+          <Route path="/admin/reset-password" element={<ResetPassword />} />
           <Route path="/client/login" element={<ClientLogin />} />
           <Route path="/pending-approval" element={<PendingApproval />} />
           <Route path="/public/track/:secret" element={<PublicTrack />} />

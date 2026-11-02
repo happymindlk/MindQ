@@ -52,7 +52,7 @@ export default function PendingApproval() {
   }
 
   if (corporateId) {
-    return <Navigate to={isOps ? '/admin/history' : '/client/dashboard'} replace />;
+    return <Navigate to={isOps ? '/admin/dashboard' : '/client/dashboard'} replace />;
   }
 
   const handleRequest = async () => {
@@ -85,7 +85,7 @@ export default function PendingApproval() {
       if (payload.auto_approved || payload.already_provisioned) {
         const membership = await refreshMembership();
         if (membership?.corporateId) {
-          navigate(isOpsRole(membership.role) ? '/admin/history' : '/client/dashboard', { replace: true });
+          navigate(isOpsRole(membership.role) ? '/admin/dashboard' : '/client/dashboard', { replace: true });
           return;
         }
         throw new Error(
@@ -117,7 +117,7 @@ export default function PendingApproval() {
     try {
       const membership = await refreshMembership();
       if (membership?.corporateId) {
-        navigate(isOpsRole(membership.role) ? '/admin/history' : '/client/dashboard', { replace: true });
+        navigate(isOpsRole(membership.role) ? '/admin/dashboard' : '/client/dashboard', { replace: true });
         return;
       }
       setStatusNote('Still pending — your admin has not provisioned a corporate workspace yet.');
