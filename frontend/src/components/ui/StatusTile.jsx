@@ -64,7 +64,7 @@ export default function StatusTile({
           : undefined
       }
       className={`
-        relative flex min-h-[9.5rem] flex-col rounded-lg border border-slate-200 bg-surface p-3 dark:border-neutral-800
+        flex min-h-[9.5rem] flex-col rounded-lg border border-slate-200 bg-surface p-3 dark:border-neutral-800
         ${isInProgress && !isLocked ? 'border-blue-500/40' : ''}
         ${isLocked ? 'opacity-70' : ''}
         ${
@@ -74,16 +74,16 @@ export default function StatusTile({
         }
       `}
     >
-      {durationLabel && (
-        <span className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
-          <Clock className="h-3.5 w-3.5 text-slate-400" aria-hidden />
-          {durationLabel.replace(/^⏱\s*/, '')}
-        </span>
-      )}
-      <div className={`mb-3 flex items-center ${durationLabel ? 'pr-24' : ''}`}>
+      <div className="mb-3 flex items-center justify-between gap-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
           {icon}
         </div>
+        {durationLabel ? (
+          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
+            <Clock className="h-3.5 w-3.5 text-slate-500" aria-hidden />
+            {durationLabel.replace(/^⏱\s*/, '')}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex-1">

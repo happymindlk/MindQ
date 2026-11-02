@@ -34,6 +34,51 @@ TIMER_CONFIG: dict[str, tuple[int, str, bool]] = {
     "hexaco_hh": (330, "flexible", True),
 }
 
+# Title/slug fragments → TIMER_CONFIG slug for older package rows missing duration.
+_TITLE_DURATION_HINTS: tuple[tuple[str, str], ...] = (
+    ("ipip-ipc", "ipip_ipc"),
+    ("ipip ipc", "ipip_ipc"),
+    ("interpersonal circumplex", "ipip_ipc"),
+    ("personal initiative", "personal_initiative"),
+    ("situational judgment", "sjt"),
+    ("cognicheck", "cognicheck"),
+    ("cognitive reflection", "crt"),
+    ("mini-ipip", "mini_ipip"),
+    ("mini ipip", "mini_ipip"),
+    ("hexaco", "hexaco_hh"),
+)
+
+
+def catalog_duration_seconds(
+    *,
+    title: str | None = None,
+    slug: str | None = None,
+    scoring_profile: str | None = None,
+) -> int | None:
+    """Resolve default catalog duration when a stored assessment has no timer.
+
+    Args:
+        title: Assessment display title.
+        slug: Global-module / catalog slug when known.
+        scoring_profile: Stored scoring profile key (e.g. ``ipip_ipc_v1``).
+
+    Returns:
+        Duration in seconds from ``TIMER_CONFIG``, or None when unrecognized.
+    """
+    if slug and slug in TIMER_CONFIG:
+        return TIMER_CONFIG[slug][0]
+    if scoring_profile:
+        for key in TIMER_CONFIG:
+            if scoring_profile.startswith(key):
+                return TIMER_CONFIG[key][0]
+    haystack = (title or "").strip().lower()
+    if not haystack:
+        return None
+    for needle, key in _TITLE_DURATION_HINTS:
+        if needle in haystack:
+            return TIMER_CONFIG[key][0]
+    return None
+
 SCORING_PROFILES: dict[str, str | None] = {
     "ipip_ipc": "ipip_ipc_v1",
 }

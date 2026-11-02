@@ -10,6 +10,7 @@ from app.services.psychometric_catalog import (
     TARGET_SLUGS,
     TIMER_CONFIG,
     assert_catalog_shape,
+    catalog_duration_seconds,
     questions_for,
     score_catalog_vector,
 )
@@ -56,6 +57,14 @@ def test_crt_is_the_only_strict_timer():
             assert mode == "flexible", slug
     assert TIMER_CONFIG["mini_ipip"][2] is True
     assert TIMER_CONFIG["hexaco_hh"][2] is True
+
+
+def test_catalog_duration_seconds_falls_back_by_title_and_profile():
+    assert catalog_duration_seconds(slug="cognicheck") == 1200
+    assert catalog_duration_seconds(scoring_profile="ipip_ipc_v1") == 270
+    assert catalog_duration_seconds(title="IPIP-HEXACO Honesty-Humility") == 330
+    assert catalog_duration_seconds(title="Personal Initiative Scale") == 120
+    assert catalog_duration_seconds(title="Custom SQL Screen") is None
 
 
 def test_catalog_has_seven_modules_and_item_counts_match():

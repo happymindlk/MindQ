@@ -350,9 +350,30 @@ async def test_dashboard_reports_closed_window_and_launchable_flags():
     now = datetime.now(timezone.utc)
     close_time = now - HOUR
     package = SimpleNamespace(title="Suite", open_time=None, close_time=close_time)
-    fresh = SimpleNamespace(id=uuid4(), title="A", description=None)
-    started = SimpleNamespace(id=uuid4(), title="B", description=None)
-    done = SimpleNamespace(id=uuid4(), title="C", description=None)
+    fresh = SimpleNamespace(
+        id=uuid4(),
+        title="CogniCheck (based on ICAR-16)",
+        description=None,
+        duration_seconds=None,
+        time_limit_minutes=None,
+        scoring_profile=None,
+    )
+    started = SimpleNamespace(
+        id=uuid4(),
+        title="Mini-IPIP",
+        description=None,
+        duration_seconds=240,
+        time_limit_minutes=4,
+        scoring_profile=None,
+    )
+    done = SimpleNamespace(
+        id=uuid4(),
+        title="C",
+        description=None,
+        duration_seconds=None,
+        time_limit_minutes=None,
+        scoring_profile=None,
+    )
     progresses = [
         SimpleNamespace(assessment_id=started.id, status="IN_PROGRESS", started_at=now - 2 * HOUR),
         SimpleNamespace(assessment_id=done.id, status="COMPLETED", started_at=now - 3 * HOUR),
@@ -369,10 +390,14 @@ async def test_dashboard_reports_closed_window_and_launchable_flags():
     assert data["close_time"] == close_time.isoformat()
     flags = {t["title"]: (t["status"], t["launchable"]) for t in data["tests"]}
     assert flags == {
-        "A": ("not_started", False),
-        "B": ("in_progress", True),
+        "CogniCheck (based on ICAR-16)": ("not_started", False),
+        "Mini-IPIP": ("in_progress", True),
         "C": ("completed", False),
     }
+    by_title = {t["title"]: t for t in data["tests"]}
+    assert by_title["CogniCheck (based on ICAR-16)"]["time_limit_seconds"] == 1200
+    assert by_title["Mini-IPIP"]["duration_seconds"] == 240
+    assert by_title["C"]["time_limit_seconds"] is None
 
 
 # --- ops schedule + update preservation ------------------------------------------
