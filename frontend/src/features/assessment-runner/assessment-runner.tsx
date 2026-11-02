@@ -317,7 +317,11 @@ export function AssessmentRunner({
               }`}
             >
               {strict ? <AlarmClock className="h-3.5 w-3.5" aria-hidden /> : <Timer className="h-3.5 w-3.5" aria-hidden />}
-              {timer.overtime ? `+${formatClock(-remaining)}` : formatClock(Math.max(0, remaining))}
+              {strict
+                ? formatClock(Math.max(0, remaining))
+                : timer.overtime
+                  ? `+${formatClock(-remaining)}`
+                  : formatClock(Math.max(0, remaining))}
               {strict && <span className="sr-only"> strict timer</span>}
             </span>
           )}

@@ -57,7 +57,19 @@ function ModuleCardImpl({ module, active = false, onOpen, onArchive, trailing, c
             <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500 dark:text-slate-400">{module.description}</p>
           )}
         </div>
-        {trailing}
+        <div className="flex shrink-0 items-start gap-2">
+          {formatDurationBadge(module.durationSeconds) ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              {formatDurationBadge(module.durationSeconds)}
+            </span>
+          ) : !compact ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              <TimerOff className="h-3 w-3" aria-hidden />
+              Untimed
+            </span>
+          ) : null}
+          {trailing}
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -83,25 +95,17 @@ function ModuleCardImpl({ module, active = false, onOpen, onArchive, trailing, c
       </div>
 
       {!compact && (
-        <div className="mt-3 flex items-end justify-between gap-2 border-t border-slate-200 pt-3 dark:border-slate-800/80">
+        <div
+          className={`mt-3 flex items-end border-t border-slate-200 pt-3 dark:border-slate-800/80 ${
+            onArchive ? 'pr-16' : ''
+          }`}
+        >
           <Pill
             tone={locked ? 'cyan' : 'amber'}
             icon={locked ? <Lock className="h-3 w-3" aria-hidden /> : undefined}
           >
             {statusLabel({ status, version: module.version, isLocked: locked })}
           </Pill>
-          <div className="flex flex-col items-end gap-1.5">
-            {formatDurationBadge(module.durationSeconds) ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                {formatDurationBadge(module.durationSeconds)}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                <TimerOff className="h-3 w-3" aria-hidden />
-                Untimed
-              </span>
-            )}
-          </div>
         </div>
       )}
     </>
