@@ -31,6 +31,7 @@ from app.schemas.mindq_report import (
 from app.services.candidate_service import COMPLETED_STATUS
 from app.services.instrument_results import (
     SCORING_VERSION,
+    big_five_subscales,
     build_score_details,
     module_bar_percentage,
     position_band,
@@ -235,6 +236,38 @@ def _as_float(value: Any) -> float | None:
     return None
 
 
+def _score_details_need_refresh(
+    details: Any,
+    facet_scores: Any,
+) -> bool:
+    """Return True when stored ``score_details`` must be recomputed for the report.
+
+    Args:
+        details: Persisted ``candidate_progress.score_details``.
+        facet_scores: Persisted ``candidate_progress.facet_scores``.
+
+    Returns:
+        True when the version is stale, subscales use legacy Emotional-stability
+        labels, or Big Five facets are present but Extraversion is missing.
+    """
+    if not isinstance(details, dict) or details.get("scoring_version") != SCORING_VERSION:
+        return True
+    names = {
+        str(row.get("name") or "")
+        for row in (details.get("subscales") or [])
+        if isinstance(row, dict)
+    }
+    if "Emotional stability" in names:
+        return True
+    if isinstance(facet_scores, Mapping) and facet_scores:
+        expected = big_five_subscales(facet_scores)
+        if expected and len(names) < len(expected):
+            return True
+        if expected and any(row["name"] not in names for row in expected):
+            return True
+    return False
+
+
 def _live_score_details(
     assessment: Assessment,
     progress: CandidateProgress,
@@ -390,7 +423,7 @@ def build_module_outcomes(
             continue
 
         details = getattr(prog, "score_details", None)
-        if not isinstance(details, dict) or details.get("scoring_version") != SCORING_VERSION:
+        if _score_details_need_refresh(details, getattr(prog, "facet_scores", None)):
             details = _live_score_details(assessment, prog, responses_by_assessment.get(assessment.id, {}))
         score = module_bar_percentage(details, _as_float(prog.score))
         if score is None and category == "technical":

@@ -16,7 +16,9 @@ from app.services.scoring import (
     likert_scale_min_from_questions,
 )
 
-SCORING_VERSION = "mindq-scoring-2.0.0"
+# Bump when persisted score_details shape changes. 2.0.0 rows may omit
+# Surgency/Extraversion or label Neuroticism as "Emotional stability".
+SCORING_VERSION = "mindq-scoring-2.1.0"
 
 ScoreKind = Literal["percentage", "count", "traits", "circumplex", "domain"]
 

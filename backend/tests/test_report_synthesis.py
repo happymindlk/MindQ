@@ -15,8 +15,10 @@ from app.schemas.jd_evaluation import (
     first_sentence,
 )
 from app.schemas.mindq_report import AssessmentBreakdownItem, MindQReport
+from app.services.instrument_results import SCORING_VERSION
 from app.services.report_synthesis import (
     ModuleOutcome,
+    _score_details_need_refresh,
     build_category_summaries,
     build_competency_breakdown,
     build_module_outcomes,
@@ -117,6 +119,42 @@ def test_module_percentage_uses_option_value_max() -> None:
     ]
     assert module_percentage(None, {"F": {"mean": 100.0, "n": 1}}, questions) == 100.0
     assert module_percentage(None, {"F": {"mean": 50.0, "n": 1}}, questions) == 50.0
+
+
+# --- score_details refresh ----------------------------------------------------
+
+
+def test_score_details_refresh_when_extraversion_missing() -> None:
+    facets = {
+        "Surgency or Extraversion": {"mean": 3.0, "n": 4},
+        "Agreeableness": {"mean": 3.0, "n": 4},
+        "Conscientiousness": {"mean": 3.0, "n": 4},
+        "Neuroticism": {"mean": 3.0, "n": 4},
+        "Intellect or Imagination": {"mean": 2.5, "n": 4},
+    }
+    stale = {
+        "scoring_version": SCORING_VERSION,
+        "instrument": "big_five",
+        "subscales": [
+            {"name": "Agreeableness", "mean": 3.0},
+            {"name": "Conscientiousness", "mean": 3.0},
+            {"name": "Emotional stability", "mean": 3.0},
+            {"name": "Intellect or Imagination", "mean": 2.5},
+        ],
+    }
+    assert _score_details_need_refresh(stale, facets) is True
+    fresh = {
+        "scoring_version": SCORING_VERSION,
+        "instrument": "big_five",
+        "subscales": [
+            {"name": "Surgency or Extraversion", "mean": 3.0},
+            {"name": "Agreeableness", "mean": 3.0},
+            {"name": "Conscientiousness", "mean": 3.0},
+            {"name": "Neuroticism", "mean": 3.0},
+            {"name": "Intellect or Imagination", "mean": 2.5},
+        ],
+    }
+    assert _score_details_need_refresh(fresh, facets) is False
 
 
 # --- build_module_outcomes ----------------------------------------------------

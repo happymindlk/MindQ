@@ -123,6 +123,38 @@ describe('MindQReport', () => {
     expect(items[0].querySelector('.mq-score-value')).toHaveClass('mq-score-value');
   });
 
+  it('renders every Mini-IPIP subscale from score_details including Extraversion', () => {
+    render(
+      <MindQReport
+        data={{
+          ...BASE,
+          competency_breakdown: [
+            {
+              category: 'Personality',
+              assessment_name: 'Mini-IPIP',
+              score: null,
+              display_score: null,
+              band: null,
+              score_kind: 'traits',
+              performance_summary: 'Trait profile recorded.',
+              subscales: [
+                { name: 'Surgency or Extraversion', mean: 3, position_pct: 50, band_label: 'Moderate' },
+                { name: 'Agreeableness', mean: 3, position_pct: 50, band_label: 'Moderate' },
+                { name: 'Conscientiousness', mean: 3, position_pct: 50, band_label: 'Moderate' },
+                { name: 'Neuroticism', mean: 3, position_pct: 50, band_label: 'Moderate' },
+                { name: 'Intellect or Imagination', mean: 2.5, position_pct: 37.5, band_label: 'Low' },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+    const mini = screen.getByRole('heading', { name: 'Personality' }).closest('article');
+    expect(within(mini).getByText('Surgency or Extraversion')).toBeInTheDocument();
+    expect(within(mini).getByText('Neuroticism')).toBeInTheDocument();
+    expect(within(mini).getAllByText(/Moderate|Low/).length).toBeGreaterThanOrEqual(5);
+  });
+
   it('keeps instrument score and band labels on one nowrap badge line', () => {
     const { container } = render(
       <MindQReport

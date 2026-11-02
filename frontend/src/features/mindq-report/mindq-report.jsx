@@ -61,7 +61,10 @@ function ScoreBar({ score }) {
   const width = score == null ? 0 : Math.max(0, Math.min(100, score));
   return (
     <div className="mq-bar-track" aria-hidden="true">
-      <div className="mq-bar-fill" style={{ width: `${width}%` }} />
+      <div
+        className="mq-bar-fill"
+        style={{ width: `${width}%`, minWidth: width > 0 ? '2px' : '0' }}
+      />
     </div>
   );
 }

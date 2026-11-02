@@ -14,7 +14,11 @@ import logoLightInline from '../../assets/branding/logo-light.png?inline';
 export default function MindQBrandMark({ size = 22 }) {
   return (
     <span className="mq-brand" aria-label="MindQ">
-      <img src={logoLightInline} alt="" style={{ height: size, width: 'auto', display: 'block' }} />
+      <img
+        src={logoLightInline}
+        alt="MindQ"
+        style={{ height: size, width: 'auto', display: 'block' }}
+      />
     </span>
   );
 }

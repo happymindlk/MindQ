@@ -210,9 +210,10 @@ function canvasToPdfBlob(canvas, scale, widthPx, layout) {
 
   const footerHeightPx = layout.footer ? layout.footer.bottom - layout.footer.top : 0;
   const footerHeightMm = footerHeightPx * mmPerPx;
+  // PNG keeps the MindQ wordmark legible; JPEG artifacts were reading as "Mincla".
   const footerImage =
     layout.footer && footerHeightPx > 0
-      ? cropCanvas(canvas, scale, layout.footer.top, footerHeightPx).toDataURL('image/jpeg', 0.95)
+      ? cropCanvas(canvas, scale, layout.footer.top, footerHeightPx).toDataURL('image/png')
       : null;
 
   const usableHeight =
@@ -233,8 +234,8 @@ function canvasToPdfBlob(canvas, scale, widthPx, layout) {
 
     if (index > 0) pdf.addPage();
     pdf.addImage(
-      pageCanvas.toDataURL('image/jpeg', 0.95),
-      'JPEG',
+      pageCanvas.toDataURL('image/png'),
+      'PNG',
       PAGE_MARGIN_X_MM,
       PAGE_MARGIN_TOP_MM,
       usableWidth,
@@ -245,7 +246,7 @@ function canvasToPdfBlob(canvas, scale, widthPx, layout) {
     if (footerImage) {
       pdf.addImage(
         footerImage,
-        'JPEG',
+        'PNG',
         PAGE_MARGIN_X_MM,
         pageNumberY - PAGE_NUMBER_BAND_MM - footerHeightMm,
         usableWidth,
