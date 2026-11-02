@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { CheckCircle2 } from 'lucide-react';
 import Skeleton from '../../components/ui/Skeleton';
 import EmptyState from '../../components/ui/EmptyState';
+import Button from '../../components/ui/Button';
 import { api } from '../../api/client';
 import { readDraft, writeDraft, clearDraft, mergeAnswers } from '../../lib/assessment-draft';
 import { AssessmentRunner } from '../../features/assessment-runner/assessment-runner';
@@ -25,6 +26,7 @@ export default function TestRunner() {
   const [isLoading, setIsLoading] = useState(true);
   const [lockDetail, setLockDetail] = useState(null);
   const [loadError, setLoadError] = useState(null);
+  const [phase, setPhase] = useState('running'); // running | complete | expired
 
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +78,10 @@ export default function TestRunner() {
 
   const backToDashboard = useCallback(() => navigate('/portal/dashboard'), [navigate]);
 
+  const onSubmitted = useCallback(() => {
+    setPhase('complete');
+  }, []);
+
   const onTimeExpired = useCallback(() => {
     toast({
       title: 'Time expired',
@@ -83,8 +89,8 @@ export default function TestRunner() {
       variant: 'warning',
       duration: 6000,
     });
-    navigate('/portal/dashboard');
-  }, [navigate, toast]);
+    setPhase('expired');
+  }, [toast]);
 
   if (isLoading) {
     return (
@@ -123,6 +129,27 @@ export default function TestRunner() {
     );
   }
 
+  if (phase === 'complete' || phase === 'expired') {
+    return (
+      <div className="mx-auto flex w-full max-w-md flex-col items-center py-16 text-center">
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-success/25 bg-success/15">
+          <CheckCircle2 className="h-7 w-7 text-success" aria-hidden />
+        </div>
+        <h1 className="text-lg font-semibold text-foreground">
+          {phase === 'expired' ? 'Time is up — answers submitted' : 'Assessment submitted'}
+        </h1>
+        <p className="mt-2 text-sm text-muted">
+          {phase === 'expired'
+            ? 'Your saved answers were locked when the timer ended.'
+            : 'Your responses are saved. You can return to the dashboard to continue other modules.'}
+        </p>
+        <Button variant="primary" size="sm" className="mt-6" onClick={backToDashboard}>
+          Back to dashboard
+        </Button>
+      </div>
+    );
+  }
+
   if (!test || (test.questions || []).length === 0) {
     return (
       <div className="max-w-md mx-auto py-10">
@@ -143,7 +170,7 @@ export default function TestRunner() {
       initialAnswers={initialAnswers}
       transport={transport}
       onAnswersChange={onAnswersChange}
-      onSubmitted={backToDashboard}
+      onSubmitted={onSubmitted}
       onTimeExpired={onTimeExpired}
       onLocked={setLockDetail}
       onExit={backToDashboard}

@@ -169,7 +169,7 @@ describe('AssessmentRunner module top disclaimer', () => {
 });
 
 describe('AssessmentRunner psychometric integrity notice', () => {
-  it('renders the configured bold italic notice beneath the options', () => {
+  it('renders the configured notice as a subtle footer below Previous / Next', () => {
     const base = twoQuestionTest('psychometric');
     renderRunner({
       ...base,
@@ -177,14 +177,15 @@ describe('AssessmentRunner psychometric integrity notice', () => {
       confidentiality_notice_text: DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
     });
     const notice = screen.getByText(/CONFIDENTIALITY & INTEGRITY NOTICE/);
-    expect(notice.className).toContain('font-bold');
-    expect(notice.className).toContain('italic');
+    expect(notice.className).toContain('text-xs');
+    expect(notice.className).toContain('text-slate-400');
+    expect(notice.className).toContain('text-center');
     expect(notice).toHaveTextContent(
       'This assessment is monitored for unauthorized AI assistance, automated inputs, and screen capture. Copying, reproducing, or sharing these questions is strictly prohibited. Violations will result in immediate test invalidation and reporting to the hiring organization.',
     );
     expect(notice.textContent).not.toContain('***');
-    const option = screen.getByRole('radio', { name: /Alpha/ });
-    expect(option.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const next = screen.getByRole('button', { name: /Next question/ });
+    expect(next.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders a custom confidentiality text when configured', () => {

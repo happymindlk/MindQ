@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, MouseEvent, ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, Loader2, Timer } from 'lucide-react';
+import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, Loader2, Timer, WifiOff } from 'lucide-react';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import { MarkdownText } from '../assessment-builder/components/markdown-preview';
+import { formatDurationBadge } from '../assessment-builder/types/module';
 import type { AnswerValue, ResponseSavePayload, ResponseSubmitPayload } from '../assessment-builder/types/telemetry';
 import { resolveAssessmentMediaUrl } from '../../lib/resolve-assessment-media-url';
 import { RunnerQuestionInput } from './runner-question-input';
@@ -72,9 +73,16 @@ export function AssessmentRunner({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [timeUp, setTimeUp] = useState(false);
+  const [offline, setOffline] = useState(
+    () => (typeof navigator !== 'undefined' ? !navigator.onLine : false),
+  );
 
   const current = questions[index];
   const topDisclaimer = useMemo(() => resolveTopDisclaimer(test), [test]);
+  const durationBadge = useMemo(
+    () => formatDurationBadge(test.duration_seconds ?? (test.time_limit_minutes ? test.time_limit_minutes * 60 : null)),
+    [test.duration_seconds, test.time_limit_minutes],
+  );
   const telemetry = useQuestionTelemetry(current?.id ?? null);
   const answersRef = useRef(answers);
   answersRef.current = answers;
@@ -200,6 +208,20 @@ export function AssessmentRunner({
     [],
   );
 
+  useEffect(() => {
+    const onOffline = () => setOffline(true);
+    const onOnline = () => {
+      setOffline(false);
+      void flushDirty().catch(() => undefined);
+    };
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [flushDirty]);
+
   const handleChange = (value: AnswerValue) => {
     if (!current || timeUp) return;
     const questionId = current.id;
@@ -247,7 +269,31 @@ export function AssessmentRunner({
   const mediaSrc = resolveAssessmentMediaUrl(current.media_url);
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4 py-6">
+    <div className="relative mx-auto w-full max-w-2xl space-y-4 py-6">
+      {submitting && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-canvas/70 backdrop-blur-[1px]"
+          role="status"
+          aria-live="assertive"
+          aria-label="Submitting"
+        >
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-5 py-4 shadow-sm">
+            <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden />
+            <span className="text-sm font-medium text-foreground">Submitting…</span>
+          </div>
+        </div>
+      )}
+
+      {offline && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground"
+        >
+          <WifiOff className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
+          <span>Offline: answers cached locally. Do not close tab</span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-3">
         <button
           type="button"
@@ -261,6 +307,11 @@ export function AssessmentRunner({
         </button>
 
         <div className="flex items-center gap-3 text-xs">
+          {durationBadge && (
+            <span className="inline-flex items-center rounded-full border border-border bg-surface-raised px-2.5 py-1 font-medium text-muted">
+              {durationBadge}
+            </span>
+          )}
           {remaining !== null && (
             <span
               role="timer"
@@ -359,14 +410,6 @@ export function AssessmentRunner({
             </figure>
           )}
           <RunnerQuestionInput question={current} value={value} disabled={timeUp || submitting} onChange={handleChange} />
-          {test.show_confidentiality_notice && test.confidentiality_notice_text?.trim() && (
-            <p
-              role="note"
-              className="mt-4 whitespace-pre-line text-sm font-bold italic leading-relaxed text-foreground"
-            >
-              {test.confidentiality_notice_text}
-            </p>
-          )}
         </div>
 
         <div className="mt-8 flex flex-col gap-2 border-t border-border pt-4">
@@ -374,7 +417,7 @@ export function AssessmentRunner({
             <button
               type="button"
               onClick={() => go(index - 1)}
-              disabled={index === 0 || timeUp}
+              disabled={index === 0 || timeUp || submitting}
               className="inline-flex h-10 items-center gap-1 rounded-md px-3 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-surface-raised hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ChevronLeft className="h-4 w-4" /> Previous
@@ -382,7 +425,7 @@ export function AssessmentRunner({
             <button
               type="button"
               onClick={() => handleNext()}
-              disabled={!canAdvance || timeUp}
+              disabled={!canAdvance || timeUp || submitting}
               className="inline-flex h-10 items-center gap-1 rounded-md border-0 bg-[#7048E2] px-4 text-sm font-medium text-white shadow-none transition-colors duration-150 hover:bg-[#5e3cc4] active:bg-[#4f32a6] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7048E2] focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#7048E2]"
             >
               {index === questions.length - 1 ? 'Submit test' : 'Next question'}
@@ -391,6 +434,14 @@ export function AssessmentRunner({
           </div>
           {!canAdvance && !timeUp && (
             <p className="text-right text-sm text-slate-600 dark:text-slate-300">Please answer to continue.</p>
+          )}
+          {test.show_confidentiality_notice && test.confidentiality_notice_text?.trim() && (
+            <p
+              role="note"
+              className="mt-6 whitespace-pre-line text-center text-xs leading-relaxed text-slate-400"
+            >
+              {test.confidentiality_notice_text}
+            </p>
           )}
         </div>
       </section>

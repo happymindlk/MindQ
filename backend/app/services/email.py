@@ -456,13 +456,11 @@ def render_hr_completion_html(
     email = html.escape(candidate_email)
     body = f"""
       <h1 style="{_HEADING_STYLE}">Candidate completed assessment</h1>
-      <p style="{_BODY_STYLE}margin:0 0 16px;">
+      <p style="{_BODY_STYLE}margin:0 0 20px;">
         Hello <strong style="color:#1F2937;">{greeting}</strong>,
         <strong style="color:#1F2937;">{cand}</strong> ({email}) has finished
         <strong style="color:#1F2937;">{title}</strong>.
-      </p>
-      <p style="{_BODY_STYLE}margin:0 0 20px;">
-        Their report is ready to download from the HR Tracker. JD fit scoring may still be finishing in the background.
+        Their report is ready to review and download from the HR Tracker.
       </p>
       <div style="margin:0 0 8px;padding:14px 16px;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;color:#4B5563;">
         Open <strong style="color:#1F2937;">MindQ → HR Tracker</strong> and download the report for this candidate.
@@ -532,8 +530,7 @@ def render_package_share_html(
     body_html = f"""
       <h1 style="{_HEADING_STYLE}">{title} is ready to share</h1>
       <p style="{_BODY_STYLE}margin:0 0 24px;">
-        Hello <strong style="color:#1F2937;">{company}</strong>, your assessment is live.
-        Forward the candidate details below to applicants, and use the HR portal to track results.
+        Hello <strong style="color:#1F2937;">{company}</strong>, your assessment is live. Forward the candidate details below to applicants, and use the HR portal to track results.
       </p>
 
       <div style="{section}">

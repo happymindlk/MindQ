@@ -35,6 +35,9 @@ def _progress(started_seconds_ago):
         completed_at=None,
         score=None,
         facet_scores=None,
+        derived_profile=None,
+        scoring_version=None,
+        score_details=None,
         client_duration_seconds=None,
         server_duration_seconds=None,
         overtime=None,
@@ -122,6 +125,7 @@ async def test_submit_in_time_stores_elapsed_and_facets(monkeypatch):
     questions = [{"id": "l1", "type": "likert", "facet": "Pace", "reverse_scored": True}]
     assessment = _assessment(timer_mode="flexible", duration_seconds=600, questions=questions)
     progress = _progress(120)
+    candidate = SimpleNamespace(id=uuid4(), corporate_id=uuid4())
     monkeypatch.setattr(
         CandidateService,
         "require_writable_assessment",
@@ -143,17 +147,26 @@ async def test_submit_in_time_stores_elapsed_and_facets(monkeypatch):
 
     result, complete = await CandidateService.submit_test(
         session,
-        SimpleNamespace(id=uuid4(), corporate_id=uuid4()),
+        candidate,
         assessment.id,
         pending_responses=pending,
     )
 
     assert complete is True
     assert float(added[0].elapsed_seconds) == 7.46
-    assert result.facet_scores == {"Pace": {"mean": 4.0, "n": 1, "sum": 4.0}}
-    assert result.derived_profile is None
+    assert result.facet_scores is None
     assert result.overtime is False
     assert result.client_duration_seconds is None
+
+    progress.status = "COMPLETED"
+    monkeypatch.setattr(
+        CandidateService, "get_assessment_for_candidate", AsyncMock(return_value=assessment)
+    )
+    monkeypatch.setattr(CandidateService, "_get_progress", AsyncMock(return_value=progress))
+    session.execute = AsyncMock(return_value=all_rows)
+    scored = await CandidateService.finalize_submission_scores(session, candidate, assessment.id)
+    assert scored.facet_scores == {"Pace": {"mean": 4.0, "n": 1, "sum": 4.0}}
+    assert scored.derived_profile is None
 
 
 OCTANT_CODES = ("PA", "BC", "DE", "FG", "HI", "JK", "LM", "NO")
@@ -186,6 +199,7 @@ async def _submit_ipc(monkeypatch, rows):
         scoring_profile="ipip_ipc_v1",
     )
     progress = _progress(300)
+    candidate = SimpleNamespace(id=uuid4(), corporate_id=uuid4())
     monkeypatch.setattr(
         CandidateService,
         "require_writable_assessment",
@@ -198,11 +212,20 @@ async def _submit_ipc(monkeypatch, rows):
     session = AsyncMock()
     session.add = MagicMock()
     session.execute = AsyncMock(return_value=all_rows)
-    result, _ = await CandidateService.submit_test(
-        session, SimpleNamespace(id=uuid4(), corporate_id=uuid4()), assessment.id
-    )
+    result, _ = await CandidateService.submit_test(session, candidate, assessment.id)
     session.commit.assert_awaited_once()
-    return result
+    assert result.status == "COMPLETED"
+    assert result.derived_profile is None
+
+    progress.status = "COMPLETED"
+    progress.completed_at = NOW
+    progress.server_duration_seconds = 300.0
+    monkeypatch.setattr(
+        CandidateService, "get_assessment_for_candidate", AsyncMock(return_value=assessment)
+    )
+    monkeypatch.setattr(CandidateService, "_get_progress", AsyncMock(return_value=progress))
+    scored = await CandidateService.finalize_submission_scores(session, candidate, assessment.id)
+    return scored
 
 
 @pytest.mark.asyncio

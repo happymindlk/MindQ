@@ -122,6 +122,18 @@ export function formatDuration(seconds: number | null): string {
   return rest ? `${minutes} min ${rest} s` : `${minutes} min`;
 }
 
+/**
+ * Compact duration badge for candidate overview / runner chrome.
+ *
+ * @param seconds - Duration in seconds (`duration_seconds` / `time_limit_seconds`).
+ * @returns e.g. `"⏱ 4 mins"`, or null when untimed.
+ */
+export function formatDurationBadge(seconds: number | null | undefined): string | null {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return null;
+  const mins = Math.max(1, Math.round(seconds / 60));
+  return `⏱ ${mins} min${mins === 1 ? '' : 's'}`;
+}
+
 export function statusLabel(module: Pick<AssessmentModule, 'status' | 'version' | 'isLocked'>): string {
   if (module.status === 'published') return `v${module.version} - Published (Locked)`;
   if (module.isLocked) return `v${module.version} - Live (Locked)`;

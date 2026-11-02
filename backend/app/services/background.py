@@ -2,13 +2,92 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from uuid import UUID
 
 from app.database import SessionLocal
+from app.models.candidate_progress import CandidateProgress
 from app.services.candidate_service import CandidateService
 from app.services.gemini_client import background_retry_profile
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
+
+
+async def persist_assessment_started(
+    candidate_id: UUID,
+    assessment_id: UUID,
+    corporate_id: UUID,
+    started_at: datetime,
+) -> None:
+    """Persist IN_PROGRESS + started_at after the runner payload already returned.
+
+    Args:
+        candidate_id: Candidate opening the module.
+        assessment_id: Assessment being started.
+        corporate_id: Tenant id for a new progress row.
+        started_at: Clock start already shown to the candidate.
+    """
+    async with SessionLocal() as session:
+        try:
+            progress = (
+                await session.execute(
+                    select(CandidateProgress).where(
+                        CandidateProgress.candidate_id == candidate_id,
+                        CandidateProgress.assessment_id == assessment_id,
+                    )
+                )
+            ).scalars().first()
+            if progress is not None and progress.started_at is not None:
+                return
+            if progress is None:
+                session.add(
+                    CandidateProgress(
+                        corporate_id=corporate_id,
+                        candidate_id=candidate_id,
+                        assessment_id=assessment_id,
+                        status="IN_PROGRESS",
+                        started_at=started_at,
+                    )
+                )
+            else:
+                progress.status = "IN_PROGRESS"
+                progress.started_at = started_at
+            await session.commit()
+        except Exception:
+            logger.exception(
+                "persist_assessment_started_failed candidate_id=%s assessment_id=%s",
+                candidate_id,
+                assessment_id,
+            )
+
+
+async def finalize_and_score_ai(
+    candidate_id: UUID, assessment_id: UUID
+) -> None:
+    """Score the submitted module, then run Gemini technical + JD pipelines.
+
+    Args:
+        candidate_id: Candidate who just submitted.
+        assessment_id: Assessment that was submitted.
+    """
+    async with SessionLocal() as session:
+        candidate = await CandidateService.get_candidate(session, candidate_id)
+        if not candidate:
+            logger.warning("finalize_missing_candidate id=%s", candidate_id)
+            return
+        try:
+            await CandidateService.finalize_submission_scores(
+                session, candidate, assessment_id
+            )
+        except Exception:
+            logger.exception(
+                "finalize_scores_failed candidate_id=%s assessment_id=%s",
+                candidate_id,
+                assessment_id,
+            )
+
+    await score_ai_for_candidate(candidate_id, assessment_id)
 
 
 async def score_ai_for_candidate(
