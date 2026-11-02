@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  createDraftIdGate,
   createDraftSaveController,
   isAbortError,
   isPackageSaveAllowed,
@@ -74,5 +75,28 @@ describe('isAbortError', () => {
   it('ignores unrelated errors', () => {
     expect(isAbortError(new Error('network'))).toBe(false);
     expect(isAbortError(null)).toBe(false);
+  });
+});
+
+describe('createDraftIdGate', () => {
+  it('runs create only once when ensureCreated is called concurrently', async () => {
+    const gate = createDraftIdGate(null);
+    const createFn = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      return { id: 'draft-1' };
+    });
+
+    const [a, b] = await Promise.all([gate.ensureCreated(createFn), gate.ensureCreated(createFn)]);
+    expect(a).toBe('draft-1');
+    expect(b).toBe('draft-1');
+    expect(createFn).toHaveBeenCalledTimes(1);
+    expect(gate.getId()).toBe('draft-1');
+  });
+
+  it('skips create when an id is already known', async () => {
+    const gate = createDraftIdGate('existing');
+    const createFn = vi.fn(async () => ({ id: 'new' }));
+    await expect(gate.ensureCreated(createFn)).resolves.toBe('existing');
+    expect(createFn).not.toHaveBeenCalled();
   });
 });

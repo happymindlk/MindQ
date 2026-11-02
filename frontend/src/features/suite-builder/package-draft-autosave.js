@@ -17,6 +17,59 @@ export function isPackageSaveAllowed({ status, isLocked } = {}) {
 }
 
 /**
+ * Single-draft retention gate: concurrent first-saves share one POST, then reuse the id.
+ *
+ * Tab blur / visibility races used to fire multiple POSTs with the same title because
+ * React state `packageId` was still null while the first create was in flight.
+ *
+ * @param {string | null} [initialId]
+ * @returns {{
+ *   getId: () => string | null,
+ *   setId: (id: string | null) => void,
+ *   ensureCreated: (createFn: () => Promise<{ id: string }>) => Promise<string>,
+ * }}
+ */
+export function createDraftIdGate(initialId = null) {
+  /** @type {string | null} */
+  let currentId = initialId || null;
+  /** @type {Promise<string> | null} */
+  let createPromise = null;
+
+  return {
+    getId() {
+      return currentId;
+    },
+
+    setId(id) {
+      currentId = id || null;
+    },
+
+    /**
+     * Return the existing draft id, or run ``createFn`` once and cache its id.
+     *
+     * @param {() => Promise<{ id: string }>} createFn
+     * @returns {Promise<string>}
+     */
+    async ensureCreated(createFn) {
+      if (currentId) return currentId;
+      if (createPromise) return createPromise;
+      createPromise = Promise.resolve()
+        .then(createFn)
+        .then((saved) => {
+          const id = saved?.id ? String(saved.id) : '';
+          if (!id) throw new Error('Draft save returned no id');
+          currentId = id;
+          return id;
+        })
+        .finally(() => {
+          createPromise = null;
+        });
+      return createPromise;
+    },
+  };
+}
+
+/**
  * Create a timer + AbortController pair for debounced draft saves.
  * Debounce cleanup should only call `clearScheduled` so an in-flight save can
  * finish while the user keeps typing. Call `cancelAll` on publish success and

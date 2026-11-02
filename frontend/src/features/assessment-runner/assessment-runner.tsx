@@ -4,7 +4,6 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, Loader2, Timer, WifiOff } from 'lucide-react';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import { MarkdownText } from '../assessment-builder/components/markdown-preview';
-import { formatDurationBadge } from '../assessment-builder/types/module';
 import type { AnswerValue, ResponseSavePayload, ResponseSubmitPayload } from '../assessment-builder/types/telemetry';
 import { resolveAssessmentMediaUrl } from '../../lib/resolve-assessment-media-url';
 import { RunnerQuestionInput } from './runner-question-input';
@@ -79,10 +78,6 @@ export function AssessmentRunner({
 
   const current = questions[index];
   const topDisclaimer = useMemo(() => resolveTopDisclaimer(test), [test]);
-  const durationBadge = useMemo(
-    () => formatDurationBadge(test.duration_seconds ?? (test.time_limit_minutes ? test.time_limit_minutes * 60 : null)),
-    [test.duration_seconds, test.time_limit_minutes],
-  );
   const telemetry = useQuestionTelemetry(current?.id ?? null);
   const answersRef = useRef(answers);
   answersRef.current = answers;
@@ -307,11 +302,6 @@ export function AssessmentRunner({
         </button>
 
         <div className="flex items-center gap-3 text-xs">
-          {durationBadge && (
-            <span className="inline-flex items-center rounded-full border border-border bg-surface-raised px-2.5 py-1 font-medium text-muted">
-              {durationBadge}
-            </span>
-          )}
           {remaining !== null && (
             <span
               role="timer"
