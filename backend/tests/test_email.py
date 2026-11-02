@@ -9,6 +9,7 @@ from app.services.email import (
     _source_address,
     clean_recipient_email,
     format_deadline_timestamp,
+    format_package_label,
     render_candidate_invite_html,
     render_candidate_nudge_html,
     render_hr_completion_html,
@@ -20,6 +21,22 @@ from app.services.email import (
     send_transactional_email,
 )
 from app.services.email_service import EmailService
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("", "Assessment Package"),
+        ("   ", "Assessment Package"),
+        ("Backend Pack", "Backend Pack assessment package"),
+        ("Community Coordinator Package", "Community Coordinator assessment package"),
+        ("Community Coordinator Package assessment package", "Community Coordinator Package assessment package"),
+        ("Leadership assessment package", "Leadership assessment package"),
+        ("Leadership Assessment Package", "Leadership Assessment Package"),
+    ],
+)
+def test_format_package_label(raw, expected):
+    assert format_package_label(raw) == expected
 
 
 @pytest.mark.asyncio
@@ -175,8 +192,8 @@ async def test_invite_email_includes_guidelines(monkeypatch):
         origin="https://mindq.pages.dev",
     )
     assert ok is True
-    assert "Backend Pack" in captured["subject"]
-    assert "Acme Corp" in captured["subject"]
+    assert captured["subject"] == "Acme Corp invited you: Backend Pack assessment package"
+    assert "Backend Pack assessment package" in captured["html"]
     assert "AP-TEST-1" in captured["html"]
     assert "Acme Corp" in captured["html"]
     assert "Guidelines" in captured["html"]
@@ -452,5 +469,65 @@ async def test_hr_completion_email(monkeypatch):
     )
     assert ok is True
     assert captured["to"] == "hr@acme.com"
-    assert "Pat Lee" in captured["subject"]
+    assert captured["subject"] == (
+        "Report ready: Pat Lee completed Backend Pack assessment package"
+    )
+    assert "Backend Pack assessment package" in captured["html"]
+    assert "Assessment Package" not in captured["html"].replace(
+        "Backend Pack assessment package", ""
+    )
     assert "finished" in captured["html"].lower() or "completed" in captured["html"].lower()
+
+
+@pytest.mark.asyncio
+async def test_nudge_subject_uses_assessment_package_label(monkeypatch):
+    captured = {}
+
+    async def fake_send(to_email, subject, html_content, raise_on_error=False):
+        captured["subject"] = subject
+        captured["html"] = html_content
+        return {"id": "msg_nudge"}
+
+    monkeypatch.setattr(
+        "app.services.email_service.send_transactional_email_async",
+        fake_send,
+    )
+    ok = await EmailService.send_nudge_email(
+        email="jane@example.com",
+        name="Jane",
+        access_code="HM-1",
+        package_title="Community Coordinator Package",
+    )
+    assert ok is True
+    assert captured["subject"] == (
+        "Friendly Reminder: Complete your Community Coordinator assessment package"
+    )
+    assert "Community Coordinator assessment package" in captured["html"]
+    assert "assessment package assessment" not in captured["html"].lower()
+
+
+def test_templates_append_assessment_package_without_doubling():
+    invite = render_candidate_invite_html(
+        candidate_name="Pat",
+        package_title="Backend Pack",
+        access_code="HM-1",
+        corporate_name="Acme",
+    )
+    assert "Backend Pack assessment package" in invite
+
+    already = render_hr_completion_html(
+        hr_name="Acme",
+        candidate_name="Pat",
+        package_title="Backend Pack assessment package",
+        candidate_email="pat@example.com",
+    )
+    assert already.count("assessment package") == 1
+    assert "assessment package Assessment Package" not in already
+
+    share = render_package_share_html(
+        corporate_name="Acme",
+        package_title="Analyst Package",
+        access_code="HM-1",
+    )
+    assert "Analyst assessment package" in share
+    assert "Assessment Package is ready" not in share

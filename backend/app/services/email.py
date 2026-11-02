@@ -40,6 +40,29 @@ def format_deadline_timestamp(close_time: datetime | None) -> str:
     # %d / %I are zero-padded; drop the padding for readability.
     return when.strftime("%B %d, %Y at %I:%M %p UTC").replace(" 0", " ")
 
+
+def format_package_label(title: str) -> str:
+    """Normalize a package/role title for email copy.
+
+    Ensures every reference ends with ``assessment package`` without doubling
+    when the title already ends with ``package`` or ``assessment package``.
+
+    Args:
+        title: Raw package or role title from the database.
+
+    Returns:
+        Display label suitable for subjects, headings, and body paragraphs.
+    """
+    cleaned = (title or "").strip()
+    if not cleaned:
+        return "Assessment Package"
+    if cleaned.lower().endswith("assessment package"):
+        return cleaned
+    if cleaned.lower().endswith("package"):
+        return f"{cleaned[:-7].strip()} assessment package"
+    return f"{cleaned} assessment package"
+
+
 logger = logging.getLogger("app.email")
 
 PRODUCTION_FRONTEND_URL = "https://mindq.pages.dev"
@@ -405,7 +428,7 @@ def render_candidate_invite_html(
         Full HTML email document string.
     """
     name = html.escape(candidate_name or "there")
-    title = html.escape(package_title or "your assessment")
+    title = html.escape(format_package_label(package_title))
     company = html.escape((corporate_name or "").strip() or "Your hiring team")
     code = html.escape(access_code)
     link = html.escape(_assessment_invite_link(access_code, origin=origin))
@@ -419,7 +442,7 @@ def render_candidate_invite_html(
       <h1 style="{_HEADING_STYLE}">You're invited to complete an assessment</h1>
       <p style="{_BODY_STYLE}margin:0 0 20px;">
         <strong style="color:#1F2937;">{company}</strong> has invited
-        <strong style="color:#1F2937;">{name}</strong> to complete
+        <strong style="color:#1F2937;">{name}</strong> to complete the
         <strong style="color:#1F2937;">{title}</strong>.
       </p>
       {deadline_line}
@@ -452,14 +475,14 @@ def render_hr_completion_html(
     """HTML alerting HR that a candidate finished and the report is ready."""
     greeting = html.escape((hr_name or "there").strip() or "there")
     cand = html.escape(candidate_name)
-    title = html.escape(package_title or "assessment package")
+    title = html.escape(format_package_label(package_title))
     email = html.escape(candidate_email)
     body = f"""
       <h1 style="{_HEADING_STYLE}">Candidate completed assessment</h1>
       <p style="{_BODY_STYLE}margin:0 0 20px;">
         Hello <strong style="color:#1F2937;">{greeting}</strong>,
-        <strong style="color:#1F2937;">{cand}</strong> ({email}) has finished
-        <strong style="color:#1F2937;">{title} Assessment Package</strong>.
+        <strong style="color:#1F2937;">{cand}</strong> ({email}) has finished the
+        <strong style="color:#1F2937;">{title}</strong>.
         Their report is ready to review and download from the HR Tracker.
       </p>
       <div style="margin:0 0 8px;padding:14px 16px;background:#F3F4F6;border:1px solid #E5E7EB;border-radius:8px;font-size:13px;color:#4B5563;">
@@ -478,14 +501,14 @@ def render_candidate_nudge_html(
 ) -> str:
     """HTML reminder for an incomplete candidate."""
     name = html.escape(candidate_name or "there")
-    title = html.escape(package_title or "your assessment")
+    title = html.escape(format_package_label(package_title))
     code = html.escape(access_code)
     link = html.escape(_portal_link(access_code, origin=origin))
     body = f"""
       <h1 style="{_HEADING_STYLE}">Friendly reminder</h1>
       <p style="{_BODY_STYLE}margin:0 0 16px;">
         Hello <strong style="color:#1F2937;">{name}</strong>, please finish your
-        <strong style="color:#1F2937;">{title}</strong> assessment when you can.
+        <strong style="color:#1F2937;">{title}</strong> when you can.
       </p>
       <div style="{_CODE_BOX_STYLE}">
         {code}
@@ -515,7 +538,7 @@ def render_package_share_html(
         Full HTML document for SES.
     """
     company = html.escape((corporate_name or "").strip() or "your team")
-    title = html.escape(package_title or "your assessment")
+    title = html.escape(format_package_label(package_title))
     code = html.escape(access_code)
     candidate_link = html.escape(candidate_portal_link(access_code, origin=origin))
     hr_link = html.escape(hr_portal_login_link(origin=origin))
@@ -528,9 +551,9 @@ def render_package_share_html(
         "text-decoration:none;border-radius:8px;font-weight:700;font-size:13px;"
     )
     body_html = f"""
-      <h1 style="{_HEADING_STYLE}">{title} Assessment Package is ready to share</h1>
+      <h1 style="{_HEADING_STYLE}">Your {title} is ready to share</h1>
       <p style="{_BODY_STYLE}margin:0 0 24px;">
-        Hello <strong style="color:#1F2937;">{company}</strong>, your assessment is live. Forward the candidate details below to applicants, and use the HR portal to track results.
+        Hello <strong style="color:#1F2937;">{company}</strong>, your {title} is live. Forward the candidate details below to applicants, and use the HR portal to track results.
       </p>
 
       <div style="{section}">
