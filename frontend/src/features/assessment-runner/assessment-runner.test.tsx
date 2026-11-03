@@ -179,7 +179,9 @@ describe('AssessmentRunner psychometric integrity notice', () => {
     const notice = screen.getByText(/CONFIDENTIALITY & INTEGRITY NOTICE/);
     expect(notice.className).toContain('text-xs');
     expect(notice.className).toContain('text-slate-400');
-    expect(notice.className).toContain('text-center');
+    expect(notice.className).toContain('font-bold');
+    expect(notice.className).toContain('italic');
+    expect(notice.className).toContain('text-left');
     expect(notice).toHaveTextContent(
       'This assessment is monitored for unauthorized AI assistance, automated inputs, and screen capture. Copying, reproducing, or sharing these questions is strictly prohibited. Violations will result in immediate test invalidation and reporting to the hiring organization.',
     );
