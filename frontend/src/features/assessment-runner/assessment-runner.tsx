@@ -432,7 +432,7 @@ export function AssessmentRunner({
           {test.show_confidentiality_notice && test.confidentiality_notice_text?.trim() && (
             <p
               role="note"
-              className="mt-6 whitespace-pre-line text-center text-xs leading-relaxed text-slate-400"
+              className="mt-6 whitespace-pre-line text-xs text-slate-400 font-bold italic text-left leading-relaxed"
             >
               {test.confidentiality_notice_text}
             </p>
