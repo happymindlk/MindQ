@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, MouseEvent, ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, Loader2, Timer, WifiOff } from 'lucide-react';
+import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, Loader2, WifiOff } from 'lucide-react';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import { MarkdownText } from '../assessment-builder/components/markdown-preview';
 import type { AnswerValue, ResponseSavePayload, ResponseSubmitPayload } from '../assessment-builder/types/telemetry';
@@ -36,7 +36,7 @@ interface AssessmentRunnerProps {
   transport: RunnerTransport;
   onAnswersChange?: (answers: Record<string, AnswerValue>) => void;
   onSubmitted: () => void;
-  /** Called instead of `onSubmitted` when a strict-timer expiry submit succeeds. */
+  /** Called instead of `onSubmitted` when a timed-module expiry submit succeeds. */
   onTimeExpired?: () => void;
   onLocked: (message: string) => void;
   onExit: () => void;
@@ -258,7 +258,6 @@ export function AssessmentRunner({
   const canAdvance = isAnswered(current, value);
   const progressPct = Math.round(((index + 1) / questions.length) * 100);
   const remaining = timer.remainingSeconds;
-  const strict = test.timer_mode === 'strict';
   const tone = remaining !== null && test.duration_seconds ? timerTone(remaining, test.duration_seconds) : 'safe';
   const warning = tone === 'urgent' && remaining !== null && remaining > 0;
   const mediaSrc = resolveAssessmentMediaUrl(current.media_url);
@@ -306,7 +305,7 @@ export function AssessmentRunner({
             <span
               role="timer"
               aria-live={warning ? 'assertive' : 'off'}
-              aria-label={strict ? 'Time remaining' : 'Suggested time remaining'}
+              aria-label="Time remaining"
               data-tone={tone}
               className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-mono text-sm tabular-nums transition-colors duration-300 ${
                 tone === 'urgent'
@@ -316,13 +315,9 @@ export function AssessmentRunner({
                     : 'border-success/40 bg-success/10 font-medium text-success'
               }`}
             >
-              {strict ? <AlarmClock className="h-3.5 w-3.5" aria-hidden /> : <Timer className="h-3.5 w-3.5" aria-hidden />}
-              {strict
-                ? formatClock(Math.max(0, remaining))
-                : timer.overtime
-                  ? `+${formatClock(-remaining)}`
-                  : formatClock(Math.max(0, remaining))}
-              {strict && <span className="sr-only"> strict timer</span>}
+              <AlarmClock className="h-3.5 w-3.5" aria-hidden />
+              {formatClock(remaining)}
+              <span className="sr-only"> hard cutoff</span>
             </span>
           )}
           {mode === 'live' ? (

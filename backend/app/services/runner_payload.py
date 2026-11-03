@@ -13,7 +13,7 @@ from app.schemas.question_payload import (
     DEFAULT_TOP_DISCLAIMER_TEXT,
 )
 
-# Network latency + auto-submit round-trip allowance after a strict deadline.
+# Network latency + auto-submit round-trip allowance after a timed deadline.
 STRICT_GRACE_SECONDS = 30
 
 
@@ -63,7 +63,10 @@ def strict_deadline(
     *,
     grace_seconds: int = STRICT_GRACE_SECONDS,
 ) -> datetime | None:
-    """Compute the server-side cutoff for a strict-timer attempt.
+    """Compute the server-side cutoff for any timed attempt.
+
+    Applies to every module with a positive duration, regardless of
+    ``timer_mode``. The grace window covers client auto-submit latency.
 
     Args:
         started_at: When the attempt started (progress.started_at).

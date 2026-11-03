@@ -50,7 +50,8 @@ def test_seed_timer_minutes_round_up():
     assert _minutes(330) == 6
 
 
-def test_crt_is_the_only_strict_timer():
+def test_catalog_timer_mode_tags_remain_crt_strict_others_flexible():
+    """Catalog tags are UI metadata; every positive duration hard-cuts at runtime."""
     assert TIMER_CONFIG["crt"] == (180, "strict", False)
     for slug, (_seconds, mode, _shuffle) in TIMER_CONFIG.items():
         if slug != "crt":

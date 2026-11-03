@@ -136,7 +136,10 @@ def _assessment_duration(assessment: Assessment) -> int | None:
 def is_strict_expired(
     assessment: Assessment, progress: CandidateProgress | None, now: datetime
 ) -> bool:
-    """Whether a strict-timer attempt is past its deadline (including grace).
+    """Whether a timed attempt is past its server deadline (including grace).
+
+    Every module with a positive duration hard-cuts regardless of
+    ``timer_mode`` (``strict`` / ``flexible`` tags are display metadata only).
 
     Args:
         assessment: Assessment with timer configuration.
@@ -144,10 +147,8 @@ def is_strict_expired(
         now: Current UTC time.
 
     Returns:
-        True only for strict modules whose deadline has passed.
+        True when the module is timed and ``now`` is past the grace deadline.
     """
-    if (getattr(assessment, "timer_mode", None) or "flexible") != "strict":
-        return False
     deadline = strict_deadline(
         getattr(progress, "started_at", None) if progress else None,
         _assessment_duration(assessment),
@@ -750,7 +751,7 @@ class CandidateService:
     ):
         """Persist pending answers and mark COMPLETED without blocking on scoring.
 
-        Strict modules past their deadline still finalize, but late pending
+        Timed modules past their deadline still finalize, but late pending
         answers are discarded so only work saved in time counts. Facet scores,
         derived profiles, and score_details are filled by
         ``finalize_submission_scores`` (BackgroundTasks).
