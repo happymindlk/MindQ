@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, MouseEvent, ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, Loader2, WifiOff } from 'lucide-react';
+import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, WifiOff } from 'lucide-react';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import { MarkdownText } from '../assessment-builder/components/markdown-preview';
 import type { AnswerValue, ResponseSavePayload, ResponseSubmitPayload } from '../assessment-builder/types/telemetry';
+import { GpuSpinner } from '../../components/ui/gpu-spinner';
 import { resolveAssessmentMediaUrl } from '../../lib/resolve-assessment-media-url';
 import { RunnerQuestionInput } from './runner-question-input';
 import {
@@ -265,13 +266,13 @@ export function AssessmentRunner({
     <div className="relative mx-auto w-full max-w-2xl space-y-4 py-6">
       {submitting && (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-canvas/70 backdrop-blur-[1px]"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-canvas/70"
           role="status"
           aria-live="assertive"
           aria-label="Submitting"
         >
           <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-5 py-4 shadow-sm">
-            <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden />
+            <GpuSpinner />
             <span className="text-sm font-medium text-foreground">Submitting…</span>
           </div>
         </div>
@@ -439,7 +440,7 @@ export function AssessmentRunner({
       {timeUp && (
         <div role="alert" className="rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-foreground">
           <p className="flex items-center gap-2 font-semibold">
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <AlarmClock className="h-4 w-4" aria-hidden />}
+            {submitting ? <GpuSpinner className="h-4 w-4" /> : <AlarmClock className="h-4 w-4" aria-hidden />}
             Time is up. {submitting ? 'Submitting your saved answers…' : 'Your answers have been locked.'}
           </p>
           {submitError && (
@@ -493,7 +494,7 @@ export function AssessmentRunner({
                 aria-busy={submitting || undefined}
                 className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-fg hover:bg-primary-hover disabled:opacity-50"
               >
-                {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+                {submitting && <GpuSpinner className="h-3.5 w-3.5" />}
                 Confirm submit
               </button>
             </div>

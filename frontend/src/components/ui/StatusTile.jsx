@@ -11,6 +11,7 @@ import { normalizeModuleStatus } from '../../features/candidate-dashboard/module
  * @param {string | null} [props.description]
  * @param {string} props.status Raw or normalized progress status.
  * @param {() => void} [props.onClick]
+ * @param {() => void} [props.onPrefetch] Warm the module payload on hover/focus.
  * @param {string | null} [props.lockedReason] When set, the tile cannot be launched and shows why.
  * @param {string | null} [props.durationLabel] Optional duration badge (e.g. `⏱ 4 mins`).
  */
@@ -19,6 +20,7 @@ export default function StatusTile({
   description,
   status,
   onClick,
+  onPrefetch,
   lockedReason = null,
   durationLabel = null,
 }) {
@@ -55,6 +57,8 @@ export default function StatusTile({
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : undefined}
       onClick={interactive ? onClick : undefined}
+      onPointerEnter={interactive && onPrefetch ? onPrefetch : undefined}
+      onFocus={interactive && onPrefetch ? onPrefetch : undefined}
       onKeyDown={
         interactive
           ? (e) => {

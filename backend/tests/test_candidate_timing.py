@@ -125,10 +125,11 @@ async def test_submit_after_deadline_discards_pending_and_flags_overtime(monkeyp
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
     session = AsyncMock()
     session.add = MagicMock()
+    session.add_all = MagicMock()
     session.execute = AsyncMock(return_value=_empty_result())
     pending = [ResponseSave(assessment_id=assessment.id, question_id="late", response={"answer": "x"})]
 
-    result, _ = await CandidateService.submit_test(
+    result, package_complete = await CandidateService.submit_test(
         session,
         SimpleNamespace(id=uuid4(), corporate_id=uuid4()),
         assessment.id,
@@ -137,6 +138,9 @@ async def test_submit_after_deadline_discards_pending_and_flags_overtime(monkeyp
     )
 
     session.add.assert_not_called()
+    session.add_all.assert_not_called()
+    session.execute.assert_not_awaited()
+    assert package_complete is False
     assert result.status == "COMPLETED"
     assert float(result.server_duration_seconds) == 500.0
     assert float(result.client_duration_seconds) == 58.4
@@ -162,7 +166,8 @@ async def test_submit_in_time_stores_elapsed_and_facets(monkeypatch):
     all_rows = MagicMock()
     all_rows.scalars.return_value.all.return_value = [saved_row]
     session = AsyncMock()
-    session.add = MagicMock(side_effect=added.append)
+    session.add = MagicMock()
+    session.add_all = MagicMock(side_effect=lambda rows: added.extend(rows))
     session.execute = AsyncMock(side_effect=[_empty_result(), all_rows])
     pending = [
         ResponseSave(assessment_id=assessment.id, question_id="l1", response={"answer": 2}, elapsed_seconds=7.456)
@@ -175,7 +180,8 @@ async def test_submit_in_time_stores_elapsed_and_facets(monkeypatch):
         pending_responses=pending,
     )
 
-    assert complete is True
+    # Completeness / HR email are deferred to BackgroundTasks.
+    assert complete is False
     assert float(added[0].elapsed_seconds) == 7.46
     assert result.facet_scores is None
     assert result.overtime is False

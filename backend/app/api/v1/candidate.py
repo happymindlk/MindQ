@@ -3,16 +3,12 @@ from typing import NoReturn
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.candidate import Candidate
-from app.models.corporate import Corporate
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.response import ResponseSave, ResponseSubmit
 from app.services.candidate_service import CandidateService
-from app.services.package_service import PackageService
-from app.services.email_service import EmailService
 from app.services.background import finalize_and_score_ai, persist_assessment_started
 from app.services.runner_payload import build_runner_payload
 from app.auth import get_current_candidate
@@ -141,7 +137,7 @@ async def submit_test(
     body: ResponseSubmit | None = None,
 ):
     try:
-        progress, package_complete = await CandidateService.submit_test(
+        progress, _package_complete = await CandidateService.submit_test(
             db,
             candidate,
             assessment_id,
@@ -155,27 +151,13 @@ async def submit_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
-    # Acknowledge after responses are written; scoring + Gemini run after the response.
+    # Acknowledge after responses are written; scoring, JD, and HR email run after.
     background_tasks.add_task(finalize_and_score_ai, candidate.id, assessment_id)
-    if package_complete:
-        package = await PackageService.get_package(db, candidate.package_id)
-        corporate = (
-            await db.execute(select(Corporate).where(Corporate.id == candidate.corporate_id))
-        ).scalar_one_or_none()
-        if corporate and corporate.contact_email:
-            background_tasks.add_task(
-                EmailService.send_hr_completion_email,
-                corporate.contact_email,
-                candidate_name=candidate.full_name,
-                candidate_email=candidate.email,
-                package_title=package.title if package else "assessment package",
-                hr_name=corporate.name,
-            )
     # Scores stay server-side: echoing them lets candidates calibrate answers
     # across modules or share keyed results.
     return {
         "assessment_id": str(progress.assessment_id),
         "status": progress.status,
         "completed_at": progress.completed_at,
-        "jd_scoring_queued": package_complete,
+        "jd_scoring_queued": True,
     }
