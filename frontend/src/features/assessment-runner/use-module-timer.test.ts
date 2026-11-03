@@ -45,7 +45,6 @@ describe('useModuleTimer', () => {
     const { result } = renderHook(() =>
       useModuleTimer({
         durationSeconds: 180,
-        timerMode: 'strict',
         startedAt: '2026-10-05T11:58:00Z',
         onExpire,
       }),
@@ -66,7 +65,7 @@ describe('useModuleTimer', () => {
   it('hard-cuts flexible timers at 00:00 and fires onExpire (no overtime)', () => {
     const onExpire = vi.fn();
     const { result } = renderHook(() =>
-      useModuleTimer({ durationSeconds: 10, timerMode: 'flexible', startedAt: null, onExpire }),
+      useModuleTimer({ durationSeconds: 10, startedAt: null, onExpire }),
     );
     act(() => {
       vi.advanceTimersByTime(15_000);
@@ -78,7 +77,7 @@ describe('useModuleTimer', () => {
 
   it('returns null remaining when untimed', () => {
     const { result } = renderHook(() =>
-      useModuleTimer({ durationSeconds: null, timerMode: 'strict', startedAt: null }),
+      useModuleTimer({ durationSeconds: null, startedAt: null }),
     );
     expect(result.current.remainingSeconds).toBeNull();
     expect(result.current.expired).toBe(false);

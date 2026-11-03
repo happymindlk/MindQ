@@ -130,7 +130,6 @@ export function AssessmentRunner({
 
   const timer = useModuleTimer({
     durationSeconds: test.duration_seconds,
-    timerMode: test.timer_mode,
     startedAt: test.started_at,
     onExpire,
     enabled: !timeUp,

@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import type { TimerMode } from '../assessment-builder/types/module';
 
 export interface ModuleTimerState {
   /** Seconds left, clamped at 0. Null when untimed. */
@@ -9,8 +8,6 @@ export interface ModuleTimerState {
 
 interface ModuleTimerOptions {
   durationSeconds: number | null;
-  /** Retained for caller compatibility; every timed module hard-cuts at 00:00. */
-  timerMode: TimerMode;
   /** Server attempt start; null falls back to mount time (preview). */
   startedAt: string | null;
   onExpire?: () => void;
@@ -28,12 +25,11 @@ function computeRemaining(deadline: number | null, now: number): number | null {
  * real remaining time instead of restarting the clock. Any timed module
  * clamps at 00:00 and fires `onExpire` exactly once (hard cut-off).
  *
- * @param options - Duration, mode, anchor, and expiry callback.
+ * @param options - Duration, anchor, and expiry callback.
  * @returns Remaining seconds (clamped) plus an expiry flag.
  */
 export function useModuleTimer({
   durationSeconds,
-  timerMode: _timerMode,
   startedAt,
   onExpire,
   enabled = true,
