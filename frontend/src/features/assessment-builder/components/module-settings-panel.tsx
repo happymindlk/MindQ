@@ -188,8 +188,8 @@ export function ModuleSettingsPanel({
             }
           }}
         >
-          <option value="strict">Strict: client lock + auto-submit on expiry</option>
-          <option value="flexible">Flexible: timer shown or silent, overtime flagged</option>
+          <option value="strict">Strict: hard cutoff at 00:00 (lock + auto-submit)</option>
+          <option value="flexible">Flexible label only — duration still hard-cuts at 00:00</option>
         </select>
       </div>
 

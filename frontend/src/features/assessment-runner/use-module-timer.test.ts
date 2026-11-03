@@ -40,12 +40,11 @@ describe('useModuleTimer', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('resumes from the server started_at and fires onExpire exactly once in strict mode', () => {
+  it('resumes from the server started_at and fires onExpire exactly once', () => {
     const onExpire = vi.fn();
     const { result } = renderHook(() =>
       useModuleTimer({
         durationSeconds: 180,
-        timerMode: 'strict',
         startedAt: '2026-10-05T11:58:00Z',
         onExpire,
       }),
@@ -56,29 +55,29 @@ describe('useModuleTimer', () => {
       vi.advanceTimersByTime(61_000);
     });
     expect(result.current.expired).toBe(true);
+    expect(result.current.remainingSeconds).toBe(0);
     act(() => {
       vi.advanceTimersByTime(5_000);
     });
     expect(onExpire).toHaveBeenCalledTimes(1);
   });
 
-  it('counts into overtime in flexible mode without expiring', () => {
+  it('hard-cuts flexible timers at 00:00 and fires onExpire (no overtime)', () => {
     const onExpire = vi.fn();
     const { result } = renderHook(() =>
-      useModuleTimer({ durationSeconds: 10, timerMode: 'flexible', startedAt: null, onExpire }),
+      useModuleTimer({ durationSeconds: 10, startedAt: null, onExpire }),
     );
     act(() => {
       vi.advanceTimersByTime(15_000);
     });
-    expect(result.current.overtime).toBe(true);
-    expect(result.current.expired).toBe(false);
-    expect(result.current.remainingSeconds).toBe(-5);
-    expect(onExpire).not.toHaveBeenCalled();
+    expect(result.current.expired).toBe(true);
+    expect(result.current.remainingSeconds).toBe(0);
+    expect(onExpire).toHaveBeenCalledTimes(1);
   });
 
   it('returns null remaining when untimed', () => {
     const { result } = renderHook(() =>
-      useModuleTimer({ durationSeconds: null, timerMode: 'strict', startedAt: null }),
+      useModuleTimer({ durationSeconds: null, startedAt: null }),
     );
     expect(result.current.remainingSeconds).toBeNull();
     expect(result.current.expired).toBe(false);
@@ -89,7 +88,7 @@ describe('formatClock', () => {
   it.each([
     [0, '0:00'],
     [65, '1:05'],
-    [-7, '-0:07'],
+    [-7, '0:00'],
   ])('%d -> %s', (seconds, expected) => {
     expect(formatClock(seconds)).toBe(expected);
   });

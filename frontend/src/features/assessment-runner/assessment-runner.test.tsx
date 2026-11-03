@@ -312,8 +312,8 @@ describe('AssessmentRunner strict expiry', () => {
   });
 });
 
-describe('AssessmentRunner flexible overtime', () => {
-  it('does not auto-submit when a flexible timer runs over', async () => {
+describe('AssessmentRunner timed hard-cut (flexible tag)', () => {
+  it('auto-submits at 00:00 even when timer_mode is flexible', async () => {
     const transport = {
       autosave: vi.fn(async () => undefined),
       submit: vi.fn(async () => undefined),
@@ -331,10 +331,11 @@ describe('AssessmentRunner flexible overtime', () => {
       'live',
       { onSubmitted, onTimeExpired },
     );
-    await screen.findByRole('timer');
-    expect(transport.submit).not.toHaveBeenCalled();
-    expect(onTimeExpired).not.toHaveBeenCalled();
+    await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
     expect(onSubmitted).not.toHaveBeenCalled();
+    expect(transport.submit).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(screen.queryByText(/\+/)).not.toBeInTheDocument();
   });
 });
 

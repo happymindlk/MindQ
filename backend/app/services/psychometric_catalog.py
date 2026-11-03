@@ -23,7 +23,8 @@ TARGET_SLUGS: tuple[str, ...] = (
     "hexaco_hh",
 )
 
-# duration_seconds is authoritative. Only CRT is a strict cutoff.
+# duration_seconds is authoritative. Every positive duration hard-cuts
+# server-side; timer_mode is retained as catalog metadata / UI hint only.
 TIMER_CONFIG: dict[str, tuple[int, str, bool]] = {
     "ipip_ipc": (270, "flexible", False),
     "personal_initiative": (120, "flexible", False),

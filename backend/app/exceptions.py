@@ -92,7 +92,7 @@ class AssessmentNotFoundError(Exception):
 
 
 class AssessmentTimeExpiredError(Exception):
-    """Strict-timer module passed its server-side deadline; further saves are rejected."""
+    """Timed module passed its server-side deadline; further saves are rejected."""
 
     detail = "Time limit reached. This section is locked; submit to finalize."
 

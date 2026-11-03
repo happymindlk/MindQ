@@ -49,19 +49,42 @@ def _progress(started_seconds_ago):
     [
         ("strict", 180 + STRICT_GRACE_SECONDS - 1, False),
         ("strict", 180 + STRICT_GRACE_SECONDS + 1, True),
-        ("flexible", 10_000, False),
+        ("flexible", 180 + STRICT_GRACE_SECONDS - 1, False),
+        ("flexible", 180 + STRICT_GRACE_SECONDS + 1, True),
     ],
 )
-def test_is_strict_expired_respects_grace_and_mode(timer_mode, elapsed, expected):
+def test_is_strict_expired_respects_grace_for_all_timed_modes(timer_mode, elapsed, expected):
     assert is_strict_expired(_assessment(timer_mode=timer_mode), _progress(elapsed), NOW) is expected
 
 
-def test_untimed_strict_module_never_expires():
+def test_untimed_module_never_expires():
     assert is_strict_expired(_assessment(duration_seconds=None), _progress(99_999), NOW) is False
 
 
 def test_not_started_attempt_is_not_expired():
     assert is_strict_expired(_assessment(), None, NOW) is False
+
+
+@pytest.mark.asyncio
+async def test_autosave_rejects_after_flexible_deadline(monkeypatch):
+    assessment = _assessment(timer_mode="flexible", duration_seconds=180)
+    progress = _progress(1000)
+    monkeypatch.setattr(
+        CandidateService,
+        "require_writable_assessment",
+        AsyncMock(return_value=(assessment, progress)),
+    )
+    monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
+    session = AsyncMock()
+    body = ResponseSave(
+        assessment_id=assessment.id, question_id="q1", response={"answer": "a"}, elapsed_seconds=4.2
+    )
+
+    with pytest.raises(AssessmentTimeExpiredError):
+        await CandidateService.autosave_response(
+            session, SimpleNamespace(id=uuid4(), corporate_id=uuid4()), body
+        )
+    session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
