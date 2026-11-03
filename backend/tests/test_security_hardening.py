@@ -151,6 +151,7 @@ async def test_submit_drops_pending_answers_for_unknown_questions(monkeypatch):
     rows.scalars.return_value.first.return_value = None
     session = AsyncMock()
     session.add = MagicMock()
+    session.add_all = MagicMock()
     session.execute = AsyncMock(return_value=rows)
     pending = [ResponseSave(assessment_id=assessment.id, question_id="ghost", response={"answer": "a"})]
 
@@ -159,6 +160,8 @@ async def test_submit_drops_pending_answers_for_unknown_questions(monkeypatch):
     )
 
     session.add.assert_not_called()
+    session.add_all.assert_not_called()
+    session.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio

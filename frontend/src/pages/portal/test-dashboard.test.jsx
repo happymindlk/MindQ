@@ -15,7 +15,7 @@ vi.mock('react-router-dom', async (importOriginal) => {
 });
 
 vi.mock('../../api/client', () => ({
-  api: { candidate: { getDashboard: vi.fn() } },
+  api: { candidate: { getDashboard: vi.fn(), getTest: vi.fn(async () => ({ questions: [] })) } },
 }));
 
 const tests = [

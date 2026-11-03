@@ -771,45 +771,13 @@ class CandidateService:
         )
         now = _utcnow()
         accept_pending = not is_strict_expired(assessment, progress, now)
-        known_ids = question_ids(assessment)
-
-        for save_data in (pending_responses or []) if accept_pending else []:
-            if save_data.assessment_id != assessment_id:
-                continue
-            if str(save_data.question_id) not in known_ids:
-                logger.warning(
-                    "submit_unknown_question_dropped candidate_id=%s assessment_id=%s",
-                    candidate.id,
-                    assessment_id,
-                )
-                continue
-            elapsed = _elapsed_decimal(save_data.elapsed_seconds)
-            existing = (
-                await session.execute(
-                    select(CandidateResponse).where(
-                        CandidateResponse.candidate_id == candidate.id,
-                        CandidateResponse.assessment_id == assessment.id,
-                        CandidateResponse.question_id == save_data.question_id,
-                    )
-                )
-            ).scalars().first()
-            if existing:
-                existing.response = save_data.response
-                if elapsed is not None:
-                    existing.elapsed_seconds = elapsed
-            else:
-                session.add(
-                    CandidateResponse(
-                        corporate_id=candidate.corporate_id,
-                        candidate_id=candidate.id,
-                        assessment_id=assessment.id,
-                        question_id=save_data.question_id,
-                        response=save_data.response,
-                        elapsed_seconds=elapsed,
-                    )
-                )
-
-        await session.flush()
+        if accept_pending and pending_responses:
+            await CandidateService._upsert_pending_responses(
+                session,
+                candidate,
+                assessment,
+                pending_responses,
+            )
 
         if not progress:
             progress = CandidateProgress(
@@ -823,7 +791,7 @@ class CandidateService:
         if progress.started_at is not None:
             server_seconds = max(0.0, (now - progress.started_at).total_seconds())
 
-        # Acknowledge completion immediately; scoring runs in BackgroundTasks.
+        # Acknowledge completion immediately; scoring / HR email run in BackgroundTasks.
         progress.status = COMPLETED_STATUS
         progress.completed_at = now
         progress.client_duration_seconds = _elapsed_decimal(client_duration_seconds)
@@ -838,9 +806,75 @@ class CandidateService:
             # A concurrent first-time submit inserted the progress row first.
             await session.rollback()
             raise AssessmentAlreadySubmittedError() from exc
-        await session.refresh(progress)
-        package_complete = await CandidateService.is_package_complete(session, candidate)
-        return progress, package_complete
+        # Skip session.refresh + is_package_complete: both are extra round-trips.
+        # JD/HR side-effects check completeness inside BackgroundTasks.
+        return progress, False
+
+    @staticmethod
+    async def _upsert_pending_responses(
+        session: AsyncSession,
+        candidate: Candidate,
+        assessment: Assessment,
+        pending_responses: list[ResponseSave],
+    ) -> None:
+        """Apply submit-time answers in one SELECT + batched writes.
+
+        Args:
+            session: Async database session.
+            candidate: Authenticated candidate.
+            assessment: Assessment being submitted.
+            pending_responses: Answer payloads from the client submit body.
+        """
+        known_ids = question_ids(assessment)
+        by_qid: dict[str, ResponseSave] = {}
+        for save_data in pending_responses:
+            if save_data.assessment_id != assessment.id:
+                continue
+            qid = str(save_data.question_id)
+            if qid not in known_ids:
+                logger.warning(
+                    "submit_unknown_question_dropped candidate_id=%s assessment_id=%s",
+                    candidate.id,
+                    assessment.id,
+                )
+                continue
+            by_qid[qid] = save_data
+        if not by_qid:
+            return
+
+        existing_rows = (
+            await session.execute(
+                select(CandidateResponse).where(
+                    CandidateResponse.candidate_id == candidate.id,
+                    CandidateResponse.assessment_id == assessment.id,
+                    CandidateResponse.question_id.in_(tuple(by_qid.keys())),
+                )
+            )
+        ).scalars().all()
+        existing_by_qid = {str(row.question_id): row for row in existing_rows}
+
+        new_rows: list[CandidateResponse] = []
+        for qid, save_data in by_qid.items():
+            elapsed = _elapsed_decimal(save_data.elapsed_seconds)
+            row = existing_by_qid.get(qid)
+            if row is not None:
+                row.response = save_data.response
+                if elapsed is not None:
+                    row.elapsed_seconds = elapsed
+            else:
+                new_rows.append(
+                    CandidateResponse(
+                        corporate_id=candidate.corporate_id,
+                        candidate_id=candidate.id,
+                        assessment_id=assessment.id,
+                        question_id=qid,
+                        response=save_data.response,
+                        elapsed_seconds=elapsed,
+                    )
+                )
+        if new_rows:
+            session.add_all(new_rows)
+        await session.flush()
 
     @staticmethod
     async def finalize_submission_scores(

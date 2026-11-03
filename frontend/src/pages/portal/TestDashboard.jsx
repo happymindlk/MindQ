@@ -19,6 +19,9 @@ import {
 } from '../../features/candidate-dashboard/module-status';
 import { formatDurationBadge } from '../../features/assessment-builder/types/module';
 import { useCachedQuery } from '../../hooks/use-cached-query';
+import { cachedQuery, candidateTestKey } from '../../lib/query-cache';
+
+const TEST_PREFETCH_STALE_MS = 60000;
 
 export default function TestDashboard() {
   const navigate = useNavigate();
@@ -113,17 +116,27 @@ export default function TestDashboard() {
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {tests.map((test) => (
-            <StatusTile
-              key={test.id}
-              title={test.title}
-              description={test.description}
-              status={normalizeModuleStatus(test.status)}
-              durationLabel={formatDurationBadge(resolveTestDurationSeconds(test))}
-              lockedReason={lockedReasonFor(normalizeModuleStatus(test.status), windowState)}
-              onClick={() => navigate(`/portal/test/${test.id}`)}
-            />
-          ))}
+          {tests.map((test) => {
+            const status = normalizeModuleStatus(test.status);
+            return (
+              <StatusTile
+                key={test.id}
+                title={test.title}
+                description={test.description}
+                status={status}
+                durationLabel={formatDurationBadge(resolveTestDurationSeconds(test))}
+                lockedReason={lockedReasonFor(status, windowState)}
+                onPrefetch={() => {
+                  void cachedQuery(
+                    candidateTestKey(test.id),
+                    () => api.candidate.getTest(test.id),
+                    { staleTime: TEST_PREFETCH_STALE_MS },
+                  ).catch(() => undefined);
+                }}
+                onClick={() => navigate(`/portal/test/${test.id}`)}
+              />
+            );
+          })}
         </div>
       )}
     </div>

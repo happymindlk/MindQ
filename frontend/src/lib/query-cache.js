@@ -11,6 +11,11 @@ const inflight = new Map();
 
 export const DEFAULT_STALE_TIME_MS = 5 * 60 * 1000;
 
+/** Cache key for a candidate assessment runner payload. */
+export function candidateTestKey(testId) {
+  return `candidate-test:${testId}`;
+}
+
 /**
  * Read a cached value without fetching.
  *

@@ -7,8 +7,11 @@ from uuid import UUID
 
 from app.database import SessionLocal
 from app.models.candidate_progress import CandidateProgress
+from app.models.corporate import Corporate
 from app.services.candidate_service import CandidateService
+from app.services.email_service import EmailService
 from app.services.gemini_client import background_retry_profile
+from app.services.package_service import PackageService
 from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
@@ -88,6 +91,42 @@ async def finalize_and_score_ai(
             )
 
     await score_ai_for_candidate(candidate_id, assessment_id)
+    await notify_hr_if_package_complete(candidate_id)
+
+
+async def notify_hr_if_package_complete(candidate_id: UUID) -> None:
+    """Send the HR completion email only after the full package is done.
+
+    Kept off the submit hot path so package/corporate lookups never delay
+    the candidate's HTTP response.
+
+    Args:
+        candidate_id: Candidate who just submitted a module.
+    """
+    async with SessionLocal() as session:
+        try:
+            candidate = await CandidateService.get_candidate(session, candidate_id)
+            if not candidate:
+                return
+            if not await CandidateService.is_package_complete(session, candidate):
+                return
+            package = await PackageService.get_package(session, candidate.package_id)
+            corporate = (
+                await session.execute(
+                    select(Corporate).where(Corporate.id == candidate.corporate_id)
+                )
+            ).scalar_one_or_none()
+            if not corporate or not corporate.contact_email:
+                return
+            await EmailService.send_hr_completion_email(
+                corporate.contact_email,
+                candidate_name=candidate.full_name,
+                candidate_email=candidate.email,
+                package_title=package.title if package else "assessment package",
+                hr_name=corporate.name,
+            )
+        except Exception:
+            logger.exception("hr_completion_email_failed candidate_id=%s", candidate_id)
 
 
 async def score_ai_for_candidate(

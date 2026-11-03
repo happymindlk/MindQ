@@ -8,13 +8,24 @@ import { api } from '../../api/client';
 import { readDraft, writeDraft, clearDraft, mergeAnswers } from '../../lib/assessment-draft';
 import { AssessmentRunner } from '../../features/assessment-runner/assessment-runner';
 import { useToast } from '../../components/ui/useToast';
-import { invalidateQuery } from '../../lib/query-cache';
+import { candidateTestKey, cachedQuery, invalidateQuery, peekQuery } from '../../lib/query-cache';
 import { CANDIDATE_DASHBOARD_KEY } from '../../features/candidate-dashboard/module-status';
 
 const LOCKED_DETAIL = 'Assessment already completed. Modifications are locked.';
+const TEST_STALE_MS = 60000;
 
 function isAssessmentLocked(err) {
   return (err?.status === 409 && err?.code !== 'TIME_EXPIRED') || err?.message === LOCKED_DETAIL;
+}
+
+function deferWork(work) {
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => {
+      window.setTimeout(work, 0);
+    });
+    return;
+  }
+  work();
 }
 
 export default function TestRunner() {
@@ -22,10 +33,15 @@ export default function TestRunner() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const candidateId = typeof window !== 'undefined' ? localStorage.getItem('candidateId') : null;
+  const cacheKey = candidateTestKey(testId);
 
-  const [test, setTest] = useState(null);
-  const [initialAnswers, setInitialAnswers] = useState({});
-  const [isLoading, setIsLoading] = useState(true);
+  const cached = typeof testId === 'string' ? peekQuery(cacheKey) : undefined;
+  const [test, setTest] = useState(() => (cached && typeof cached === 'object' ? cached : null));
+  const [initialAnswers, setInitialAnswers] = useState(() => {
+    if (!cached || typeof cached !== 'object') return {};
+    return mergeAnswers(cached.answers || {}, readDraft(candidateId, testId));
+  });
+  const [isLoading, setIsLoading] = useState(() => !cached);
   const [lockDetail, setLockDetail] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [phase, setPhase] = useState('running'); // running | complete | expired
@@ -33,28 +49,33 @@ export default function TestRunner() {
   useEffect(() => {
     let cancelled = false;
     async function loadTest() {
+      if (!testId) return;
       try {
-        const data = await api.candidate.getTest(testId);
+        const data = await cachedQuery(cacheKey, () => api.candidate.getTest(testId), {
+          staleTime: TEST_STALE_MS,
+        });
         if (cancelled) return;
         setInitialAnswers(mergeAnswers(data.answers || {}, readDraft(candidateId, testId)));
         setTest(data);
+        setLoadError(null);
+        setLockDetail(null);
       } catch (err) {
         if (cancelled) return;
         const detail = err.message || '';
         if (isAssessmentLocked(err)) {
           setLockDetail(detail || LOCKED_DETAIL);
-        } else {
+        } else if (!peekQuery(cacheKey)) {
           setLoadError(detail || 'Failed to load test questions');
         }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
     }
-    loadTest();
+    void loadTest();
     return () => {
       cancelled = true;
     };
-  }, [testId, candidateId]);
+  }, [testId, candidateId, cacheKey]);
 
   const transport = useMemo(
     () => ({
@@ -67,12 +88,17 @@ export default function TestRunner() {
           responses,
           total_module_duration_seconds ?? null,
         );
-        if (result.status === 200) clearDraft(candidateId, testId);
-        // Drop stale package status before the success screen / dashboard return.
-        invalidateQuery(CANDIDATE_DASHBOARD_KEY);
+        if (result.status === 200) {
+          clearDraft(candidateId, testId);
+          // Bust caches off the critical path so the submit spinner stays fluid.
+          deferWork(() => {
+            invalidateQuery(CANDIDATE_DASHBOARD_KEY);
+            invalidateQuery(cacheKey);
+          });
+        }
       },
     }),
-    [testId, candidateId],
+    [testId, candidateId, cacheKey],
   );
 
   const onAnswersChange = useCallback(
@@ -86,27 +112,29 @@ export default function TestRunner() {
   }, [navigate]);
 
   const onSubmitted = useCallback(() => {
-    invalidateQuery(CANDIDATE_DASHBOARD_KEY);
     setPhase('complete');
+    deferWork(() => invalidateQuery(CANDIDATE_DASHBOARD_KEY));
   }, []);
 
   const onTimeExpired = useCallback(() => {
-    invalidateQuery(CANDIDATE_DASHBOARD_KEY);
-    toast({
-      title: 'Time expired',
-      description: 'Your time for this test has ended. Your answers were automatically submitted.',
-      variant: 'warning',
-      duration: 6000,
-    });
     setPhase('expired');
+    deferWork(() => {
+      invalidateQuery(CANDIDATE_DASHBOARD_KEY);
+      toast({
+        title: 'Time expired',
+        description: 'Your time for this test has ended. Your answers were automatically submitted.',
+        variant: 'warning',
+        duration: 6000,
+      });
+    });
   }, [toast]);
 
-  if (isLoading) {
+  if (isLoading && !test) {
     return (
       <div className="w-full max-w-2xl mx-auto py-6 space-y-4" role="status" aria-label="Loading test">
-        <Skeleton className="h-4 w-40" />
-        <Skeleton className="h-2 w-full" />
-        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-4 w-40 animate-pulse" />
+        <Skeleton className="h-2 w-full animate-pulse" />
+        <Skeleton className="h-64 w-full animate-pulse" />
       </div>
     );
   }
