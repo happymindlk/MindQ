@@ -40,15 +40,12 @@ def test_logo_upload_returns_public_url(app, corp_id):
     persisted = type("Corp", (), {"logo_url": public})()
 
     with (
-        patch("app.api.v1.corporates.settings") as settings,
         patch("app.api.v1.corporates.upload_logo", return_value=public) as upload,
         patch(
             "app.api.v1.corporates.ClientPackageService.set_company_logo",
             new=AsyncMock(return_value=persisted),
         ) as persist,
     ):
-        settings.r2_configured = True
-        settings.r2_public_base = "https://cdn.example.com"
         res = client.post(
             f"/corporates/{corp_id}/logo",
             files={"file": ("logo.png", b"\x89PNG\r\n\x1a\n", "image/png")},
@@ -69,23 +66,36 @@ def test_logo_upload_returns_public_url(app, corp_id):
 def test_logo_upload_rejects_other_tenant(app, corp_id):
     client = TestClient(app)
     other = uuid4()
-    with patch("app.api.v1.corporates.settings") as settings:
-        settings.r2_configured = True
-        settings.r2_public_base = "https://cdn.example.com"
-        res = client.post(
-            f"/corporates/{other}/logo",
-            files={"file": ("logo.png", b"abc", "image/png")},
-        )
+    res = client.post(
+        f"/corporates/{other}/logo",
+        files={"file": ("logo.png", b"abc", "image/png")},
+    )
     assert res.status_code == 403
 
 
 def test_logo_upload_rejects_bad_type(app, corp_id):
     client = TestClient(app)
-    with patch("app.api.v1.corporates.settings") as settings:
-        settings.r2_configured = True
-        settings.r2_public_base = "https://cdn.example.com"
+    res = client.post(
+        f"/corporates/{corp_id}/logo",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+    assert res.status_code == 400
+
+
+def test_logo_upload_returns_503_when_storage_unconfigured(app, corp_id):
+    from app.services.storage import LogoStorageError
+
+    client = TestClient(app)
+    with patch(
+        "app.api.v1.corporates.upload_logo",
+        side_effect=LogoStorageError(
+            "Logo storage is not configured (missing: R2_ACCESS_KEY_ID, R2_PUBLIC_URL)",
+            status_code=503,
+        ),
+    ):
         res = client.post(
             f"/corporates/{corp_id}/logo",
-            files={"file": ("notes.txt", b"hello", "text/plain")},
+            files={"file": ("logo.png", b"\x89PNG\r\n\x1a\n", "image/png")},
         )
-    assert res.status_code == 400
+    assert res.status_code == 503
+    assert "missing:" in res.json()["detail"]

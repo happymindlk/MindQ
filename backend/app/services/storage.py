@@ -36,6 +36,46 @@ class LogoValidationError(ValueError):
     """Uploaded logo failed type, size, or emptiness checks."""
 
 
+class LogoStorageError(RuntimeError):
+    """Logo object-storage is misconfigured or the upload failed.
+
+    Attributes:
+        status_code: Suggested HTTP status for API handlers (503 misconfig, 502 upstream).
+    """
+
+    def __init__(self, message: str, *, status_code: int = 502) -> None:
+        """Create a storage failure with an HTTP-facing message.
+
+        Args:
+            message: Safe detail string for clients (no secrets).
+            status_code: Suggested HTTP status code for the API layer.
+        """
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def assert_logo_storage_configured() -> None:
+    """Raise ``LogoStorageError`` (503) when public R2 logo storage is incomplete.
+
+    Logs the missing env var names so operators can fix deployment config without
+    guessing which of ``R2_*`` / ``R2_PUBLIC_URL`` is blank.
+
+    Raises:
+        LogoStorageError: When credentials, endpoint, bucket, or public URL are missing.
+    """
+    missing = settings.missing_r2_logo_settings
+    if not missing:
+        return
+    logger.error(
+        "Logo storage is not configured; missing env vars: %s",
+        ", ".join(missing),
+    )
+    raise LogoStorageError(
+        f"Logo storage is not configured (missing: {', '.join(missing)})",
+        status_code=503,
+    )
+
+
 def validate_logo_upload(
     content_type: str | None,
     raw: bytes,
@@ -159,26 +199,54 @@ def upload_report(
         return None
 
 
+def _logo_upload_failure_detail(exc: BaseException) -> str:
+    """Map a boto/R2 failure to a safe, actionable client-facing detail.
+
+    Args:
+        exc: Exception raised by the S3 client during ``put_object``.
+
+    Returns:
+        Detail string without credentials or signed URLs.
+    """
+    error_code = ""
+    if isinstance(exc, ClientError):
+        error_code = str((exc.response or {}).get("Error", {}).get("Code") or "")
+    code = error_code.lower()
+    bucket = (settings.R2_BUCKET_NAME or "").strip() or "(unset)"
+    if code in {"nosuchbucket", "notfound", "404"}:
+        return (
+            f"Logo storage bucket {bucket!r} does not exist. "
+            "Create it in Cloudflare R2 (public read) or fix R2_BUCKET_NAME."
+        )
+    if code in {"invalidaccesskeyid", "signaturedoesnotmatch", "accessdenied", "403"}:
+        return "Logo storage rejected the credentials (check R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY)."
+    if code in {"permanentredirect", "illegalocation", "301", "307"}:
+        return "Logo storage endpoint/region mismatch (check R2_ENDPOINT_URL)."
+    return "Failed to upload logo to object storage"
+
+
 def upload_logo(
     corporate_id: UUID,
     filename: str,
     content: bytes,
     content_type: str,
-) -> str | None:
+) -> str:
     """Upload a corporate logo and return its public URL.
 
     Args:
         corporate_id: Tenant id used in the object key.
         filename: Sanitized file name (e.g. ``logo-171000.png``).
-        content: Raw image bytes.
+        content: Raw image bytes (already size-capped by ``validate_logo_upload``).
         content_type: MIME type for the object.
 
     Returns:
-        Public HTTPS URL on success, or None when R2 is unconfigured / upload fails.
+        Public HTTPS URL on success.
+
+    Raises:
+        LogoStorageError: When R2 is misconfigured (503) or the upload fails (502).
+            The bucket is never auto-created; operators must provision it.
     """
-    if not settings.r2_configured or not settings.r2_public_base:
-        logger.warning("R2 public storage not configured; skipping logo upload")
-        return None
+    assert_logo_storage_configured()
 
     safe_name = filename.replace("\\", "/").split("/")[-1]
     key = f"logos/{corporate_id}/{safe_name}"
@@ -192,9 +260,18 @@ def upload_logo(
             ContentType=content_type or "application/octet-stream",
         )
         return f"{settings.r2_public_base}/{key}"
-    except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001
-        logger.warning("Logo upload failed for %s: %s", key, exc)
-        return None
+    except (BotoCoreError, ClientError) as exc:
+        logger.error("Logo upload failed: %s", exc, exc_info=True)
+        raise LogoStorageError(
+            _logo_upload_failure_detail(exc),
+            status_code=502,
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 - surface unexpected client/runtime failures
+        logger.error("Logo upload failed: %s", exc, exc_info=True)
+        raise LogoStorageError(
+            "Failed to upload logo to object storage",
+            status_code=502,
+        ) from exc
 
 
 def _reports_bucket_safe() -> bool:

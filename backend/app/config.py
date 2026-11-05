@@ -195,6 +195,27 @@ class Settings(BaseSettings):
         )
 
     @property
+    def missing_r2_logo_settings(self) -> list[str]:
+        """Env var names required for public logo uploads that are currently blank.
+
+        Returns:
+            Ordered list of missing setting names (credentials, endpoint, bucket,
+            and/or public CDN base). Empty when logo storage is fully configured.
+        """
+        missing: list[str] = []
+        for name in (
+            "R2_ACCESS_KEY_ID",
+            "R2_SECRET_ACCESS_KEY",
+            "R2_ENDPOINT_URL",
+            "R2_BUCKET_NAME",
+        ):
+            if not str(getattr(self, name, "") or "").strip():
+                missing.append(name)
+        if not str(self.R2_PUBLIC_URL or "").strip():
+            missing.append("R2_PUBLIC_URL")
+        return missing
+
+    @property
     def r2_reports_configured(self) -> bool:
         """True when a dedicated private bucket for candidate reports is configured."""
         return bool(self.r2_configured and self.R2_REPORTS_BUCKET_NAME.strip())
