@@ -32,7 +32,7 @@ def _beta_request_html(user_email: str, user_id: str) -> str:
 <html>
 <body style="font-family:Segoe UI,system-ui,sans-serif;line-height:1.5;color:#111827;">
   <h2 style="margin:0 0 12px;">New beta access request</h2>
-  <p style="margin:0 0 16px;">An HR user requested Assess Pulse beta access. Provision their tenant via SQL using the values below.</p>
+  <p style="margin:0 0 16px;">An HR user requested MindQ beta access. Provision their tenant via SQL using the values below.</p>
   <table style="border-collapse:collapse;font-size:14px;">
     <tr>
       <td style="padding:8px 12px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Email</td>

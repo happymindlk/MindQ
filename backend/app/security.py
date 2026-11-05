@@ -79,10 +79,20 @@ def assert_production_ready(settings: Settings) -> None:
             )
 
     reports_bucket = settings.R2_REPORTS_BUCKET_NAME.strip()
-    if reports_bucket and reports_bucket == settings.R2_BUCKET_NAME.strip() and settings.r2_public_base:
+    public_logo_buckets = {
+        name
+        for name in (
+            (settings.R2_BUCKET_NAME or "").strip(),
+            (settings.SUPABASE_LOGO_BUCKET or "").strip(),
+        )
+        if name
+    }
+    if reports_bucket and reports_bucket in public_logo_buckets and (
+        settings.r2_public_base or settings.supabase_logo_public_base
+    ):
         errors.append(
             "R2_REPORTS_BUCKET_NAME must be a private bucket distinct from the public "
-            "logo bucket (R2_BUCKET_NAME) when DEBUG=false"
+            "logo bucket (SUPABASE_LOGO_BUCKET / R2_BUCKET_NAME) when DEBUG=false"
         )
 
     if errors:

@@ -1,7 +1,7 @@
 import json
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict, NoDecode
 
 
@@ -26,19 +26,43 @@ class Settings(BaseSettings):
     # HR client-portal session tokens (also signed with SECRET_KEY, separate audience).
     CLIENT_TOKEN_TTL_MINUTES: int = 480
 
-    # Supabase settings (server-side). Auth/DB only — report archives use R2.
+    # Supabase settings (server-side). Auth/DB + public logo uploads via Storage.
     SUPABASE_URL: str = "http://127.0.0.1:54321"
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     # Verifies HR access tokens minted by Supabase Auth (HS256).
     SUPABASE_JWT_SECRET: str = "super-secret-jwt-token-with-at-least-32-characters-long"
+    # Public Storage bucket for corporate logos (see supabase migrations).
+    # Override only if you intentionally provision a different public bucket.
+    SUPABASE_LOGO_BUCKET: str = "corporate-logos"
 
-    # Cloudflare R2 (S3-compatible). ENDPOINT is the S3 API host; PUBLIC_URL is the
-    # public bucket/CDN base used for logos (and other publicly readable objects).
-    R2_ACCESS_KEY_ID: str = ""
-    R2_SECRET_ACCESS_KEY: str = ""
-    R2_ENDPOINT_URL: str = ""
-    R2_BUCKET_NAME: str = "assess-pulse"
-    R2_PUBLIC_URL: str = ""
+    # Optional S3-compatible fallback for logos + private report archives.
+    # Prefer native Supabase Storage above. These accept legacy R2_* names and the
+    # Supabase S3 gateway aliases. Do NOT reuse AWS_ACCESS_KEY_ID here — that pair
+    # is reserved for SES email below.
+    R2_ACCESS_KEY_ID: str = Field(
+        default="",
+        validation_alias=AliasChoices("R2_ACCESS_KEY_ID", "AWS_S3_ACCESS_KEY_ID"),
+    )
+    R2_SECRET_ACCESS_KEY: str = Field(
+        default="",
+        validation_alias=AliasChoices("R2_SECRET_ACCESS_KEY", "AWS_S3_SECRET_ACCESS_KEY"),
+    )
+    R2_ENDPOINT_URL: str = Field(
+        default="",
+        validation_alias=AliasChoices("R2_ENDPOINT_URL", "AWS_S3_ENDPOINT_URL"),
+    )
+    R2_BUCKET_NAME: str = Field(
+        default="assess-pulse",
+        validation_alias=AliasChoices("R2_BUCKET_NAME", "AWS_STORAGE_BUCKET_NAME"),
+    )
+    R2_PUBLIC_URL: str = Field(
+        default="",
+        validation_alias=AliasChoices("R2_PUBLIC_URL", "STORAGE_PUBLIC_BASE_URL"),
+    )
+    R2_REGION: str = Field(
+        default="",
+        validation_alias=AliasChoices("R2_REGION", "AWS_S3_REGION_NAME"),
+    )
     # Candidate reports contain PII + psychometric results, so they must never share
     # the publicly readable logo bucket. Blank disables report archiving entirely.
     R2_REPORTS_BUCKET_NAME: str = ""
@@ -46,6 +70,7 @@ class Settings(BaseSettings):
 
     # AWS SES transactional email (boto3). Credentials may come from env keys
     # or the default AWS credential chain (IAM role, shared config, …).
+    # Keep these distinct from Storage S3 gateway keys (use AWS_S3_* for storage).
     AWS_REGION: str = "us-east-1"
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
@@ -99,7 +124,12 @@ class Settings(BaseSettings):
     # (1 in qa/staging/DEBUG, else 5). Set AUTH_LOCKOUT_MINUTES to override.
     AUTH_LOCKOUT_MINUTES: int | None = None
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
@@ -185,8 +215,17 @@ class Settings(BaseSettings):
         return [str(raw).strip().rstrip("/")] if str(raw).strip() else []
 
     @property
+    def supabase_logo_storage_configured(self) -> bool:
+        """True when logos can upload via the Supabase Storage client."""
+        return bool(
+            str(self.SUPABASE_URL or "").strip()
+            and str(self.SUPABASE_SERVICE_ROLE_KEY or "").strip()
+            and str(self.SUPABASE_LOGO_BUCKET or "").strip()
+        )
+
+    @property
     def r2_configured(self) -> bool:
-        """True when all R2 credentials needed for object storage are present."""
+        """True when S3-compatible credentials for object storage are present."""
         return bool(
             self.R2_ACCESS_KEY_ID
             and self.R2_SECRET_ACCESS_KEY
@@ -195,25 +234,45 @@ class Settings(BaseSettings):
         )
 
     @property
-    def missing_r2_logo_settings(self) -> list[str]:
+    def s3_logo_storage_configured(self) -> bool:
+        """True when logos can upload via the S3/R2 client + public URL base."""
+        return bool(self.r2_configured and str(self.R2_PUBLIC_URL or "").strip())
+
+    @property
+    def missing_logo_storage_settings(self) -> list[str]:
         """Env var names required for public logo uploads that are currently blank.
 
+        Prefers Supabase Storage (``SUPABASE_URL`` + service role + bucket). When
+        that path is incomplete, falls back to listing the S3/R2 vars so either
+        backend can satisfy the guard.
+
         Returns:
-            Ordered list of missing setting names (credentials, endpoint, bucket,
-            and/or public CDN base). Empty when logo storage is fully configured.
+            Ordered list of missing setting names. Empty when either Supabase or
+            S3 logo storage is fully configured.
         """
+        if self.supabase_logo_storage_configured or self.s3_logo_storage_configured:
+            return []
+
         missing: list[str] = []
+        for name in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_LOGO_BUCKET"):
+            if not str(getattr(self, name, "") or "").strip():
+                missing.append(name)
+        # Surface the S3 fallback gaps so operators who prefer R2/S3 know what to set.
         for name in (
             "R2_ACCESS_KEY_ID",
             "R2_SECRET_ACCESS_KEY",
             "R2_ENDPOINT_URL",
             "R2_BUCKET_NAME",
+            "R2_PUBLIC_URL",
         ):
             if not str(getattr(self, name, "") or "").strip():
                 missing.append(name)
-        if not str(self.R2_PUBLIC_URL or "").strip():
-            missing.append("R2_PUBLIC_URL")
         return missing
+
+    @property
+    def missing_r2_logo_settings(self) -> list[str]:
+        """Backward-compatible alias for ``missing_logo_storage_settings``."""
+        return self.missing_logo_storage_settings
 
     @property
     def r2_reports_configured(self) -> bool:
@@ -222,8 +281,21 @@ class Settings(BaseSettings):
 
     @property
     def r2_public_base(self) -> str:
-        """Public base URL for objects (no trailing slash)."""
+        """Public base URL for S3/R2 objects (no trailing slash)."""
         return (self.R2_PUBLIC_URL or "").rstrip("/")
+
+    @property
+    def supabase_logo_public_base(self) -> str:
+        """Public Storage object base for logos (no trailing slash).
+
+        Returns:
+            ``{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_LOGO_BUCKET}``.
+        """
+        base = str(self.SUPABASE_URL or "").rstrip("/")
+        bucket = str(self.SUPABASE_LOGO_BUCKET or "").strip()
+        if not base or not bucket:
+            return ""
+        return f"{base}/storage/v1/object/public/{bucket}"
 
     @property
     def admin_notification_email(self) -> str:

@@ -317,7 +317,7 @@ def test_logo_upload_rejects_invalid_files(
     session.commit.assert_not_called()
 
 
-def test_logo_upload_returns_503_when_r2_unconfigured():
+def test_logo_upload_returns_503_when_storage_unconfigured():
     from app.services.storage import LogoStorageError
 
     corp_id = uuid4()
@@ -325,7 +325,7 @@ def test_logo_upload_returns_503_when_r2_unconfigured():
     with patch(
         "app.api.v1.admin_ops.upload_logo",
         side_effect=LogoStorageError(
-            "Logo storage is not configured (missing: R2_PUBLIC_URL)",
+            "Logo storage is not configured (missing: SUPABASE_SERVICE_ROLE_KEY)",
             status_code=503,
         ),
     ):
@@ -334,7 +334,7 @@ def test_logo_upload_returns_503_when_r2_unconfigured():
             files={"file": ("logo.png", PNG, "image/png")},
         )
     assert res.status_code == 503
-    assert "missing: R2_PUBLIC_URL" in res.json()["detail"]
+    assert "missing: SUPABASE_SERVICE_ROLE_KEY" in res.json()["detail"]
 
 
 def test_logo_upload_returns_502_when_storage_fails():
@@ -345,8 +345,8 @@ def test_logo_upload_returns_502_when_storage_fails():
     with patch(
         "app.api.v1.admin_ops.upload_logo",
         side_effect=LogoStorageError(
-            "Logo storage bucket 'assess-pulse' does not exist. "
-            "Create it in Cloudflare R2 (public read) or fix R2_BUCKET_NAME.",
+            "Logo storage bucket 'corporate-logos' does not exist. "
+            "Create a public bucket in Supabase Storage (or fix SUPABASE_LOGO_BUCKET / R2_BUCKET_NAME).",
             status_code=502,
         ),
     ):

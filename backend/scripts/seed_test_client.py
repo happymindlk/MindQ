@@ -222,7 +222,7 @@ async def _seed_candidates(
                     corporate_id=corporate_id,
                     package_id=package_id,
                     full_name=f"Test Candidate {index + 1}",
-                    email=f"candidate{index + 1}@seed.assesspulse.test",
+                    email=f"candidate{index + 1}@seed.mindq.test",
                     access_code=access_code,
                     logged_in_at=logged_in_at,
                 )

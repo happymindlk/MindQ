@@ -3,7 +3,9 @@ import { ChevronDown } from 'lucide-react';
 import CandidateShareBanner from './candidate-share-banner';
 import CandidateTable from './candidate-table';
 import DownloadAllReportsButton from '../../features/mindq-report/download-all-reports-button';
+import DeadlineLabel from '../../features/package-schedule/deadline-label';
 import { clientApi } from '../../lib/clientApi';
+import { formatPackageLabel } from '../../lib/format-package-label';
 
 /**
  * @param {{ pkg: object, open: boolean, onToggle: (id: string) => void, companyName: string }} props
@@ -26,8 +28,11 @@ function PackageAccordion({ pkg, open, onToggle, companyName }) {
           className={`h-4 w-4 shrink-0 text-muted transition-transform duration-200 ${open ? '' : '-rotate-90'}`}
         />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-foreground">{pkg.title}</p>
+          <p className="truncate text-sm font-semibold text-foreground">
+            {formatPackageLabel(pkg.title)}
+          </p>
           <p className="truncate text-xs text-muted">{pkg.target_role || 'No target role'}</p>
+          <DeadlineLabel closeTime={pkg.close_time} className="mt-1" />
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <div

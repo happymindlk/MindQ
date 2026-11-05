@@ -6,6 +6,7 @@ import Button from '../../../components/ui/Button';
 import { useToast } from '../../../components/ui/useToast';
 import { adminApi } from '../../../lib/adminApi';
 import { formatDeadlineTimestamp } from '../../../lib/format-deadline';
+import { formatPackageLabel } from '../../../lib/format-package-label';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@.]+$/;
 const COPIED_RESET_MS = 1800;
@@ -129,7 +130,7 @@ export default function SharePackageModal({ isOpen, pkg, corporate, onClose }) {
     : (pkg?.candidate_link ?? '');
   const hrLink = `${frontendOrigin}/client/login`;
   const candidateInvite = [
-    `Assessment: ${pkg?.title ?? ''}`,
+    `Assessment: ${formatPackageLabel(pkg?.title)}`,
     `Test link: ${candidateLink}`,
     `PIN: ${accessCode}`,
     `Deadline: ${formatDeadlineTimestamp(pkg?.close_time)}`,

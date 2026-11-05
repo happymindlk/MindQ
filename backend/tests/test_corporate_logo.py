@@ -89,7 +89,7 @@ def test_logo_upload_returns_503_when_storage_unconfigured(app, corp_id):
     with patch(
         "app.api.v1.corporates.upload_logo",
         side_effect=LogoStorageError(
-            "Logo storage is not configured (missing: R2_ACCESS_KEY_ID, R2_PUBLIC_URL)",
+            "Logo storage is not configured (missing: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)",
             status_code=503,
         ),
     ):

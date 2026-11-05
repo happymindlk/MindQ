@@ -128,7 +128,7 @@ async def upload_company_logo(
     db: AsyncSession = Depends(get_db),
     _: HRUserContext = Depends(get_current_ops_user),
 ):
-    """Upload a logo for any company to R2 and persist ``corporates.logo_url``.
+    """Upload a logo for any company to Supabase Storage and persist ``corporates.logo_url``.
 
     Args:
         company_id: Target corporate UUID.

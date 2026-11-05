@@ -25,7 +25,7 @@ from app.models.candidate import Candidate
 from app.services.candidate_service import CandidateService
 
 CANDIDATE_AUDIENCE = "happy-mind-candidate"
-CLIENT_AUDIENCE = "assesspulse-client"
+CLIENT_AUDIENCE = "mindq-client"
 CLIENT_ROLE = "client_hr"
 
 

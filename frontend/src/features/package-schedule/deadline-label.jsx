@@ -1,9 +1,13 @@
 import React, { memo } from 'react';
 import { CalendarClock } from 'lucide-react';
-import { formatSriLankaDateTime, isPastInstant } from './sri-lanka-time';
+import {
+  SRI_LANKA_ZONE_LABEL,
+  formatSriLankaDateTime,
+  isPastInstant,
+} from './sri-lanka-time';
 
 /**
- * Compact "Closes … IST" / "Closed … IST" line for package rows and cards.
+ * Compact "Closes … (Sri Lanka Time - GMT+5:30)" line for package rows and cards.
  *
  * @param {object} props
  * @param {string | null | undefined} props.closeTime
@@ -20,7 +24,7 @@ function DeadlineLabel({ closeTime, className = '' }) {
       } ${className}`}
     >
       <CalendarClock className="w-3 h-3 shrink-0" aria-hidden="true" />
-      {closed ? 'Closed' : 'Closes'} {formatted} IST
+      {closed ? 'Closed' : 'Closes'} {formatted} ({SRI_LANKA_ZONE_LABEL})
     </p>
   );
 }

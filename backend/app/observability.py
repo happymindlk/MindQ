@@ -54,7 +54,7 @@ def configure_logging(*, debug: bool = False) -> None:
         debug: When True, use human-readable text logs; otherwise JSON lines.
     """
     root = logging.getLogger()
-    if getattr(root, "_assess_pulse_configured", False):
+    if getattr(root, "_mindq_configured", False):
         return
     root.handlers.clear()
     handler = logging.StreamHandler(sys.stdout)
@@ -66,4 +66,4 @@ def configure_logging(*, debug: bool = False) -> None:
         handler.setFormatter(JsonFormatter())
     root.addHandler(handler)
     root.setLevel(logging.DEBUG if debug else logging.INFO)
-    root._assess_pulse_configured = True  # type: ignore[attr-defined]
+    root._mindq_configured = True  # type: ignore[attr-defined]

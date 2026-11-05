@@ -1,9 +1,13 @@
-"""Cloudflare R2 object storage helpers (S3 API via boto3).
+"""Object storage helpers for logos (Supabase Storage) and reports (S3/R2).
+
+Corporate logos prefer the Supabase Python Storage client
+(``SUPABASE_URL`` + ``SUPABASE_SERVICE_ROLE_KEY`` + ``SUPABASE_LOGO_BUCKET``).
+When that path is unavailable, logos fall back to the S3-compatible client
+(Cloudflare R2 or Supabase's S3 gateway).
 
 Reports are archived in the PRIVATE ``R2_REPORTS_BUCKET_NAME`` bucket under
 ``{corporate_id}/{candidate_id}.{ext}`` and are only ever served through
-short-lived presigned URLs. Corporate logos are stored in the public
-``R2_BUCKET_NAME`` bucket under ``logos/{corporate_id}/{filename}``.
+short-lived presigned URLs.
 """
 from __future__ import annotations
 
@@ -55,15 +59,15 @@ class LogoStorageError(RuntimeError):
 
 
 def assert_logo_storage_configured() -> None:
-    """Raise ``LogoStorageError`` (503) when public R2 logo storage is incomplete.
+    """Raise ``LogoStorageError`` (503) when public logo storage is incomplete.
 
-    Logs the missing env var names so operators can fix deployment config without
-    guessing which of ``R2_*`` / ``R2_PUBLIC_URL`` is blank.
+    Accepts either Supabase Storage credentials or a complete S3/R2 fallback.
+    Logs the missing env var names so operators can fix deployment config.
 
     Raises:
-        LogoStorageError: When credentials, endpoint, bucket, or public URL are missing.
+        LogoStorageError: When neither Supabase nor S3 logo storage is configured.
     """
-    missing = settings.missing_r2_logo_settings
+    missing = settings.missing_logo_storage_settings
     if not missing:
         return
     logger.error(
@@ -145,18 +149,76 @@ def _report_key(corporate_id: UUID, candidate_id: UUID, is_pdf: bool) -> str:
     return f"{corporate_id}/{candidate_id}.{ext}"
 
 
+def _logo_object_key(corporate_id: UUID, filename: str) -> str:
+    """Build the Storage object path for a corporate logo.
+
+    Matches the ``corporate-logos`` bucket convention
+    ``{corporate_id}/{filename}`` used by Storage RLS policies.
+
+    Args:
+        corporate_id: Tenant id used as the first path segment.
+        filename: Sanitized file name (no directories).
+
+    Returns:
+        Object key relative to the logo bucket.
+    """
+    safe_name = filename.replace("\\", "/").split("/")[-1]
+    return f"{corporate_id}/{safe_name}"
+
+
 def _s3_client():
-    """Build an S3 client pointed at the configured R2 endpoint."""
+    """Build an S3 client pointed at the configured R2 / Supabase S3 endpoint.
+
+    Supabase's S3 gateway expects ``region_name="us-east-1"`` and path-style
+    addressing. Cloudflare R2 continues to work with ``region_name="auto"``.
+    Explicit ``R2_REGION`` / ``AWS_S3_REGION_NAME`` overrides the default.
+    """
     import boto3
+
+    endpoint = (settings.R2_ENDPOINT_URL or "").rstrip("/")
+    is_supabase_s3 = "/storage/v1/s3" in endpoint
+    explicit_region = (settings.R2_REGION or "").strip()
+    region = explicit_region or ("us-east-1" if is_supabase_s3 else "auto")
+
+    if is_supabase_s3:
+        return boto3.client(
+            "s3",
+            endpoint_url=settings.R2_ENDPOINT_URL,
+            aws_access_key_id=settings.R2_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
+            region_name=region,
+            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+        )
 
     return boto3.client(
         "s3",
         endpoint_url=settings.R2_ENDPOINT_URL,
         aws_access_key_id=settings.R2_ACCESS_KEY_ID,
         aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
-        region_name="auto",
+        region_name=region,
         config=Config(signature_version="s3v4"),
     )
+
+
+def _supabase_storage_client():
+    """Build a service-role Supabase client for Storage uploads.
+
+    Returns:
+        A supabase-py client authenticated with the service role key.
+
+    Raises:
+        LogoStorageError: URL or service role key is missing.
+    """
+    from supabase import create_client
+
+    url = (settings.SUPABASE_URL or "").rstrip("/")
+    key = (settings.SUPABASE_SERVICE_ROLE_KEY or "").strip()
+    if not url or not key:
+        raise LogoStorageError(
+            "Logo storage is not configured (missing: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)",
+            status_code=503,
+        )
+    return create_client(url, key)
 
 
 def upload_report(
@@ -165,7 +227,7 @@ def upload_report(
     content: bytes,
     is_pdf: bool,
 ) -> str | None:
-    """Archive a generated report to R2.
+    """Archive a generated report to private S3/R2 storage.
 
     Args:
         corporate_id: Tenant id used as the object prefix.
@@ -200,10 +262,10 @@ def upload_report(
 
 
 def _logo_upload_failure_detail(exc: BaseException) -> str:
-    """Map a boto/R2 failure to a safe, actionable client-facing detail.
+    """Map an upstream storage failure to a safe, actionable client-facing detail.
 
     Args:
-        exc: Exception raised by the S3 client during ``put_object``.
+        exc: Exception raised during logo upload.
 
     Returns:
         Detail string without credentials or signed URLs.
@@ -212,45 +274,99 @@ def _logo_upload_failure_detail(exc: BaseException) -> str:
     if isinstance(exc, ClientError):
         error_code = str((exc.response or {}).get("Error", {}).get("Code") or "")
     code = error_code.lower()
-    bucket = (settings.R2_BUCKET_NAME or "").strip() or "(unset)"
-    if code in {"nosuchbucket", "notfound", "404"}:
+    message = str(exc).lower()
+    bucket = (
+        (settings.SUPABASE_LOGO_BUCKET if settings.supabase_logo_storage_configured else settings.R2_BUCKET_NAME)
+        or ""
+    ).strip() or "(unset)"
+    if code in {"nosuchbucket", "notfound", "404"} or "bucket not found" in message:
         return (
             f"Logo storage bucket {bucket!r} does not exist. "
-            "Create it in Cloudflare R2 (public read) or fix R2_BUCKET_NAME."
+            "Create a public bucket in Supabase Storage (or fix SUPABASE_LOGO_BUCKET / R2_BUCKET_NAME)."
         )
     if code in {"invalidaccesskeyid", "signaturedoesnotmatch", "accessdenied", "403"}:
-        return "Logo storage rejected the credentials (check R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY)."
+        return (
+            "Logo storage rejected the credentials "
+            "(check SUPABASE_SERVICE_ROLE_KEY or R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY)."
+        )
     if code in {"permanentredirect", "illegalocation", "301", "307"}:
         return "Logo storage endpoint/region mismatch (check R2_ENDPOINT_URL)."
     return "Failed to upload logo to object storage"
 
 
-def upload_logo(
-    corporate_id: UUID,
-    filename: str,
+def _public_logo_url(key: str) -> str:
+    """Return the publicly readable HTTPS URL for an uploaded logo object.
+
+    Args:
+        key: Object key inside the logo bucket.
+
+    Returns:
+        Absolute public URL.
+    """
+    if settings.supabase_logo_storage_configured:
+        return f"{settings.supabase_logo_public_base}/{key}"
+    return f"{settings.r2_public_base}/{key}"
+
+
+def _upload_logo_via_supabase(
+    key: str,
     content: bytes,
     content_type: str,
 ) -> str:
-    """Upload a corporate logo and return its public URL.
+    """Upload a logo through the Supabase Storage REST client.
 
     Args:
-        corporate_id: Tenant id used in the object key.
-        filename: Sanitized file name (e.g. ``logo-171000.png``).
-        content: Raw image bytes (already size-capped by ``validate_logo_upload``).
+        key: Object path inside ``SUPABASE_LOGO_BUCKET``.
+        content: Raw image bytes.
         content_type: MIME type for the object.
 
     Returns:
-        Public HTTPS URL on success.
+        Public HTTPS URL.
 
     Raises:
-        LogoStorageError: When R2 is misconfigured (503) or the upload fails (502).
-            The bucket is never auto-created; operators must provision it.
+        LogoStorageError: When the Storage API rejects the upload.
     """
-    assert_logo_storage_configured()
+    bucket = (settings.SUPABASE_LOGO_BUCKET or "").strip()
+    client = _supabase_storage_client()
+    try:
+        client.storage.from_(bucket).upload(
+            path=key,
+            file=content,
+            file_options={
+                "content-type": content_type or "application/octet-stream",
+                "upsert": "true",
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - normalize Storage SDK shapes
+        logger.error("Supabase logo upload failed: %s", exc, exc_info=True)
+        raise LogoStorageError(
+            _logo_upload_failure_detail(exc),
+            status_code=502,
+        ) from exc
 
-    safe_name = filename.replace("\\", "/").split("/")[-1]
-    key = f"logos/{corporate_id}/{safe_name}"
+    # Prefer constructing the stable public URL ourselves so local/dev and
+    # hosted hosts stay consistent even if get_public_url adds query params.
+    return _public_logo_url(key)
 
+
+def _upload_logo_via_s3(
+    key: str,
+    content: bytes,
+    content_type: str,
+) -> str:
+    """Upload a logo through the S3-compatible client (R2 or Supabase S3).
+
+    Args:
+        key: Object path inside ``R2_BUCKET_NAME``.
+        content: Raw image bytes.
+        content_type: MIME type for the object.
+
+    Returns:
+        Public HTTPS URL built from ``R2_PUBLIC_URL``.
+
+    Raises:
+        LogoStorageError: When put_object fails.
+    """
     try:
         client = _s3_client()
         client.put_object(
@@ -274,14 +390,51 @@ def upload_logo(
         ) from exc
 
 
+def upload_logo(
+    corporate_id: UUID,
+    filename: str,
+    content: bytes,
+    content_type: str,
+) -> str:
+    """Upload a corporate logo and return its public URL.
+
+    Prefers Supabase Storage when ``SUPABASE_URL`` and
+    ``SUPABASE_SERVICE_ROLE_KEY`` are set; otherwise uses the S3/R2 client.
+
+    Args:
+        corporate_id: Tenant id used in the object key.
+        filename: Sanitized file name (e.g. ``logo-171000.png``).
+        content: Raw image bytes (already size-capped by ``validate_logo_upload``).
+        content_type: MIME type for the object.
+
+    Returns:
+        Public HTTPS URL on success.
+
+    Raises:
+        LogoStorageError: When storage is misconfigured (503) or the upload fails (502).
+            The bucket is never auto-created; operators must provision it.
+    """
+    assert_logo_storage_configured()
+
+    key = _logo_object_key(corporate_id, filename)
+
+    if settings.supabase_logo_storage_configured:
+        return _upload_logo_via_supabase(key, content, content_type)
+    return _upload_logo_via_s3(key, content, content_type)
+
+
 def _reports_bucket_safe() -> bool:
     """True only when reports go to a dedicated bucket, never the public logo bucket."""
     if not settings.r2_reports_configured:
         return False
     reports = settings.R2_REPORTS_BUCKET_NAME.strip()
-    if reports == settings.R2_BUCKET_NAME.strip() and settings.r2_public_base:
+    logo_bucket = (settings.R2_BUCKET_NAME or "").strip()
+    supabase_logo = (settings.SUPABASE_LOGO_BUCKET or "").strip()
+    if reports in {logo_bucket, supabase_logo} and (
+        settings.r2_public_base or settings.supabase_logo_public_base
+    ):
         logger.error(
-            "R2_REPORTS_BUCKET_NAME equals the public logo bucket; refusing to store reports publicly"
+            "R2_REPORTS_BUCKET_NAME equals a public logo bucket; refusing to store reports publicly"
         )
         return False
     return True

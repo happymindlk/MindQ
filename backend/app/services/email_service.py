@@ -90,7 +90,7 @@ class EmailService:
             access_code,
             link,
         )
-        company = (corporate_name or "").strip() or "Assess Pulse"
+        company = (corporate_name or "").strip() or "MindQ"
         label = format_package_label(package_title)
         subject = f"{company} invited you: {label}"
         html_body = render_candidate_invite_html(
