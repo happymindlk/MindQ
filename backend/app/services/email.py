@@ -10,7 +10,7 @@ import functools
 import html
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -20,12 +20,21 @@ from starlette.requests import Request
 
 from app.config import settings
 
+# Matches admin Suite Builder + candidate portal (fixed offset; no DST).
+_SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
+_SRI_LANKA_ZONE_LABEL = "Sri Lanka Time - GMT+5:30"
+_ASSESSMENT_PACKAGE_SUFFIX = "Assessment Package"
+
 
 def format_deadline_timestamp(close_time: datetime | None) -> str:
-    """Format a package close time for invite emails.
+    """Format a package close time for invite emails in Sri Lanka time.
+
+    Admin Suite Builder stores deadlines as absolute UTC instants configured in
+    Sri Lanka wall-clock time. Rendering in that same zone prevents the calendar
+    day from shifting when a late-evening local deadline crosses a UTC midnight.
 
     Args:
-        close_time: Assessment window end in UTC (or naive treated as UTC).
+        close_time: Assessment window end (timezone-aware preferred; naive as UTC).
 
     Returns:
         Human-readable deadline string, or ``No fixed deadline`` when unset.
@@ -35,17 +44,17 @@ def format_deadline_timestamp(close_time: datetime | None) -> str:
     when = close_time
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
-    else:
-        when = when.astimezone(timezone.utc)
+    when = when.astimezone(_SRI_LANKA_TZ)
     # %d / %I are zero-padded; drop the padding for readability.
-    return when.strftime("%B %d, %Y at %I:%M %p UTC").replace(" 0", " ")
+    stamp = when.strftime("%B %d, %Y at %I:%M %p").replace(" 0", " ")
+    return f"{stamp} ({_SRI_LANKA_ZONE_LABEL})"
 
 
 def format_package_label(title: str) -> str:
     """Normalize a package/role title for email copy.
 
-    Ensures every reference ends with ``assessment package`` without doubling
-    when the title already ends with ``package`` or ``assessment package``.
+    Ensures every reference ends with ``Assessment Package`` without doubling
+    when the title already ends with ``Package`` or ``Assessment Package``.
 
     Args:
         title: Raw package or role title from the database.
@@ -55,12 +64,23 @@ def format_package_label(title: str) -> str:
     """
     cleaned = (title or "").strip()
     if not cleaned:
-        return "Assessment Package"
-    if cleaned.lower().endswith("assessment package"):
-        return cleaned
-    if cleaned.lower().endswith("package"):
-        return f"{cleaned[:-7].strip()} assessment package"
-    return f"{cleaned} assessment package"
+        return _ASSESSMENT_PACKAGE_SUFFIX
+    lower = cleaned.lower()
+    while True:
+        if lower.endswith("assessment package"):
+            cleaned = cleaned[: -len("assessment package")].rstrip(" -–—:")
+            lower = cleaned.lower()
+            continue
+        if lower.endswith("package"):
+            cleaned = cleaned[:-7].rstrip(" -–—:")
+            lower = cleaned.lower()
+            continue
+        break
+    return (
+        f"{cleaned} {_ASSESSMENT_PACKAGE_SUFFIX}"
+        if cleaned
+        else _ASSESSMENT_PACKAGE_SUFFIX
+    )
 
 
 logger = logging.getLogger("app.email")

@@ -1,4 +1,5 @@
 import { formatDeadlineTimestamp } from '../../lib/format-deadline';
+import { formatPackageLabel } from '../../lib/format-package-label';
 
 /**
  * Plain-text invitation HR can paste into email/Slack.
@@ -10,11 +11,13 @@ import { formatDeadlineTimestamp } from '../../lib/format-deadline';
  */
 export function buildInvitationTemplate(pkg, url, companyName) {
   const role = pkg.target_role || pkg.title;
+  const packageLabel = formatPackageLabel(pkg.title);
   const deadline = formatDeadlineTimestamp(pkg?.close_time);
+  const company = (companyName || '').trim();
   return [
     'Hello,',
     '',
-    `As part of your application for the ${role} role${companyName ? ` at ${companyName}` : ''}, please complete the online assessment below.`,
+    `As part of your application for the ${role} role${company ? ` at ${company}` : ''}, please complete the ${packageLabel} below.`,
     '',
     `Assessment link: ${url}`,
     `Access PIN: ${pkg.access_code}`,
@@ -23,6 +26,6 @@ export function buildInvitationTemplate(pkg, url, companyName) {
     'Use the email address this invitation was sent to when you sign in. The assessment is timed, so please start when you have an uninterrupted block of time.',
     '',
     'Best regards,',
-    companyName ? `${companyName} Talent Team` : 'Talent Team',
+    company ? `${company} Talent Team` : 'The MindQ Team',
   ].join('\n');
 }

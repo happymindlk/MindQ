@@ -28,10 +28,13 @@ from app.services.email_service import EmailService
     [
         ("", "Assessment Package"),
         ("   ", "Assessment Package"),
-        ("Backend Pack", "Backend Pack assessment package"),
-        ("Community Coordinator Package", "Community Coordinator assessment package"),
-        ("Community Coordinator Package assessment package", "Community Coordinator Package assessment package"),
-        ("Leadership assessment package", "Leadership assessment package"),
+        ("Backend Pack", "Backend Pack Assessment Package"),
+        ("Community Coordinator Package", "Community Coordinator Assessment Package"),
+        (
+            "Community Coordinator Package assessment package",
+            "Community Coordinator Assessment Package",
+        ),
+        ("Leadership assessment package", "Leadership Assessment Package"),
         ("Leadership Assessment Package", "Leadership Assessment Package"),
     ],
 )
@@ -59,7 +62,7 @@ async def test_nudge_without_ses_returns_false(monkeypatch, caplog):
 
 
 def test_send_transactional_email_success(monkeypatch):
-    monkeypatch.setattr("app.services.email.settings.EMAIL_FROM", "Assess Pulse <noreply@example.com>")
+    monkeypatch.setattr("app.services.email.settings.EMAIL_FROM", "MindQ <noreply@example.com>")
     monkeypatch.setattr("app.services.email.settings.AWS_REGION", "us-east-1")
     monkeypatch.setattr("app.services.email.settings.AWS_ACCESS_KEY_ID", "AKIATEST")
     monkeypatch.setattr("app.services.email.settings.AWS_SECRET_ACCESS_KEY", "secret")
@@ -77,11 +80,11 @@ def test_send_transactional_email_success(monkeypatch):
     fake_client.send_email.assert_called_once()
     call_kwargs = fake_client.send_email.call_args.kwargs
     assert call_kwargs["Destination"]["ToAddresses"] == ["jane@example.com"]
-    assert call_kwargs["Source"] == "Assess Pulse <noreply@example.com>"
+    assert call_kwargs["Source"] == "MindQ <noreply@example.com>"
 
 
 def test_send_transactional_email_logs_client_error(monkeypatch, caplog):
-    monkeypatch.setattr("app.services.email.settings.EMAIL_FROM", "Assess Pulse <noreply@example.com>")
+    monkeypatch.setattr("app.services.email.settings.EMAIL_FROM", "MindQ <noreply@example.com>")
     monkeypatch.setattr("app.services.email.settings.AWS_REGION", "us-east-1")
     monkeypatch.setattr("app.services.email.settings.AWS_ACCESS_KEY_ID", "AKIATEST")
     monkeypatch.setattr("app.services.email.settings.AWS_SECRET_ACCESS_KEY", "secret")
@@ -192,8 +195,8 @@ async def test_invite_email_includes_guidelines(monkeypatch):
         origin="https://mindq.pages.dev",
     )
     assert ok is True
-    assert captured["subject"] == "Acme Corp invited you: Backend Pack assessment package"
-    assert "Backend Pack assessment package" in captured["html"]
+    assert captured["subject"] == "Acme Corp invited you: Backend Pack Assessment Package"
+    assert "Backend Pack Assessment Package" in captured["html"]
     assert "AP-TEST-1" in captured["html"]
     assert "Acme Corp" in captured["html"]
     assert "Guidelines" in captured["html"]
@@ -204,11 +207,10 @@ async def test_invite_email_includes_guidelines(monkeypatch):
 
 def test_format_deadline_timestamp_and_invite_html():
     assert format_deadline_timestamp(None) == "No fixed deadline"
-    deadline = datetime(2026, 10, 30, 23, 59, tzinfo=timezone.utc)
+    # Late-evening SLT deadline stored as UTC must keep the Sri Lanka calendar day.
+    deadline = datetime(2026, 11, 12, 18, 29, tzinfo=timezone.utc)
     stamp = format_deadline_timestamp(deadline)
-    assert "October" in stamp
-    assert "2026" in stamp
-    assert "UTC" in stamp
+    assert stamp == "November 12, 2026 at 11:59 PM (Sri Lanka Time - GMT+5:30)"
     html = render_candidate_invite_html(
         candidate_name="Pat",
         package_title="Backend Pack",
@@ -219,6 +221,7 @@ def test_format_deadline_timestamp_and_invite_html():
     assert "Deadline:" in html
     assert stamp in html
     assert "No fixed deadline" not in html
+    assert "UTC" not in stamp
 
 
 @pytest.mark.asyncio
@@ -470,12 +473,10 @@ async def test_hr_completion_email(monkeypatch):
     assert ok is True
     assert captured["to"] == "hr@acme.com"
     assert captured["subject"] == (
-        "Report ready: Pat Lee completed Backend Pack assessment package"
+        "Report ready: Pat Lee completed Backend Pack Assessment Package"
     )
-    assert "Backend Pack assessment package" in captured["html"]
-    assert "Assessment Package" not in captured["html"].replace(
-        "Backend Pack assessment package", ""
-    )
+    assert "Backend Pack Assessment Package" in captured["html"]
+    assert captured["html"].lower().count("assessment package") == 1
     assert "finished" in captured["html"].lower() or "completed" in captured["html"].lower()
 
 
@@ -500,9 +501,9 @@ async def test_nudge_subject_uses_assessment_package_label(monkeypatch):
     )
     assert ok is True
     assert captured["subject"] == (
-        "Friendly Reminder: Complete your Community Coordinator assessment package"
+        "Friendly Reminder: Complete your Community Coordinator Assessment Package"
     )
-    assert "Community Coordinator assessment package" in captured["html"]
+    assert "Community Coordinator Assessment Package" in captured["html"]
     assert "assessment package assessment" not in captured["html"].lower()
 
 
@@ -513,7 +514,7 @@ def test_templates_append_assessment_package_without_doubling():
         access_code="HM-1",
         corporate_name="Acme",
     )
-    assert "Backend Pack assessment package" in invite
+    assert "Backend Pack Assessment Package" in invite
 
     already = render_hr_completion_html(
         hr_name="Acme",
@@ -521,7 +522,7 @@ def test_templates_append_assessment_package_without_doubling():
         package_title="Backend Pack assessment package",
         candidate_email="pat@example.com",
     )
-    assert already.count("assessment package") == 1
+    assert already.lower().count("assessment package") == 1
     assert "assessment package Assessment Package" not in already
 
     share = render_package_share_html(
@@ -529,5 +530,5 @@ def test_templates_append_assessment_package_without_doubling():
         package_title="Analyst Package",
         access_code="HM-1",
     )
-    assert "Analyst assessment package" in share
-    assert "Assessment Package is ready" not in share
+    assert "Analyst Assessment Package" in share
+    assert "Package Assessment Package" not in share

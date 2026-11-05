@@ -8,9 +8,17 @@ describe('formatDeadlineTimestamp', () => {
     expect(formatDeadlineTimestamp('')).toBe('No fixed deadline');
   });
 
-  it('formats a UTC close time like the SES invite email', () => {
+  it('formats a close time in Sri Lanka time like the SES invite email', () => {
+    // 23:59 UTC → 05:29 next day in GMT+5:30
     expect(formatDeadlineTimestamp('2026-10-30T23:59:00Z')).toBe(
-      'October 30, 2026 at 11:59 PM UTC',
+      '31 Oct 2026, 5:29 AM (Sri Lanka Time - GMT+5:30)',
+    );
+  });
+
+  it('preserves the Sri Lanka calendar day for a late-evening local deadline', () => {
+    // Admin picks Nov 12, 2026 11:59 PM SLT → stored as 18:29 UTC same day
+    expect(formatDeadlineTimestamp('2026-11-12T18:29:00Z')).toBe(
+      '12 Nov 2026, 11:59 PM (Sri Lanka Time - GMT+5:30)',
     );
   });
 

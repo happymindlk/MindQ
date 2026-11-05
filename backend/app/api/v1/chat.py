@@ -18,7 +18,7 @@ class ChatReply(BaseModel):
 FAQ_ENTRIES = [
     {
         "keywords": ["hello", "hi", "hey", "good morning", "good afternoon"],
-        "reply": "Hello! I'm your Assess Pulse assistant. How can I help you today? You can ask me about getting started, access codes, test duration, or anything else!"
+        "reply": "Hello! I'm your MindQ assistant. How can I help you today? You can ask me about getting started, access codes, test duration, or anything else!"
     },
     {
         "keywords": ["start", "begin", "how do i", "get started", "first step"],

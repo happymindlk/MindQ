@@ -16,7 +16,7 @@ from app.models.corporate import Corporate
 from app.models.package import Package
 from app.services.email import render_package_share_html
 
-ORIGIN = "https://app.assesspulse.test"
+ORIGIN = "https://app.mindq.test"
 SEND = "app.services.package_share.send_transactional_email"
 
 

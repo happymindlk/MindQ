@@ -1,4 +1,5 @@
-const STORAGE_KEY = 'assesspulse.client.session';
+const STORAGE_KEY = 'mindq.client.session';
+const LEGACY_STORAGE_KEY = 'assesspulse.client.session';
 const EXPIRY_SKEW_MS = 30000;
 
 /**
@@ -14,16 +15,23 @@ export function isExpired(session) {
 /** @returns {ClientSession | null} Valid stored session, or null (expired ones are purged). */
 export function readClientSession() {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    let raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (raw) {
+        window.localStorage.setItem(STORAGE_KEY, raw);
+        window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+      }
+    }
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (isExpired(parsed)) {
-      window.localStorage.removeItem(STORAGE_KEY);
+      clearClientSession();
       return null;
     }
     return parsed;
   } catch {
-    window.localStorage.removeItem(STORAGE_KEY);
+    clearClientSession();
     return null;
   }
 }
@@ -41,9 +49,11 @@ export function writeClientSession(response) {
     corporate: response.corporate,
   };
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  window.localStorage.removeItem(LEGACY_STORAGE_KEY);
   return session;
 }
 
 export function clearClientSession() {
   window.localStorage.removeItem(STORAGE_KEY);
+  window.localStorage.removeItem(LEGACY_STORAGE_KEY);
 }
