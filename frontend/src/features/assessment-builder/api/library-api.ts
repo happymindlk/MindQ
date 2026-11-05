@@ -204,8 +204,23 @@ function settingsBody(settings: Partial<ModuleSettings>): Record<string, unknown
 }
 
 /**
- * Persist a builder payload, retrying Likert without ``options``/``scale_points``
- * when the API still runs the pre-dynamic Likert schema (``extra_forbidden``).
+ * Wire payload for library create/update.
+ *
+ * Live api-qa still validates Likert with the pre-dynamic schema (``scale_labels``
+ * only; ``options`` / ``scale_points`` are ``extra_forbidden``). Prefer that shape
+ * on the wire; newer backends still accept it via ``coerce_likert_options``.
+ * If a newer API instead rejects the legacy shape, retry with the full payload.
+ *
+ * @param payload - Normalized editor payload.
+ * @returns Body ``payload`` value for the HTTP request.
+ */
+function toWireQuestionPayload(payload: QuestionPayload): QuestionPayload | ReturnType<typeof toLegacyLikertWirePayload> {
+  if (payload.type === 'likert') return toLegacyLikertWirePayload(payload);
+  return payload;
+}
+
+/**
+ * Persist a builder question, with Likert wire-shape compatibility for stale APIs.
  *
  * @param path - Library questions collection or item path.
  * @param method - ``POST`` (create) or ``PUT`` (update).
@@ -219,35 +234,43 @@ async function saveTemplateQuestion(
   payload: QuestionPayload,
   debugCtx: { moduleId?: string; questionId?: string } = {},
 ): Promise<TemplateQuestion> {
+  const wirePayload = toWireQuestionPayload(payload);
   // #region agent log
-  fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion',message:'question save attempt',data:{method,path,moduleId:debugCtx.moduleId??null,questionId:debugCtx.questionId??null,type:payload.type,payloadKeys:Object.keys(payload),likert:payload.type==='likert'?{scale_points:payload.scale_points,optionCount:payload.options.length,scale_labels:payload.scale_labels}:null},timestamp:Date.now()})}).catch(()=>{});
+  fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion',message:'question save attempt',data:{method,path,moduleId:debugCtx.moduleId??null,questionId:debugCtx.questionId??null,type:payload.type,editorKeys:Object.keys(payload),wireKeys:Object.keys(wirePayload),wireHasOptions:'options' in wirePayload,wireHasScalePoints:'scale_points' in wirePayload},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
   try {
-    return await request<TemplateQuestion>(path, {
+    const saved = await request<TemplateQuestion>(path, {
+      method,
+      fallback: 'Could not save this question.',
+      body: { payload: wirePayload },
+    });
+    // #region agent log
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:success',message:'question save succeeded',data:{method,questionId:saved.id,wireMode:payload.type==='likert'?'legacy-likert':'full'},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return saved;
+  } catch (err) {
+    const detail = err instanceof ApiError ? err.detail : null;
+    const canRetryFull =
+      payload.type === 'likert' &&
+      err instanceof ApiError &&
+      err.status === 422 &&
+      !isLikertOptionsForbiddenDetail(detail);
+    // #region agent log
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:catch',message:'question save failed',data:{method,status:err instanceof ApiError?err.status:null,canRetryFull,detail},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    if (!canRetryFull) throw err;
+    // #region agent log
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:full-retry',message:'retrying Likert with full options payload',data:{method,fullKeys:Object.keys(payload)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    const saved = await request<TemplateQuestion>(path, {
       method,
       fallback: 'Could not save this question.',
       body: { payload },
     });
-  } catch (err) {
-    const detail = err instanceof ApiError ? err.detail : null;
-    const canRetryLegacy =
-      payload.type === 'likert' &&
-      err instanceof ApiError &&
-      err.status === 422 &&
-      isLikertOptionsForbiddenDetail(detail);
     // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:catch',message:'question save failed',data:{method,status:err instanceof ApiError?err.status:null,canRetryLegacy,detail},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:success',message:'question save succeeded after full retry',data:{method,questionId:saved.id,wireMode:'full-retry'},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
-    if (!canRetryLegacy) throw err;
-    const legacyPayload = toLegacyLikertWirePayload(payload);
-    // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:legacy-retry',message:'retrying Likert without options/scale_points',data:{method,legacyKeys:Object.keys(legacyPayload),scale_labels:legacyPayload.scale_labels},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    return request<TemplateQuestion>(path, {
-      method,
-      fallback: 'Could not save this question.',
-      body: { payload: legacyPayload },
-    });
+    return saved;
   }
 }
 
