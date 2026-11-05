@@ -1,6 +1,7 @@
 """Ops admin company + single-package endpoints."""
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -9,7 +10,6 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import HRUserContext, get_current_ops_user
-from app.config import settings
 from app.database import get_db
 from app.exceptions import schema_drift_detail
 from app.models.corporate import Corporate
@@ -38,10 +38,16 @@ from app.services.hr_membership import (
     hr_display_name,
     upsert_hr_membership,
 )
-from app.services.storage import LogoValidationError, upload_logo, validate_logo_upload
+from app.services.storage import (
+    LogoStorageError,
+    LogoValidationError,
+    upload_logo,
+    validate_logo_upload,
+)
 from app.services.supabase_admin import SupabaseAdminError, invite_hr_user_by_email
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/companies", response_model=CompanyCreateResponse)
@@ -126,7 +132,7 @@ async def upload_company_logo(
 
     Args:
         company_id: Target corporate UUID.
-        file: PNG, JPEG, WebP, or SVG image up to 2 MB.
+        file: PNG, JPEG, or WebP image up to 2 MB.
         db: Async database session.
         _: Authenticated ops user.
 
@@ -143,9 +149,6 @@ async def upload_company_logo(
     if exists is None:
         raise HTTPException(status_code=404, detail="Company not found")
 
-    if not settings.r2_configured or not settings.r2_public_base:
-        raise HTTPException(status_code=503, detail="Logo storage is not configured")
-
     raw = await file.read()
     try:
         filename, content_type = validate_logo_upload(
@@ -154,9 +157,11 @@ async def upload_company_logo(
     except LogoValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    public_url = upload_logo(company_id, filename, raw, content_type)
-    if not public_url:
-        raise HTTPException(status_code=502, detail="Failed to upload logo to object storage")
+    try:
+        public_url = upload_logo(company_id, filename, raw, content_type)
+    except LogoStorageError as exc:
+        logger.error("Logo upload failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
     try:
         company = await ClientPackageService.set_company_logo(db, company_id, public_url)

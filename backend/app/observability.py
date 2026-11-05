@@ -26,6 +26,7 @@ class JsonFormatter(logging.Formatter):
             "ticket_id",
             "path",
             "method",
+            "process_time_ms",
             "driver_error",
             "driver_error_message",
             "sqlalchemy_error",

@@ -65,11 +65,6 @@ def _client(session: MagicMock, *, ops: bool = True) -> TestClient:
     return TestClient(application)
 
 
-def _r2_settings(settings: MagicMock, *, configured: bool = True) -> None:
-    settings.r2_configured = configured
-    settings.r2_public_base = "https://cdn.example.com" if configured else ""
-
-
 # --------------------------------------------------------------------------- create
 
 
@@ -268,11 +263,7 @@ def test_logo_upload_stores_on_r2_and_persists_url():
     session = _session(corp.id, corp)
     public = f"https://cdn.example.com/logos/{corp.id}/logo-1.png"
 
-    with (
-        patch("app.api.v1.admin_ops.settings") as settings,
-        patch("app.api.v1.admin_ops.upload_logo", return_value=public) as upload,
-    ):
-        _r2_settings(settings)
+    with patch("app.api.v1.admin_ops.upload_logo", return_value=public) as upload:
         res = _client(session).post(
             f"/admin/companies/{corp.id}/logo",
             files={"file": ("My Logo!.png", PNG, "image/png")},
@@ -291,11 +282,7 @@ def test_logo_upload_stores_on_r2_and_persists_url():
 
 def test_logo_upload_unknown_company_returns_404_without_uploading():
     session = _session(None)
-    with (
-        patch("app.api.v1.admin_ops.settings") as settings,
-        patch("app.api.v1.admin_ops.upload_logo") as upload,
-    ):
-        _r2_settings(settings)
+    with patch("app.api.v1.admin_ops.upload_logo") as upload:
         res = _client(session).post(
             f"/admin/companies/{uuid4()}/logo",
             files={"file": ("logo.png", PNG, "image/png")},
@@ -319,11 +306,7 @@ def test_logo_upload_rejects_invalid_files(
     content = b"\x00" * size
     corp_id = uuid4()
     session = _session(corp_id)
-    with (
-        patch("app.api.v1.admin_ops.settings") as settings,
-        patch("app.api.v1.admin_ops.upload_logo") as upload,
-    ):
-        _r2_settings(settings)
+    with patch("app.api.v1.admin_ops.upload_logo") as upload:
         res = _client(session).post(
             f"/admin/companies/{corp_id}/logo",
             files={"file": (filename, content, content_type)},
@@ -335,34 +318,44 @@ def test_logo_upload_rejects_invalid_files(
 
 
 def test_logo_upload_returns_503_when_r2_unconfigured():
+    from app.services.storage import LogoStorageError
+
     corp_id = uuid4()
     session = _session(corp_id)
-    with (
-        patch("app.api.v1.admin_ops.settings") as settings,
-        patch("app.api.v1.admin_ops.upload_logo") as upload,
+    with patch(
+        "app.api.v1.admin_ops.upload_logo",
+        side_effect=LogoStorageError(
+            "Logo storage is not configured (missing: R2_PUBLIC_URL)",
+            status_code=503,
+        ),
     ):
-        _r2_settings(settings, configured=False)
         res = _client(session).post(
             f"/admin/companies/{corp_id}/logo",
             files={"file": ("logo.png", PNG, "image/png")},
         )
     assert res.status_code == 503
-    upload.assert_not_called()
+    assert "missing: R2_PUBLIC_URL" in res.json()["detail"]
 
 
 def test_logo_upload_returns_502_when_storage_fails():
+    from app.services.storage import LogoStorageError
+
     corp_id = uuid4()
     session = _session(corp_id)
-    with (
-        patch("app.api.v1.admin_ops.settings") as settings,
-        patch("app.api.v1.admin_ops.upload_logo", return_value=None),
+    with patch(
+        "app.api.v1.admin_ops.upload_logo",
+        side_effect=LogoStorageError(
+            "Logo storage bucket 'assess-pulse' does not exist. "
+            "Create it in Cloudflare R2 (public read) or fix R2_BUCKET_NAME.",
+            status_code=502,
+        ),
     ):
-        _r2_settings(settings)
         res = _client(session).post(
             f"/admin/companies/{corp_id}/logo",
             files={"file": ("logo.png", PNG, "image/png")},
         )
     assert res.status_code == 502
+    assert "does not exist" in res.json()["detail"]
     session.commit.assert_not_called()
 
 

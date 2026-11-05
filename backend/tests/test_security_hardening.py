@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import jwt
 import pytest
+from botocore.exceptions import ClientError
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
@@ -456,6 +457,41 @@ def test_logo_upload_accepts_real_png():
     filename, content_type = validate_logo_upload("image/png", PNG, "My Logo!.png")
     assert content_type == "image/png"
     assert filename.endswith(".png")
+
+
+def test_assert_logo_storage_configured_lists_missing_vars(monkeypatch):
+    monkeypatch.setattr(
+        storage,
+        "settings",
+        SimpleNamespace(
+            missing_r2_logo_settings=["R2_ACCESS_KEY_ID", "R2_PUBLIC_URL"],
+        ),
+    )
+    with pytest.raises(storage.LogoStorageError, match="missing: R2_ACCESS_KEY_ID") as info:
+        storage.assert_logo_storage_configured()
+    assert info.value.status_code == 503
+
+
+def test_upload_logo_raises_502_for_missing_bucket(monkeypatch):
+    monkeypatch.setattr(
+        storage,
+        "settings",
+        SimpleNamespace(
+            missing_r2_logo_settings=[],
+            R2_BUCKET_NAME="assess-pulse",
+            r2_public_base="https://cdn.example.com",
+        ),
+    )
+    client = MagicMock()
+    client.put_object.side_effect = ClientError(
+        {"Error": {"Code": "NoSuchBucket", "Message": "missing"}},
+        "PutObject",
+    )
+    monkeypatch.setattr(storage, "_s3_client", lambda: client)
+
+    with pytest.raises(storage.LogoStorageError, match="does not exist") as info:
+        storage.upload_logo(uuid.uuid4(), "logo.png", PNG, "image/png")
+    assert info.value.status_code == 502
 
 
 def _storage_settings(**overrides):

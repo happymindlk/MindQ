@@ -3,15 +3,14 @@ import json
 import logging
 import re
 import time
-from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.api.v1.beta_access import router as beta_access_router
 from app.api.v1.invites import router as invites_router
@@ -172,10 +171,54 @@ def is_origin_allowed(origin: str | None) -> bool:
     return _allow_origin_pattern.fullmatch(normalized) is not None
 
 
-# Security headers first, CORS last: Starlette runs the last-added middleware
-# outermost, so preflight (OPTIONS) is answered by CORSMiddleware before any
-# inner middleware can reject or reroute it.
+class ProcessTimeMiddleware:
+    """Pure ASGI middleware: attach ``X-Process-Time`` and log slow requests.
+
+    Implemented as pure ASGI (not ``@app.middleware("http")`` /
+    ``BaseHTTPMiddleware``) so BackgroundTasks and StreamingResponse keep
+    working — same rationale as ``SecurityHeadersMiddleware``.
+    """
+
+    #: Log when server-side handling exceeds this budget (ms).
+    SLOW_MS = 1000.0
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start = time.perf_counter()
+
+        async def send_wrapper(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                process_time_ms = (time.perf_counter() - start) * 1000
+                headers = MutableHeaders(scope=message)
+                headers["X-Process-Time"] = f"{process_time_ms:.2f}ms"
+                if process_time_ms > self.SLOW_MS:
+                    path = scope.get("path", "")
+                    method = scope.get("method", "")
+                    logger.warning(
+                        f"[SLOW ENDPOINT] {method} {path} took {process_time_ms:.2f}ms",
+                        extra={
+                            "event": "slow_endpoint",
+                            "path": path,
+                            "method": method,
+                            "process_time_ms": round(process_time_ms, 2),
+                        },
+                    )
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+# Security headers innermost, process-time around the app, CORS last (outermost):
+# Starlette runs the last-added middleware outermost, so preflight (OPTIONS) is
+# answered by CORSMiddleware before any inner middleware can reject or reroute it.
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(ProcessTimeMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -184,7 +227,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-Id", "X-Report-Type", "X-Report-Synthesis-Status"],
+    expose_headers=[
+        "X-Request-Id",
+        "X-Process-Time",
+        "X-Report-Type",
+        "X-Report-Synthesis-Status",
+    ],
 )
 
 app.include_router(api_router, prefix="/api/v1")
@@ -211,47 +259,6 @@ def _cors_error_headers(request: Request) -> dict[str, str]:
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
-
-
-@app.exception_handler(RequestValidationError)
-async def request_validation_error_handler(request: Request, exc: RequestValidationError):
-    """Return FastAPI's default 422 body; debug-log library question PUTs."""
-    # #region agent log
-    if "/library/templates/" in request.url.path and "/questions/" in request.url.path:
-        try:
-            body = await request.body()
-            parsed = json.loads(body.decode("utf-8")) if body else None
-            payload = parsed.get("payload") if isinstance(parsed, dict) else None
-            with Path(r"d:\happy-mind-psychometrics\.cursor\debug-ee8c61.log").open(
-                "a", encoding="utf-8"
-            ) as debug_log:
-                debug_log.write(
-                    json.dumps(
-                        {
-                            "sessionId": "ee8c61",
-                            "runId": "pre-fix",
-                            "hypothesisId": "A,B,C,E",
-                            "location": "main.py:request_validation_error_handler",
-                            "message": "422 on library question route",
-                            "data": {
-                                "method": request.method,
-                                "path": request.url.path,
-                                "errors": jsonable_encoder(exc.errors()),
-                                "payload_type": payload.get("type") if isinstance(payload, dict) else None,
-                                "payload_keys": list(payload.keys()) if isinstance(payload, dict) else None,
-                                "media_url": payload.get("media_url") if isinstance(payload, dict) else None,
-                                "facet": payload.get("facet") if isinstance(payload, dict) else None,
-                                "top_level_keys": list(parsed.keys()) if isinstance(parsed, dict) else None,
-                            },
-                            "timestamp": int(time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            logger.exception("debug_validation_log_failed")
-    # #endregion
-    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 @app.exception_handler(DBAPIError)
