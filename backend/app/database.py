@@ -21,15 +21,23 @@ _DB_OP_BASE_DELAY_S = 0.05
 
 # Async Postgres engine. Schema is owned by Supabase migrations (supabase/migrations),
 # NOT by SQLAlchemy metadata.create_all.
+#
+# Bounded pool sized for ~100 concurrent candidates + admins/HR (15 baseline +
+# 35 burst = 50 max checkouts per worker). Production Dockerfile defaults to
+# WEB_CONCURRENCY=2 → 100 sockets total, under Supavisor Nano/Micro (~200).
+# Concurrent HTTP clients share these sockets; they do not need 1:1 DB
+# connections. Keep workers × 50 under the pooler client limit.
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
-    pool_pre_ping=True,
+    pool_size=15,
+    max_overflow=35,
+    pool_timeout=15,
     # Recycle before typical Supabase/PgBouncer idle cuts (~5m) so the pool
-    # does not hand out sockets the remote already closed.
+    # does not hand out sockets the remote already closed. Do not raise this to
+    # 30m while fronting Supavisor — stale sockets surface as intermittent 57P01.
     pool_recycle=280,
-    pool_size=10,
-    max_overflow=20,
+    pool_pre_ping=True,
     # Production connects through Supavisor in transaction mode, which may hand any
     # query a different Postgres backend. Cached / reused prepared-statement names
     # then fail with "prepared statement __asyncpg_stmt_N__ does not exist" (26000).

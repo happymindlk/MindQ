@@ -339,7 +339,49 @@ describe('AssessmentRunner timed hard-cut (flexible tag)', () => {
   });
 });
 
-describe('AssessmentRunner autosave race', () => {
+describe('AssessmentRunner navigation flush autosave', () => {
+  it('does not hit the network on answer click — only local draft state', async () => {
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    const user = userEvent.setup();
+    renderRunner(twoQuestionTest(), transport, 'live');
+    await user.click(screen.getByRole('radio', { name: /Alpha/ }));
+    await user.click(screen.getByRole('radio', { name: /Beta/ }));
+    expect(transport.autosave).not.toHaveBeenCalled();
+  });
+
+  it('flushes dirty answers when the tab becomes hidden', async () => {
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    const user = userEvent.setup();
+    renderRunner(twoQuestionTest(), transport, 'live');
+    await user.click(screen.getByRole('radio', { name: /Alpha/ }));
+    expect(transport.autosave).not.toHaveBeenCalled();
+
+    const visibilityDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    });
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await waitFor(() => expect(transport.autosave).toHaveBeenCalledTimes(1));
+      expect(transport.autosave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          question_id: 'q1',
+          response: { answer: 'Alpha' },
+        }),
+      );
+    } finally {
+      if (visibilityDesc) Object.defineProperty(Document.prototype, 'visibilityState', visibilityDesc);
+      else Reflect.deleteProperty(document, 'visibilityState');
+    }
+  });
+
   it('posts the latest answer after an in-flight save for the same item id', async () => {
     let resolveSave: (() => void) | undefined;
     const transport = {
@@ -455,6 +497,7 @@ describe('AssessmentRunner optimistic navigation', () => {
     await user.click(screen.getByRole('radio', { name: /Alpha/ }));
     await user.click(screen.getByRole('button', { name: /Back to dashboard/i }));
     expect(onExit).toHaveBeenCalledTimes(1);
+    expect(transport.autosave).toHaveBeenCalledTimes(1);
     resolveSave?.();
   });
 

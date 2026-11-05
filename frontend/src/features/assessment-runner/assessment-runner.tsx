@@ -46,8 +46,6 @@ interface AssessmentRunnerProps {
   renderFooter?: (api: { elapsedFor: (id: string) => number; totalSeconds: () => number; answers: Record<string, AnswerValue> }) => ReactNode;
 }
 
-const AUTOSAVE_DELAY_MS = 2000;
-
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
@@ -84,17 +82,16 @@ export function AssessmentRunner({
   answersRef.current = answers;
   const dirtyRef = useRef<Set<string>>(new Set());
   const inFlightSaveRef = useRef<Set<string>>(new Set());
-  const debounceRef = useRef<number | null>(null);
   const submittedRef = useRef(false);
 
   const submit = useCallback(
     async (reason: 'manual' | 'expired') => {
       if (submittedRef.current) return;
       submittedRef.current = true;
-      if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
       setSubmitting(true);
       setSubmitError(null);
       try {
+        // Final submit carries every answer; no mid-question autosave required.
         await transport.submit({
           responses: buildResponses(test.id, answersRef.current, telemetry.elapsedFor),
           total_module_duration_seconds: telemetry.totalModuleSeconds(),
@@ -140,9 +137,9 @@ export function AssessmentRunner({
     async (questionId: string) => {
       const answer = answersRef.current[questionId];
       if (!hasContent(answer)) return;
-      // A debounced save and a navigation flush can race for the same
-      // question; keep it dirty so the in-flight save's completion (or the
-      // next flush) is the single writer instead of posting duplicates.
+      // Concurrent navigation/blur flushes can race for the same question;
+      // keep it dirty so the in-flight save's completion (or the next flush)
+      // is the single writer instead of posting duplicates.
       if (inFlightSaveRef.current.has(questionId)) {
         dirtyRef.current.add(questionId);
         return;
@@ -180,28 +177,16 @@ export function AssessmentRunner({
   );
 
   const flushDirty = useCallback(async () => {
-    if (debounceRef.current !== null) {
-      window.clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
     // Draft lives in localStorage; a failed save must never block navigation.
     await Promise.allSettled(Array.from(dirtyRef.current).map((id) => saveQuestion(id)));
   }, [saveQuestion]);
 
-  // Navigation must never wait on the network: advance locally and let the
-  // autosave settle in the background. Failures stay in dirtyRef (saveQuestion
-  // re-queues them) and are retried on the next navigation, debounced save,
-  // exit flush, or final submit — whose payload re-sends every answer anyway.
+  // Network writes only on Next/Prev, exit, tab hide/blur, reconnect, or final
+  // submit — never on every answer click. Advance locally and let autosave settle
+  // in the background; failures stay in dirtyRef for the next flush.
   const flushDirtyInBackground = useCallback(() => {
     void flushDirty().catch(() => undefined);
   }, [flushDirty]);
-
-  useEffect(
-    () => () => {
-      if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
-    },
-    [],
-  );
 
   useEffect(() => {
     const onOffline = () => setOffline(true);
@@ -209,13 +194,21 @@ export function AssessmentRunner({
       setOffline(false);
       void flushDirty().catch(() => undefined);
     };
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') flushDirtyInBackground();
+    };
+    const onPageHide = () => flushDirtyInBackground();
     window.addEventListener('offline', onOffline);
     window.addEventListener('online', onOnline);
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onHidden);
     return () => {
       window.removeEventListener('offline', onOffline);
       window.removeEventListener('online', onOnline);
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onHidden);
     };
-  }, [flushDirty]);
+  }, [flushDirty, flushDirtyInBackground]);
 
   const handleChange = (value: AnswerValue) => {
     if (!current || timeUp) return;
@@ -225,12 +218,8 @@ export function AssessmentRunner({
       onAnswersChange?.(next);
       return next;
     });
+    // Mark dirty for the next navigation/exit/blur flush; do not hit the network here.
     dirtyRef.current.add(questionId);
-    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
-    debounceRef.current = window.setTimeout(() => {
-      debounceRef.current = null;
-      void saveQuestion(questionId);
-    }, AUTOSAVE_DELAY_MS);
   };
 
   const go = (nextIndex: number) => {

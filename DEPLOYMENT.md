@@ -139,6 +139,10 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
    - `DATABASE_URL` = the project's Postgres connection (use the pooler)
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`
    - `SECRET_KEY` (strong random), `DEBUG=false`, `CORS_ORIGINS` = your frontend origin(s)
+   - `WEB_CONCURRENCY` (default **2** in `backend/Dockerfile`): each worker opens
+     up to 50 SQLAlchemy sockets (`pool_size=15` + `max_overflow=35`). Cap is
+     `WEB_CONCURRENCY × 50` — keep that under your Supavisor client limit
+     (Nano/Micro ≈ 200; Small ≈ 400). Do not jump to 4 workers on Nano/Micro.
 4. Deploy the frontend to Cloudflare Pages with root directory `frontend/`
    (build `npm run build`, output `dist`). Set env:
    - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
