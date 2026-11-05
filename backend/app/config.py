@@ -36,16 +36,25 @@ class Settings(BaseSettings):
     SUPABASE_LOGO_BUCKET: str = "corporate-logos"
 
     # Optional S3-compatible fallback for logos + private report archives.
-    # Prefer native Supabase Storage above. These accept legacy R2_* names and the
-    # Supabase S3 gateway aliases. Do NOT reuse AWS_ACCESS_KEY_ID here — that pair
-    # is reserved for SES email below.
+    # Prefer native Supabase Storage above. Accepts R2_*, AWS_S3_*, and the common
+    # Supabase docs names AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY when used as
+    # Storage gateway credentials (those same names are also read by SES below —
+    # prefer AWS_S3_* if you need both email and storage keys).
     R2_ACCESS_KEY_ID: str = Field(
         default="",
-        validation_alias=AliasChoices("R2_ACCESS_KEY_ID", "AWS_S3_ACCESS_KEY_ID"),
+        validation_alias=AliasChoices(
+            "R2_ACCESS_KEY_ID",
+            "AWS_S3_ACCESS_KEY_ID",
+            "AWS_ACCESS_KEY_ID",
+        ),
     )
     R2_SECRET_ACCESS_KEY: str = Field(
         default="",
-        validation_alias=AliasChoices("R2_SECRET_ACCESS_KEY", "AWS_S3_SECRET_ACCESS_KEY"),
+        validation_alias=AliasChoices(
+            "R2_SECRET_ACCESS_KEY",
+            "AWS_S3_SECRET_ACCESS_KEY",
+            "AWS_SECRET_ACCESS_KEY",
+        ),
     )
     R2_ENDPOINT_URL: str = Field(
         default="",
@@ -214,12 +223,54 @@ class Settings(BaseSettings):
             ]
         return [str(raw).strip().rstrip("/")] if str(raw).strip() else []
 
+    @staticmethod
+    def _usable_secret(value: object) -> str:
+        """Return a stripped secret, or ``""`` for blanks/placeholders.
+
+        Args:
+            value: Raw settings value.
+
+        Returns:
+            Usable secret string, or empty when unset / still a ``<placeholder>``.
+        """
+        text = str(value or "").strip().strip("\"'")
+        if not text:
+            return ""
+        lowered = text.lower()
+        if lowered.startswith("<") and lowered.endswith(">"):
+            return ""
+        if "your-" in lowered and "key" in lowered:
+            return ""
+        if "paste" in lowered or "replace" in lowered:
+            return ""
+        return text
+
+    @staticmethod
+    def _usable_public_base(value: object) -> str:
+        """Return a public object-base URL, rejecting dashboard / console links.
+
+        Args:
+            value: Raw ``R2_PUBLIC_URL`` / ``STORAGE_PUBLIC_BASE_URL`` value.
+
+        Returns:
+            Stripped base URL, or empty when missing or not an object URL.
+        """
+        text = str(value or "").strip().strip("\"'").rstrip("/")
+        if not text:
+            return ""
+        lowered = text.lower()
+        if "/dashboard/" in lowered or "supabase.com/dashboard" in lowered:
+            return ""
+        if not lowered.startswith("http://") and not lowered.startswith("https://"):
+            return ""
+        return text
+
     @property
     def supabase_logo_storage_configured(self) -> bool:
         """True when logos can upload via the Supabase Storage client."""
         return bool(
-            str(self.SUPABASE_URL or "").strip()
-            and str(self.SUPABASE_SERVICE_ROLE_KEY or "").strip()
+            self._usable_secret(self.SUPABASE_URL)
+            and self._usable_secret(self.SUPABASE_SERVICE_ROLE_KEY)
             and str(self.SUPABASE_LOGO_BUCKET or "").strip()
         )
 
@@ -227,16 +278,16 @@ class Settings(BaseSettings):
     def r2_configured(self) -> bool:
         """True when S3-compatible credentials for object storage are present."""
         return bool(
-            self.R2_ACCESS_KEY_ID
-            and self.R2_SECRET_ACCESS_KEY
-            and self.R2_ENDPOINT_URL
-            and self.R2_BUCKET_NAME
+            self._usable_secret(self.R2_ACCESS_KEY_ID)
+            and self._usable_secret(self.R2_SECRET_ACCESS_KEY)
+            and self._usable_secret(self.R2_ENDPOINT_URL)
+            and str(self.R2_BUCKET_NAME or "").strip()
         )
 
     @property
     def s3_logo_storage_configured(self) -> bool:
         """True when logos can upload via the S3/R2 client + public URL base."""
-        return bool(self.r2_configured and str(self.R2_PUBLIC_URL or "").strip())
+        return bool(self.r2_configured and self._usable_public_base(self.R2_PUBLIC_URL))
 
     @property
     def missing_logo_storage_settings(self) -> list[str]:
@@ -254,19 +305,23 @@ class Settings(BaseSettings):
             return []
 
         missing: list[str] = []
-        for name in ("SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_LOGO_BUCKET"):
-            if not str(getattr(self, name, "") or "").strip():
-                missing.append(name)
+        if not self._usable_secret(self.SUPABASE_URL):
+            missing.append("SUPABASE_URL")
+        if not self._usable_secret(self.SUPABASE_SERVICE_ROLE_KEY):
+            missing.append("SUPABASE_SERVICE_ROLE_KEY")
+        if not str(self.SUPABASE_LOGO_BUCKET or "").strip():
+            missing.append("SUPABASE_LOGO_BUCKET")
         # Surface the S3 fallback gaps so operators who prefer R2/S3 know what to set.
-        for name in (
-            "R2_ACCESS_KEY_ID",
-            "R2_SECRET_ACCESS_KEY",
-            "R2_ENDPOINT_URL",
-            "R2_BUCKET_NAME",
-            "R2_PUBLIC_URL",
-        ):
-            if not str(getattr(self, name, "") or "").strip():
-                missing.append(name)
+        if not self._usable_secret(self.R2_ACCESS_KEY_ID):
+            missing.append("AWS_S3_ACCESS_KEY_ID")
+        if not self._usable_secret(self.R2_SECRET_ACCESS_KEY):
+            missing.append("AWS_S3_SECRET_ACCESS_KEY")
+        if not self._usable_secret(self.R2_ENDPOINT_URL):
+            missing.append("AWS_S3_ENDPOINT_URL")
+        if not str(self.R2_BUCKET_NAME or "").strip():
+            missing.append("AWS_STORAGE_BUCKET_NAME")
+        if not self._usable_public_base(self.R2_PUBLIC_URL):
+            missing.append("STORAGE_PUBLIC_BASE_URL")
         return missing
 
     @property
@@ -282,7 +337,7 @@ class Settings(BaseSettings):
     @property
     def r2_public_base(self) -> str:
         """Public base URL for S3/R2 objects (no trailing slash)."""
-        return (self.R2_PUBLIC_URL or "").rstrip("/")
+        return self._usable_public_base(self.R2_PUBLIC_URL)
 
     @property
     def supabase_logo_public_base(self) -> str:
