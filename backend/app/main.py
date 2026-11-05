@@ -2,8 +2,12 @@ import contextlib
 import json
 import logging
 import re
+import time
+from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -207,6 +211,47 @@ def _cors_error_headers(request: Request) -> dict[str, str]:
         "Access-Control-Allow-Credentials": "true",
         "Vary": "Origin",
     }
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(request: Request, exc: RequestValidationError):
+    """Return FastAPI's default 422 body; debug-log library question PUTs."""
+    # #region agent log
+    if "/library/templates/" in request.url.path and "/questions/" in request.url.path:
+        try:
+            body = await request.body()
+            parsed = json.loads(body.decode("utf-8")) if body else None
+            payload = parsed.get("payload") if isinstance(parsed, dict) else None
+            with Path(r"d:\happy-mind-psychometrics\.cursor\debug-ee8c61.log").open(
+                "a", encoding="utf-8"
+            ) as debug_log:
+                debug_log.write(
+                    json.dumps(
+                        {
+                            "sessionId": "ee8c61",
+                            "runId": "pre-fix",
+                            "hypothesisId": "A,B,C,E",
+                            "location": "main.py:request_validation_error_handler",
+                            "message": "422 on library question route",
+                            "data": {
+                                "method": request.method,
+                                "path": request.url.path,
+                                "errors": jsonable_encoder(exc.errors()),
+                                "payload_type": payload.get("type") if isinstance(payload, dict) else None,
+                                "payload_keys": list(payload.keys()) if isinstance(payload, dict) else None,
+                                "media_url": payload.get("media_url") if isinstance(payload, dict) else None,
+                                "facet": payload.get("facet") if isinstance(payload, dict) else None,
+                                "top_level_keys": list(parsed.keys()) if isinstance(parsed, dict) else None,
+                            },
+                            "timestamp": int(time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            logger.exception("debug_validation_log_failed")
+    # #endregion
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
 
 
 @app.exception_handler(DBAPIError)

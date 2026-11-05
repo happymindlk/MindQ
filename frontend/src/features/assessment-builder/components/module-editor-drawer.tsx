@@ -309,11 +309,17 @@ export function ModuleEditorDrawer({
   const onSaveQuestion = async (payload: QuestionPayload) => {
     if (!editor) return;
     setEditorError(null);
+    // #region agent log
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'pre-fix',hypothesisId:'B,D',location:'module-editor-drawer.tsx:onSaveQuestion',message:'Save question invoked',data:{questionId:editor.questionId,isUpdate:Boolean(editor.questionId),type:payload.type,facetLen:payload.facet.length,hasMedia:Boolean(payload.media_url),show_disclaimer:payload.show_disclaimer},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     try {
       await detail.saveQuestion(payload, editor.questionId);
       toast({ title: editor.questionId ? 'Question updated' : 'Question added', variant: 'success' });
       setEditor(null);
     } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'pre-fix',hypothesisId:'A,C,E',location:'module-editor-drawer.tsx:onSaveQuestion:catch',message:'Save question UI error',data:{isApiError:err instanceof ApiError,status:err instanceof ApiError?err.status:null,code:err instanceof ApiError?err.code:null,message:err instanceof Error?err.message:String(err),detail:err instanceof ApiError?err.detail:null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (err instanceof ApiError && err.isModuleLocked) {
         setEditor(null);
         setCloneOpen(true);
