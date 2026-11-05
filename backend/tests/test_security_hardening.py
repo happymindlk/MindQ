@@ -464,12 +464,44 @@ def test_assert_logo_storage_configured_lists_missing_vars(monkeypatch):
         storage,
         "settings",
         SimpleNamespace(
-            missing_r2_logo_settings=["R2_ACCESS_KEY_ID", "R2_PUBLIC_URL"],
+            missing_logo_storage_settings=["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"],
         ),
     )
-    with pytest.raises(storage.LogoStorageError, match="missing: R2_ACCESS_KEY_ID") as info:
+    with pytest.raises(storage.LogoStorageError, match="missing: SUPABASE_URL") as info:
         storage.assert_logo_storage_configured()
     assert info.value.status_code == 503
+
+
+def test_upload_logo_via_supabase_returns_public_url(monkeypatch):
+    corp_id = uuid.uuid4()
+    monkeypatch.setattr(
+        storage,
+        "settings",
+        SimpleNamespace(
+            missing_logo_storage_settings=[],
+            supabase_logo_storage_configured=True,
+            SUPABASE_LOGO_BUCKET="corporate-logos",
+            supabase_logo_public_base="https://proj.supabase.co/storage/v1/object/public/corporate-logos",
+            r2_public_base="",
+        ),
+    )
+    bucket = MagicMock()
+    bucket.upload.return_value = {"path": f"{corp_id}/logo.png"}
+    client = MagicMock()
+    client.storage.from_.return_value = bucket
+    monkeypatch.setattr(storage, "_supabase_storage_client", lambda: client)
+
+    url = storage.upload_logo(corp_id, "logo.png", PNG, "image/png")
+    assert url == (
+        f"https://proj.supabase.co/storage/v1/object/public/corporate-logos/"
+        f"{corp_id}/logo.png"
+    )
+    client.storage.from_.assert_called_once_with("corporate-logos")
+    bucket.upload.assert_called_once()
+    kwargs = bucket.upload.call_args.kwargs
+    assert kwargs["path"] == f"{corp_id}/logo.png"
+    assert kwargs["file"] == PNG
+    assert kwargs["file_options"]["upsert"] == "true"
 
 
 def test_upload_logo_raises_502_for_missing_bucket(monkeypatch):
@@ -477,7 +509,9 @@ def test_upload_logo_raises_502_for_missing_bucket(monkeypatch):
         storage,
         "settings",
         SimpleNamespace(
-            missing_r2_logo_settings=[],
+            missing_logo_storage_settings=[],
+            supabase_logo_storage_configured=False,
+            SUPABASE_LOGO_BUCKET="corporate-logos",
             R2_BUCKET_NAME="assess-pulse",
             r2_public_base="https://cdn.example.com",
         ),
@@ -499,7 +533,9 @@ def _storage_settings(**overrides):
         r2_reports_configured=True,
         R2_REPORTS_BUCKET_NAME="mindq-reports-private",
         R2_BUCKET_NAME="assess-pulse",
+        SUPABASE_LOGO_BUCKET="corporate-logos",
         r2_public_base="https://cdn.example.com",
+        supabase_logo_public_base="",
         REPORT_URL_TTL_SECONDS=900,
     )
     base.update(overrides)

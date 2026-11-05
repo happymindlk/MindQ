@@ -1,4 +1,4 @@
-"""Corporate branding endpoints (logo upload via R2)."""
+"""Corporate branding endpoints (logo upload via Supabase Storage)."""
 from __future__ import annotations
 
 import logging
@@ -28,7 +28,7 @@ async def upload_corporate_logo(
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload a corporate logo to R2 and persist ``corporates.logo_url``.
+    """Upload a corporate logo to Supabase Storage and persist ``corporates.logo_url``.
 
     Tenant-scoped: the path ``corporate_id`` must match the caller's
     ``app_metadata.corporate_id``. Object keys are versioned
