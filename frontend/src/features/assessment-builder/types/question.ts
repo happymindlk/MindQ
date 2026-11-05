@@ -401,3 +401,50 @@ export function toApiPayload(question: QuestionPayload): QuestionPayload {
       return { ...question, ...shared, rubric: question.rubric.trim() };
   }
 }
+
+/**
+ * Likert wire shape accepted by pre-dynamic-options backends that only declare
+ * ``scale_labels`` (``options`` / ``scale_points`` are ``extra_forbidden``).
+ *
+ * Newer backends still accept this via ``coerce_likert_options``; custom point
+ * values are not preserved on that path.
+ *
+ * @param question - Normalized Likert payload from ``toApiPayload``.
+ * @returns Payload without ``options`` / ``scale_points``.
+ */
+export function toLegacyLikertWirePayload(
+  question: LikertQuestion,
+): Omit<LikertQuestion, 'options' | 'scale_points'> {
+  const labels =
+    question.scale_labels?.length > 0
+      ? question.scale_labels.map((label) => label.trim()).filter(Boolean)
+      : question.options.map((row) => row.label.trim()).filter(Boolean);
+  return {
+    type: 'likert',
+    prompt: question.prompt,
+    facet: question.facet,
+    sme_rationale: question.sme_rationale,
+    media_url: question.media_url,
+    show_disclaimer: question.show_disclaimer,
+    disclaimer_text: question.disclaimer_text,
+    reverse_scored: question.reverse_scored,
+    scale_labels: labels,
+  };
+}
+
+/**
+ * Whether a 422 detail matches the stale Likert schema that forbids ``options``
+ * / ``scale_points``.
+ *
+ * @param detail - FastAPI ``detail`` array from an ``ApiError``.
+ * @returns True when a legacy Likert retry is warranted.
+ */
+export function isLikertOptionsForbiddenDetail(detail: unknown): boolean {
+  if (!Array.isArray(detail)) return false;
+  return detail.some((issue) => {
+    if (!issue || typeof issue !== 'object') return false;
+    const row = issue as { type?: unknown; loc?: unknown };
+    if (row.type !== 'extra_forbidden' || !Array.isArray(row.loc)) return false;
+    return row.loc.includes('options') || row.loc.includes('scale_points');
+  });
+}

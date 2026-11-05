@@ -194,6 +194,39 @@ def test_likert_options_round_trip_sets_scale_points_from_length():
     assert rebuilt["scale_points"] == 5
 
 
+def test_template_question_update_accepts_admin_likert_options_payload():
+    """Regression: admin PUT body that previously 422'd as extra_forbidden."""
+    from app.schemas.library import TemplateQuestionUpdate
+
+    body = TemplateQuestionUpdate.model_validate(
+        {
+            "payload": {
+                "prompt": "I enjoy teamwork",
+                "facet": "JK",
+                "sme_rationale": "",
+                "media_url": None,
+                "show_disclaimer": False,
+                "disclaimer_text": (
+                    "There are no right or wrong answers for this assessment. "
+                    "Answer all questions from your own perspective."
+                ),
+                "type": "likert",
+                "reverse_scored": False,
+                "scale_labels": list(LIKERT_DEFAULT_LABELS),
+                "options": [
+                    {"label": label, "value": index + 1}
+                    for index, label in enumerate(LIKERT_DEFAULT_LABELS)
+                ],
+                "scale_points": 5,
+            }
+        }
+    )
+    assert body.payload is not None
+    assert body.payload.type == "likert"
+    assert body.payload.scale_points == 5
+    assert len(body.payload.options) == 5
+
+
 def test_likert_rejects_duplicate_option_values():
     options = [
         {"label": "a", "value": 1},

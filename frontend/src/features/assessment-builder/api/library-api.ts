@@ -15,7 +15,9 @@ import type {
   TimerMode,
 } from '../types/module';
 import type { QuestionPayload, TemplateQuestion } from '../types/question';
+import { isLikertOptionsForbiddenDetail, toLegacyLikertWirePayload } from '../types/question';
 import { API_ORIGIN as API_BASE } from '../../../lib/api-origin';
+import { ApiError } from '../../../lib/api-error';
 import { requestJson } from '../../../lib/api-request';
 
 interface TemplateSummaryDto {
@@ -201,6 +203,54 @@ function settingsBody(settings: Partial<ModuleSettings>): Record<string, unknown
   return body;
 }
 
+/**
+ * Persist a builder payload, retrying Likert without ``options``/``scale_points``
+ * when the API still runs the pre-dynamic Likert schema (``extra_forbidden``).
+ *
+ * @param path - Library questions collection or item path.
+ * @param method - ``POST`` (create) or ``PUT`` (update).
+ * @param payload - Normalized editor payload.
+ * @param debugCtx - Optional ids for debug instrumentation.
+ * @returns Saved template question row.
+ */
+async function saveTemplateQuestion(
+  path: string,
+  method: 'POST' | 'PUT',
+  payload: QuestionPayload,
+  debugCtx: { moduleId?: string; questionId?: string } = {},
+): Promise<TemplateQuestion> {
+  // #region agent log
+  fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion',message:'question save attempt',data:{method,path,moduleId:debugCtx.moduleId??null,questionId:debugCtx.questionId??null,type:payload.type,payloadKeys:Object.keys(payload),likert:payload.type==='likert'?{scale_points:payload.scale_points,optionCount:payload.options.length,scale_labels:payload.scale_labels}:null},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  try {
+    return await request<TemplateQuestion>(path, {
+      method,
+      fallback: 'Could not save this question.',
+      body: { payload },
+    });
+  } catch (err) {
+    const detail = err instanceof ApiError ? err.detail : null;
+    const canRetryLegacy =
+      payload.type === 'likert' &&
+      err instanceof ApiError &&
+      err.status === 422 &&
+      isLikertOptionsForbiddenDetail(detail);
+    // #region agent log
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:catch',message:'question save failed',data:{method,status:err instanceof ApiError?err.status:null,canRetryLegacy,detail},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    if (!canRetryLegacy) throw err;
+    const legacyPayload = toLegacyLikertWirePayload(payload);
+    // #region agent log
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:legacy-retry',message:'retrying Likert without options/scale_points',data:{method,legacyKeys:Object.keys(legacyPayload),scale_labels:legacyPayload.scale_labels},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return request<TemplateQuestion>(path, {
+      method,
+      fallback: 'Could not save this question.',
+      body: { payload: legacyPayload },
+    });
+  }
+}
+
 export const libraryApi = {
   async listModules(includeArchived = false): Promise<AssessmentModule[]> {
     const rows = await request<TemplateSummaryDto[]>(
@@ -282,11 +332,7 @@ export const libraryApi = {
   },
 
   async createQuestion(moduleId: string, payload: QuestionPayload): Promise<TemplateQuestion> {
-    return request<TemplateQuestion>(`/library/templates/${moduleId}/questions`, {
-      method: 'POST',
-      fallback: 'Could not save this question.',
-      body: { payload },
-    });
+    return saveTemplateQuestion(`/library/templates/${moduleId}/questions`, 'POST', payload);
   },
 
   async updateQuestion(
@@ -294,21 +340,12 @@ export const libraryApi = {
     questionId: string,
     payload: QuestionPayload,
   ): Promise<TemplateQuestion> {
-    // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'pre-fix',hypothesisId:'A,B,C,E',location:'library-api.ts:updateQuestion',message:'PUT question body before request',data:{moduleId,questionId,type:payload.type,facet:payload.facet,media_url:payload.media_url,payloadKeys:Object.keys(payload),likert:payload.type==='likert'?{scale_points:payload.scale_points,optionCount:payload.options.length,options:payload.options,scale_labels:payload.scale_labels,reverse_scored:payload.reverse_scored}:null,mcq:payload.type==='mcq'?{mode:payload.mode,optionCount:payload.options.length,correct_keys:payload.correct_keys}:null,sjt:payload.type==='sjt'?{optionCount:payload.options.length,weights:payload.options.map(o=>o.weight)}:null},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    try {
-      return await request<TemplateQuestion>(`/library/templates/${moduleId}/questions/${questionId}`, {
-        method: 'PUT',
-        fallback: 'Could not save this question.',
-        body: { payload },
-      });
-    } catch (err) {
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'pre-fix',hypothesisId:'A,B,C,E',location:'library-api.ts:updateQuestion:catch',message:'PUT question failed',data:{status:err&&typeof err==='object'&&'status' in err?(err as {status:number}).status:null,code:err&&typeof err==='object'&&'code' in err?(err as {code:string|null}).code:null,message:err instanceof Error?err.message:String(err),detail:err&&typeof err==='object'&&'detail' in err?(err as {detail:unknown}).detail:null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
-      throw err;
-    }
+    return saveTemplateQuestion(
+      `/library/templates/${moduleId}/questions/${questionId}`,
+      'PUT',
+      payload,
+      { moduleId, questionId },
+    );
   },
 
   async deactivateQuestion(moduleId: string, questionId: string): Promise<TemplateQuestion> {
