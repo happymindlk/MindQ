@@ -17,8 +17,12 @@ from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.models.corporate import Corporate
 from app.models.package import Package
-from app.schemas.jd_evaluation import ReportSynthesis
-from app.schemas.mindq_report import MindQReportResponse, ReportCustomQuestion
+from app.schemas.jd_evaluation import ReportNarrative
+from app.schemas.mindq_report import (
+    MindQReportResponse,
+    ReportCustomQuestion,
+    role_alignment_for_report,
+)
 from app.security import enforce_user_rate_limit, report_limiter
 from app.services.client_package import PSYCHOMETRIC, TECHNICAL, _strip_answer_keys
 from app.services.jd_scoring import JdScoringService
@@ -370,7 +374,7 @@ async def build_technical_report_data(
     )
     scores_released = bool(outcomes) and all(o.scores_released for o in outcomes)
 
-    synthesis: ReportSynthesis | None = None
+    synthesis: ReportNarrative | None = None
     synthesis_status = "pending"
     if scores_released:
         try:
@@ -392,8 +396,9 @@ async def build_technical_report_data(
     else:
         synthesis_status = "pending"
 
+    released = bool(synthesis and scores_released)
     summaries = performance_summaries(candidate.full_name, outcomes, synthesis)
-    breakdown = build_competency_breakdown(outcomes, summaries)
+    breakdown = build_competency_breakdown(outcomes, summaries, synthesis)
 
     completed_times = [
         o.completed_at
@@ -412,11 +417,19 @@ async def build_technical_report_data(
         target_role=(package.target_role or package.title or "") if package else "",
         total_assessments_completed=completed_count,
         category_averages=compute_category_averages(outcomes),
-        executive_summary=(synthesis.executive_summary if synthesis and scores_released else ""),
-        strengths=(synthesis.strengths if synthesis and scores_released else []),
-        risks_and_antipatterns=(
-            synthesis.risks_and_antipatterns if synthesis and scores_released else []
+        headline=(synthesis.headline if released else ""),
+        key_takeaways=(synthesis.key_takeaways if released else []),
+        executive_summary=(synthesis.executive_summary if released else ""),
+        role_alignment=(
+            role_alignment_for_report(synthesis.role_alignment) if released else []
         ),
+        strengths=(synthesis.strengths if released else []),
+        areas_to_explore=(synthesis.areas_to_explore if released else []),
+        work_environment_notes=(synthesis.work_environment_notes if released else []),
+        interview_focus_areas=(synthesis.interview_focus_areas if released else []),
+        verify_separately=(synthesis.verify_separately if released else []),
+        support_suggestions=(synthesis.support_suggestions if released else []),
+        reliability_notes=(synthesis.reliability_notes if released else []),
         competency_breakdown=breakdown,
         category_summaries=(
             build_category_summaries(candidate.full_name, outcomes, synthesis)

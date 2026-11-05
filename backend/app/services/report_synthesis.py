@@ -1,7 +1,7 @@
 """MindQ Report scoring: module outcomes, category averages, breakdown merge.
 
 Everything numeric in the report is computed here, deterministically. Gemini
-only contributes prose (see ``app.schemas.jd_evaluation.ReportSynthesis``),
+only contributes prose (see ``app.schemas.jd_evaluation.ReportNarrative``),
 which is merged onto these outcomes by a stable ``assessment_key``.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,11 +23,12 @@ from app.models.assessment import Assessment
 from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.models.global_module import GlobalModule
-from app.schemas.jd_evaluation import ReportSynthesis
+from app.schemas.jd_evaluation import ReportNarrative
 from app.schemas.mindq_report import (
     AssessmentBreakdownItem,
     CategorySummaryItem,
     ReportCategory,
+    ReportSubscaleNote,
 )
 from app.services.candidate_service import COMPLETED_STATUS
 from app.services.instrument_results import (
@@ -36,6 +38,7 @@ from app.services.instrument_results import (
     module_bar_percentage,
     position_band,
 )
+from app.services.profiles import DerivedProfile
 from app.services.scoring import (
     ScoreResult,
     _extract_answer,
@@ -43,6 +46,36 @@ from app.services.scoring import (
     likert_scale_max_from_questions,
     likert_scale_min_from_questions,
     score_assessment_detailed,
+)
+
+# Internal score_details instrument → Gemini v5 instrument key.
+_INSTRUMENT_PROMPT_KEYS: dict[str, str] = {
+    "cognicheck": "cognicheck",
+    "crt": "crt",
+    "big_five": "mini_ipip",
+    "hexaco": "hexaco_hh",
+    "ipc": "ipip_ipc",
+    "initiative": "personal_initiative",
+    "sjt": "sjt",
+    "mcq": "cognicheck",
+    "ability": "ability",
+    "likert": "likert",
+}
+
+_TIMING_KEYS = frozenset(
+    {
+        "server_duration_seconds",
+        "client_duration_seconds",
+        "elapsed",
+        "elapsed_seconds",
+        "overtime",
+        "duration",
+        "duration_seconds",
+        "time_taken",
+        "time_ms",
+        "response_time",
+        "response_time_ms",
+    }
 )
 
 CategoryKey = Literal["cognitive", "behavioral", "personality", "technical"]
@@ -99,8 +132,61 @@ class ModuleOutcome:
     subscales: tuple[dict[str, Any], ...] = ()
     instrument: str | None = None
     completeness: dict[str, Any] | None = None
+    facet_means: dict[str, Any] | None = None
+    interpersonal_profile: dict[str, Any] | None = None
     status: str = COMPLETED_STATUS
     scores_released: bool = True
+
+
+def map_instrument_for_prompt(instrument: str | None, category: CategoryKey) -> str | None:
+    """Map internal instrument IDs to the Gemini v5 keys.
+
+    Args:
+        instrument: Value from ``score_details.instrument``.
+        category: Resolved competency category.
+
+    Returns:
+        Prompt-facing instrument key, or None when unknown.
+    """
+    if not instrument:
+        return "cognicheck" if category == "cognitive" else None
+    key = _INSTRUMENT_PROMPT_KEYS.get(instrument, instrument)
+    if key == "ability" and category == "cognitive":
+        return "cognicheck"
+    return key
+
+
+def _facet_means_payload(facet_scores: Any) -> dict[str, Any] | None:
+    if not isinstance(facet_scores, Mapping) or not facet_scores:
+        return None
+    return {
+        str(name): (
+            {"mean": value.get("mean"), "n": value.get("n")}
+            if isinstance(value, Mapping)
+            else value
+        )
+        for name, value in facet_scores.items()
+    }
+
+
+def _interpersonal_profile_payload(progress: CandidateProgress | None) -> dict[str, Any] | None:
+    """Return the LLM-facing interpersonal profile when the resolver completed."""
+    raw = getattr(progress, "derived_profile", None) if progress is not None else None
+    if not raw:
+        return None
+    try:
+        profile = DerivedProfile.model_validate(raw)
+    except ValidationError:
+        return None
+    if profile.status != "complete":
+        return None
+    return {"resolver": profile.resolver, "version": profile.version, **profile.data}
+
+
+def _strip_timing(payload: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, Mapping):
+        return None
+    return {k: v for k, v in payload.items() if k not in _TIMING_KEYS}
 
 
 def question_type(question: Mapping[str, Any]) -> str:
@@ -431,6 +517,11 @@ def build_module_outcomes(
                 assessment.questions, responses_by_assessment.get(assessment.id, {})
             )
         details = details or {}
+        instrument = details.get("instrument")
+        subscales = tuple(details.get("subscales") or ())
+        # CogniCheck: total only — never send logic-area subscales to Gemini.
+        if map_instrument_for_prompt(instrument, category) == "cognicheck":
+            subscales = ()
         outcomes.append(
             ModuleOutcome(
                 key=f"A{len(outcomes) + 1}",
@@ -443,9 +534,11 @@ def build_module_outcomes(
                 display_score=details.get("display_score"),
                 band=details.get("band"),
                 band_label=details.get("band_label"),
-                subscales=tuple(details.get("subscales") or ()),
-                instrument=details.get("instrument"),
-                completeness=details.get("completeness"),
+                subscales=subscales,
+                instrument=instrument,
+                completeness=_strip_timing(details.get("completeness")),
+                facet_means=_facet_means_payload(getattr(prog, "facet_scores", None)),
+                interpersonal_profile=_interpersonal_profile_payload(prog),
                 status=status,
                 scores_released=True,
             )
@@ -529,7 +622,7 @@ def fallback_performance_summary(candidate_name: str, outcome: ModuleOutcome) ->
 def performance_summaries(
     candidate_name: str,
     outcomes: Iterable[ModuleOutcome],
-    synthesis: ReportSynthesis | None,
+    synthesis: ReportNarrative | None,
 ) -> dict[UUID, str]:
     """One sentence per scored assessment: Gemini's when present, else fallback.
 
@@ -591,7 +684,7 @@ def fallback_category_summary(
 def build_category_summaries(
     candidate_name: str,
     outcomes: Iterable[ModuleOutcome],
-    synthesis: ReportSynthesis | None,
+    synthesis: ReportNarrative | None,
 ) -> list[CategorySummaryItem]:
     """Merge pillar prose onto the psychometric pillars actually completed.
 
@@ -630,7 +723,9 @@ def build_category_summaries(
 
 
 def build_competency_breakdown(
-    outcomes: Iterable[ModuleOutcome], summaries: Mapping[UUID, str]
+    outcomes: Iterable[ModuleOutcome],
+    summaries: Mapping[UUID, str],
+    synthesis: ReportNarrative | None = None,
 ) -> list[AssessmentBreakdownItem]:
     """Merge sentences onto server-computed scores.
 
@@ -640,44 +735,67 @@ def build_competency_breakdown(
     Args:
         outcomes: Module outcomes (possibly score-masked).
         summaries: Output of ``performance_summaries``.
+        synthesis: Optional Gemini narrative for role_relevance / subscale notes.
 
     Returns:
         Breakdown rows in category order, then assessment order.
     """
+    narratives = synthesis.narratives_by_key() if synthesis else {}
     scored = [o for o in outcomes if _has_breakdown_row(o) and o.id in summaries]
     scored.sort(key=lambda o: CATEGORY_ORDER.index(o.category))
-    return [
-        AssessmentBreakdownItem(
-            category=CATEGORY_LABELS[o.category],
-            assessment_name=o.title,
-            score=(
-                max(0.0, min(100.0, o.score))
-                if o.scores_released and o.score is not None
-                else None
-            ),
-            display_score=o.display_score if o.scores_released else None,
-            band=(o.band_label or o.band) if o.scores_released else None,
-            score_kind=o.score_kind if o.scores_released else None,
-            subscales=list(o.subscales) if o.scores_released else [],
-            performance_summary=summaries[o.id] if o.scores_released else None,
-            status=o.status,
-            scores_released=o.scores_released,
+    rows: list[AssessmentBreakdownItem] = []
+    for o in scored:
+        narrative = narratives.get(o.key)
+        notes = [
+            ReportSubscaleNote(subscale_key=n.subscale_key, note=n.note)
+            for n in (narrative.subscale_notes if narrative else [])
+        ]
+        rows.append(
+            AssessmentBreakdownItem(
+                category=CATEGORY_LABELS[o.category],
+                assessment_name=o.title,
+                score=(
+                    max(0.0, min(100.0, o.score))
+                    if o.scores_released and o.score is not None
+                    else None
+                ),
+                display_score=o.display_score if o.scores_released else None,
+                band=(o.band_label or o.band) if o.scores_released else None,
+                score_kind=o.score_kind if o.scores_released else None,
+                subscales=list(o.subscales) if o.scores_released else [],
+                performance_summary=summaries[o.id] if o.scores_released else None,
+                role_relevance=(
+                    narrative.role_relevance if o.scores_released and narrative else None
+                ),
+                subscale_notes=notes if o.scores_released else [],
+                status=o.status,
+                scores_released=o.scores_released,
+            )
         )
-        for o in scored
-    ]
+    return rows
 
 
 def prompt_assessments(outcomes: Iterable[ModuleOutcome]) -> list[dict[str, Any]]:
     """Score table handed to Gemini (only scored, completed assessments).
 
+    CogniCheck rows carry the total only (empty subscales). Timing fields are
+    never included. Instrument IDs are mapped to the v5 prompt vocabulary.
+
     Args:
         outcomes: Completed module outcomes.
 
     Returns:
-        ``[{assessment_key, assessment_name, category, score}]``.
+        ``[{assessment_key, assessment_name, category, score, …}]``.
     """
-    return [
-        {
+    rows: list[dict[str, Any]] = []
+    for o in outcomes:
+        if not (o.scores_released and _has_breakdown_row(o)):
+            continue
+        instrument = map_instrument_for_prompt(o.instrument, o.category)
+        subscales = list(o.subscales)
+        if instrument == "cognicheck":
+            subscales = []
+        row: dict[str, Any] = {
             "assessment_key": o.key,
             "assessment_name": o.title,
             "category": CATEGORY_LABELS[o.category],
@@ -685,13 +803,17 @@ def prompt_assessments(outcomes: Iterable[ModuleOutcome]) -> list[dict[str, Any]
             "score_kind": o.score_kind,
             "display_score": o.display_score,
             "band": o.band_label or o.band,
-            "subscales": list(o.subscales),
-            "instrument": o.instrument,
-            "completeness": o.completeness,
+            "subscales": subscales,
+            "instrument": instrument,
+            "completeness": _strip_timing(o.completeness),
         }
-        for o in outcomes
-        if o.scores_released and _has_breakdown_row(o)
-    ]
+        if o.facet_means:
+            row["facet_means"] = o.facet_means
+        if o.interpersonal_profile:
+            row["interpersonal_profile"] = o.interpersonal_profile
+        # Defence in depth: drop any accidental timing keys.
+        rows.append({k: v for k, v in row.items() if k not in _TIMING_KEYS})
+    return rows
 
 
 def outcomes_fingerprint(outcomes: Iterable[ModuleOutcome]) -> str:

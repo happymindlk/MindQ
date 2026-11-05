@@ -211,7 +211,7 @@ function toViewModel(data) {
     summary,
     synthesisStatus: typeof data.synthesis_status === 'string' ? data.synthesis_status : 'pending',
     strengths: asList(data.strengths),
-    risks: asList(data.risks_and_antipatterns),
+    risks: asList(data.areas_to_explore ?? data.risks_and_antipatterns),
     groups: groupByCategory(breakdown, averages, toCategorySummaries(data.category_summaries)),
     customs: Array.isArray(data.custom_questions) ? data.custom_questions : [],
   };
@@ -381,9 +381,9 @@ export default function MindQReport({ data, logoSrc }) {
               )}
             </div>
             <div className="mq-sr-col mq-sr-risks">
-              <h2>Risks &amp; Anti-patterns</h2>
+              <h2>Areas to explore</h2>
               {vm.risks.length === 0 ? (
-                <p className="mq-fallback">No risks recorded yet.</p>
+                <p className="mq-fallback">No areas to explore recorded yet.</p>
               ) : (
                 <ul>
                   {vm.risks.map((item) => (

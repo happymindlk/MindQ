@@ -1,5 +1,4 @@
-"""MindQ Report synthesis (Gemini): executive summary, strengths, risks, and
-one sentence per completed assessment. No fit score, no hiring recommendation.
+"""MindQ Report synthesis (Gemini): narrative sections for the v5 report.
 
 Triggered after the last test is submitted (background) and again on report
 view/download (cache hit when possible). Answer keys are stripped from evidence.
@@ -8,6 +7,7 @@ scores, so a prompt change or a re-graded assessment regenerates the synthesis.
 
 Outcomes are persisted on ``candidate_evaluations.status``: ``ok`` rows carry the
 payload; ``failed`` rows carry ``last_error`` and are retried on the next call.
+Banned-language matches after one retry are held for manual review (``failed``).
 """
 from __future__ import annotations
 
@@ -15,21 +15,18 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
-from app.services.gemini_client import (
-    GeminiUnavailable,
-    generate_content_sync,
-    overall_deadline_seconds,
-    served_model,
-)
 from app.models.assessment import Assessment
 from app.models.candidate import Candidate
 from app.models.candidate_evaluation import CandidateEvaluation
@@ -38,7 +35,18 @@ from app.models.candidate_response import CandidateResponse
 from app.models.package import Package
 from app.prompts.jd_scoring import PROMPT_VERSION, SYSTEM_INSTRUCTION, build_user_prompt
 from app.schemas.candidate import CandidateQuestion
-from app.schemas.jd_evaluation import REPORT_SYNTHESIS_JSON_SCHEMA, ReportSynthesis
+from app.schemas.jd_evaluation import (
+    CAPABILITY_KEYS,
+    REPORT_NARRATIVE_JSON_SCHEMA,
+    ReportNarrative,
+)
+from app.services.gemini_client import (
+    GeminiUnavailable,
+    generate_content_sync,
+    overall_deadline_seconds,
+    served_model,
+)
+from app.services.instrument_results import sjt_item_tier
 from app.services.profiles import DerivedProfile
 from app.services.report_synthesis import (
     ModuleOutcome,
@@ -47,10 +55,7 @@ from app.services.report_synthesis import (
     outcomes_fingerprint,
     prompt_assessments,
 )
-from app.services.instrument_results import sjt_item_tier
 from app.services.scoring import _extract_answer, _parse_number, crt_credit, sjt_credit
-from pydantic import ValidationError
-from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +63,58 @@ CompleteFn = Callable[[str], str]
 
 EVAL_STATUS_OK = "ok"
 EVAL_STATUS_FAILED = "failed"
+BANNED_LANGUAGE_ERROR = "banned_language_held_for_review"
 _ERROR_MAX_CHARS = 1000
+
+# Longest phrases first so "mood swings" / "cold-hearted" match before singles.
+_BANNED_PHRASES: tuple[str, ...] = (
+    "mood swings",
+    "cold-hearted",
+    "cold hearted",
+    "red flag",
+    "high risk",
+    "poor performer",
+    "moody",
+    "anxious",
+    "anxiety",
+    "nervous",
+    "neurotic",
+    "unstable",
+    "fragile",
+    "emotional",
+    "dishonest",
+    "deceitful",
+    "untrustworthy",
+    "manipulative",
+    "arrogant",
+    "aggressive",
+    "cold",
+    "lazy",
+    "immature",
+    "weak",
+    "unfit",
+    "failed",
+    "fail",
+    "disqualifying",
+)
+_BANNED_PATTERN = re.compile(
+    r"(?<!\w)("
+    + "|".join(re.escape(p).replace(r"\ ", r"[\s\-]+") for p in _BANNED_PHRASES)
+    + r")(?!\w)",
+    re.IGNORECASE,
+)
 
 
 class JdScoringUnavailable(GeminiUnavailable):
     """Gemini is not configured or returned unusable JD-fit output."""
+
+
+class BannedLanguageError(JdScoringUnavailable):
+    """Synthesis prose contained banned wording after retry."""
+
+    def __init__(self, matches: list[str]) -> None:
+        self.matches = matches
+        super().__init__(f"{BANNED_LANGUAGE_ERROR}: {', '.join(matches)}")
 
 
 class ModelText(str):
@@ -336,7 +388,7 @@ def complete_with_gemini(user_prompt: str) -> str:
                 system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.2,
                 response_mime_type="application/json",
-                response_json_schema=REPORT_SYNTHESIS_JSON_SCHEMA,
+                response_json_schema=REPORT_NARRATIVE_JSON_SCHEMA,
             ),
         )
     except GeminiUnavailable as exc:
@@ -347,14 +399,105 @@ def complete_with_gemini(user_prompt: str) -> str:
     return ModelText.tagged(text, served_model(response, settings.GEMINI_MODEL))
 
 
-def parse_evaluation_json(raw: str) -> ReportSynthesis:
+def parse_evaluation_json(raw: str) -> ReportNarrative:
     """Accept raw JSON, including accidental markdown fences from the model."""
     text = (raw or "").strip()
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:].lstrip()
-    return ReportSynthesis.model_validate_json(text)
+    return ReportNarrative.model_validate_json(text)
+
+
+def find_banned_words(obj: Any) -> list[str]:
+    """Scan every string in a nested payload for banned wording.
+
+    Args:
+        obj: Parsed synthesis (model dump or nested structure).
+
+    Returns:
+        Deduplicated list of matched banned phrases (lowercase).
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, str):
+            for match in _BANNED_PATTERN.finditer(value):
+                token = match.group(1).lower()
+                if token not in seen:
+                    seen.add(token)
+                    found.append(token)
+        elif isinstance(value, dict):
+            for child in value.values():
+                _walk(child)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                _walk(child)
+
+    _walk(obj)
+    return found
+
+
+def assert_no_banned_words(narrative: ReportNarrative) -> None:
+    """Raise when any banned word appears in the narrative.
+
+    Args:
+        narrative: Validated Gemini synthesis.
+
+    Raises:
+        BannedLanguageError: When one or more banned phrases are present.
+    """
+    matches = find_banned_words(narrative.model_dump())
+    if matches:
+        raise BannedLanguageError(matches)
+
+
+def validate_narrative_keys(
+    narrative: ReportNarrative,
+    assessment_scores: list[dict[str, Any]] | None,
+) -> None:
+    """Ensure assessment and capability keys match the prompt contract.
+
+    Args:
+        narrative: Validated Gemini synthesis.
+        assessment_scores: Server-computed score table sent to Gemini.
+
+    Raises:
+        JdScoringUnavailable: When keys are unexpected or missing.
+    """
+    expected = {str(row["assessment_key"]) for row in assessment_scores or []}
+    got = {item.assessment_key.strip() for item in narrative.competency_breakdown}
+    if expected:
+        unexpected = got - expected
+        if unexpected:
+            raise JdScoringUnavailable(
+                f"report_synthesis_unexpected_assessment_keys: {sorted(unexpected)}"
+            )
+        missing = expected - got
+        if missing:
+            logger.warning(
+                "report_synthesis_missing_summaries keys=%s", sorted(missing)
+            )
+    bad_caps = [
+        item.capability_key
+        for item in narrative.role_alignment
+        if item.capability_key not in CAPABILITY_KEYS
+    ]
+    if bad_caps:
+        raise JdScoringUnavailable(
+            f"report_synthesis_invalid_capability_keys: {sorted(set(bad_caps))}"
+        )
+    psychometric = {"Cognitive", "Personality", "Behavioral"}
+    expected_categories = {
+        str(row.get("category")) for row in assessment_scores or []
+    } & psychometric
+    missing_categories = expected_categories - set(narrative.summaries_by_category())
+    if missing_categories:
+        logger.warning(
+            "report_synthesis_missing_category_summaries categories=%s",
+            sorted(missing_categories),
+        )
 
 
 _ANSWER_KEY_FIELDS = frozenset({"correct_answer", "is_correct"})
@@ -374,6 +517,16 @@ def assert_no_answer_key_fields(obj: Any) -> None:
             assert_no_answer_key_fields(item)
 
 
+def _parse_and_validate(
+    raw: str,
+    assessment_scores: list[dict[str, Any]] | None,
+) -> ReportNarrative:
+    narrative = parse_evaluation_json(raw)
+    validate_narrative_keys(narrative, assessment_scores)
+    assert_no_banned_words(narrative)
+    return narrative
+
+
 def score_against_jd_with_model(
     *,
     job_description: str,
@@ -383,8 +536,12 @@ def score_against_jd_with_model(
     assessment_scores: list[dict[str, Any]] | None = None,
     target_role: str = "",
     complete: CompleteFn | None = None,
-) -> tuple[ReportSynthesis, str]:
+) -> tuple[ReportNarrative, str]:
     """Generate the report synthesis and report which model produced it.
+
+    Retries once on parse, key, or banned-word failure. Persistent banned
+    language raises ``BannedLanguageError`` so the caller can hold the report
+    for manual review.
 
     Args:
         job_description: JD text (or synthesized role brief).
@@ -407,27 +564,31 @@ def score_against_jd_with_model(
         assessment_scores_json=json.dumps(assessment_scores or [], ensure_ascii=False),
         evidence_json=json.dumps(evidence, ensure_ascii=False, default=str),
     )
-    raw = (complete or complete_with_gemini)(prompt)
-    model = getattr(raw, "model", None) or settings.GEMINI_MODEL
-    synthesis = parse_evaluation_json(raw)
-    expected = {row["assessment_key"] for row in assessment_scores or []}
-    missing = expected - set(synthesis.summaries_by_key())
-    if missing:
-        logger.warning(
-            "report_synthesis_missing_summaries keys=%s model=%s", sorted(missing), model
-        )
-    psychometric = {"Cognitive", "Personality", "Behavioral"}
-    expected_categories = {
-        str(row.get("category")) for row in assessment_scores or []
-    } & psychometric
-    missing_categories = expected_categories - set(synthesis.summaries_by_category())
-    if missing_categories:
-        logger.warning(
-            "report_synthesis_missing_category_summaries categories=%s model=%s",
-            sorted(missing_categories),
-            model,
-        )
-    return synthesis, model
+    completer = complete or complete_with_gemini
+    last_error: Exception | None = None
+    model = settings.GEMINI_MODEL
+    for attempt in range(2):
+        try:
+            raw = completer(prompt)
+            model = getattr(raw, "model", None) or settings.GEMINI_MODEL
+            synthesis = _parse_and_validate(raw, assessment_scores)
+            return synthesis, model
+        except (ValidationError, BannedLanguageError, JdScoringUnavailable, json.JSONDecodeError) as exc:
+            last_error = exc
+            logger.warning(
+                "report_synthesis_attempt_failed attempt=%s error=%s",
+                attempt + 1,
+                exc,
+            )
+            if attempt == 0:
+                continue
+            break
+    assert last_error is not None
+    if isinstance(last_error, BannedLanguageError):
+        raise last_error
+    if isinstance(last_error, ValidationError):
+        raise JdScoringUnavailable(f"invalid_synthesis_json: {last_error}") from last_error
+    raise last_error
 
 
 def score_against_jd(
@@ -439,7 +600,7 @@ def score_against_jd(
     assessment_scores: list[dict[str, Any]] | None = None,
     target_role: str = "",
     complete: CompleteFn | None = None,
-) -> ReportSynthesis:
+) -> ReportNarrative:
     """Generate the report synthesis.
 
     Args:
@@ -478,13 +639,14 @@ class JdScoringService:
         responses: list[CandidateResponse],
         outcomes: list[ModuleOutcome] | None = None,
         complete: CompleteFn | None = None,
-    ) -> tuple[ReportSynthesis | None, str]:
+    ) -> tuple[ReportNarrative | None, str]:
         """Return the cached or freshly generated report synthesis.
 
         Status is one of: cached, generated, skipped, failed. Failures never raise
         to the report download path; they are persisted as ``status='failed'``
         rows (with ``last_error``) so HR and ops can see them, and retried on
-        the next call.
+        the next call. Banned language after retry is recorded as
+        ``banned_language_held_for_review``.
 
         Args:
             session: Async SQLAlchemy session.
@@ -520,7 +682,7 @@ class JdScoringService:
         ).scalars().first()
         if existing and existing.jd_hash == digest and evaluation_is_ok(existing):
             try:
-                return ReportSynthesis.model_validate(existing.payload), "cached"
+                return ReportNarrative.model_validate(existing.payload), "cached"
             except ValidationError:
                 logger.warning(
                     "jd_scoring_cache_invalid candidate_id=%s", candidate.id

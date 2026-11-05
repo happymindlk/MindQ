@@ -340,9 +340,11 @@ def test_report_html_escapes_candidate_controlled_values(monkeypatch):
             "synthesis_status": "ok",
             "total_assessments_completed": 1,
             "category_averages": {"Technical": 50.0},
+            "headline": "",
+            "key_takeaways": [],
             "executive_summary": "<iframe src=x>",
             "strengths": ["<b>bold</b>"],
-            "risks_and_antipatterns": [],
+            "areas_to_explore": [],
             "competency_breakdown": [
                 {
                     "category": "Technical",

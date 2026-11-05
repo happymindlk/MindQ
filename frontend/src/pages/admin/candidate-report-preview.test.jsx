@@ -30,7 +30,7 @@ const REPORT = {
   category_averages: { Cognitive: 82.5 },
   executive_summary: 'Strong analytical candidate.',
   strengths: ['Fast numerical reasoning.'],
-  risks_and_antipatterns: [],
+  areas_to_explore: [],
   competency_breakdown: [
     {
       category: 'Cognitive',
