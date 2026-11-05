@@ -245,7 +245,20 @@
     <p class="muted">No scored assessments have been completed yet.</p>
     {% endif %}
 
-    {% if report.strengths or report.risks_and_antipatterns %}
+    {% if report.headline %}
+    <div class="summary">{{ report.headline }}</div>
+    {% endif %}
+
+    {% if report.key_takeaways %}
+    <h2>Key takeaways</h2>
+    <ul>
+        {% for item in report.key_takeaways %}
+        <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if report.strengths or report.areas_to_explore %}
     <h2>Analysis</h2>
     <table class="two-col">
         <tr>
@@ -265,15 +278,15 @@
             </td>
             <td class="col-right">
                 <div class="panel panel-risks">
-                    <h3>Risks &amp; Anti-patterns</h3>
-                    {% if report.risks_and_antipatterns %}
+                    <h3>Areas to explore</h3>
+                    {% if report.areas_to_explore %}
                     <ul>
-                        {% for item in report.risks_and_antipatterns %}
+                        {% for item in report.areas_to_explore %}
                         <li>{{ item }}</li>
                         {% endfor %}
                     </ul>
                     {% else %}
-                    <p class="muted">No risks recorded.</p>
+                    <p class="muted">No areas to explore recorded.</p>
                     {% endif %}
                 </div>
             </td>

@@ -30,7 +30,7 @@ const BASE = {
   category_averages: { Cognitive: 82.5, Personality: 64 },
   executive_summary: 'Strong analytical candidate.',
   strengths: ['Fast numerical reasoning.'],
-  risks_and_antipatterns: ['May over-index on detail.'],
+  areas_to_explore: ['May over-index on detail.'],
   competency_breakdown: [
     row('Personality', 'Work Style Inventory', 64),
     row('Cognitive', 'Numerical Reasoning', 90),
@@ -269,10 +269,10 @@ describe('MindQReport', () => {
     expect(container.querySelectorAll('article.mq-group')).toHaveLength(Math.min(count, 4));
   });
 
-  it('renders strengths and risks & anti-patterns', () => {
+  it('renders strengths and areas to explore', () => {
     render(<MindQReport data={BASE} />);
     expect(screen.getByText('Fast numerical reasoning.')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Risks & Anti-patterns' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Areas to explore' })).toBeInTheDocument();
     expect(screen.getByText('May over-index on detail.')).toBeInTheDocument();
   });
 

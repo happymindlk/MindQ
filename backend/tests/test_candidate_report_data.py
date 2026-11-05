@@ -14,7 +14,7 @@ from app.api.v1 import candidate_reports
 from app.api.v1.candidate_reports import router
 from app.auth import HRUserContext, get_current_hr_user
 from app.database import get_db
-from app.schemas.jd_evaluation import ReportSynthesis
+from app.schemas.jd_evaluation import ReportNarrative
 
 DONE = datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
 
@@ -204,14 +204,51 @@ def _full_fixture(candidate_id, corp_id):
     return results, big_five_gm
 
 
-SYNTHESIS = ReportSynthesis.model_validate(
+SYNTHESIS = ReportNarrative.model_validate(
     {
+        "headline": "Results align with analytical priorities for the analyst role.",
+        "key_takeaways": [
+            "Strong SQL and temperament signals for the role.",
+            "May prefer clearer guidance on isolation trade-offs.",
+            "Treat self-report results as supporting evidence.",
+        ],
         "executive_summary": "Strong SQL fundamentals with calm temperament.",
-        "strengths": ["Solid indexing rationale."],
-        "risks_and_antipatterns": ["Light on isolation trade-offs."],
+        "role_alignment": [],
+        "strengths": [
+            "Solid indexing rationale.",
+            "Applies calm judgment under pressure.",
+            "Shows structured analytical reasoning.",
+        ],
+        "areas_to_explore": [
+            "May prefer clearer guidance on isolation trade-offs.",
+            "May take longer to commit when information is incomplete.",
+            "May benefit from confirming composure under change.",
+        ],
+        "work_environment_notes": [
+            "May settle well with clear analytical ownership.",
+            "May prefer steady collaboration over constant switching.",
+        ],
+        "interview_focus_areas": [
+            "SQL trade-off reasoning.",
+            "Handling ambiguous requirements.",
+            "Working pace under change.",
+        ],
+        "verify_separately": [],
+        "support_suggestions": [],
+        "reliability_notes": [],
         "competency_breakdown": [
-            {"assessment_key": "A1", "assessment_name": "Big Five", "performance_summary": "Calm and steady."},
-            {"assessment_key": "A2", "assessment_name": "SQL Basics", "performance_summary": "Strong SQL. Hire now."},
+            {
+                "assessment_key": "A1",
+                "assessment_name": "Big Five",
+                "performance_summary": "Calm and steady.",
+                "role_relevance": "Supports composure for the analyst role.",
+            },
+            {
+                "assessment_key": "A2",
+                "assessment_name": "SQL Basics",
+                "performance_summary": "Strong SQL. Hire now.",
+                "role_relevance": "Supports the technical SQL requirement.",
+            },
         ],
         "category_summaries": [
             {"category": "Personality", "summary": "Calm and steady under pressure."},
@@ -234,8 +271,13 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
     assert body["total_assessments_completed"] == 4
     assert body["category_averages"] is None
     assert body["executive_summary"] == "Strong SQL fundamentals with calm temperament."
-    assert body["strengths"] == ["Solid indexing rationale."]
-    assert body["risks_and_antipatterns"] == ["Light on isolation trade-offs."]
+    assert body["strengths"][0] == "Solid indexing rationale."
+    assert body["areas_to_explore"][0] == (
+        "May prefer clearer guidance on isolation trade-offs."
+    )
+    assert body["headline"].startswith("Results align")
+    assert len(body["key_takeaways"]) == 3
+    assert "risks_and_antipatterns" not in body
     assert body["synthesis_status"] == "ok"
     assert body["company_logo_url"] == "https://cdn.example.com/acme-logo.png"
 
@@ -280,7 +322,8 @@ def test_report_data_falls_back_when_synthesis_fails(app, corp_id, candidate_id,
     assert body["synthesis_status"] == "failed"
     assert body["executive_summary"] == ""
     assert body["strengths"] == []
-    assert body["risks_and_antipatterns"] == []
+    assert body["areas_to_explore"] == []
+    assert body["headline"] == ""
     assert len(body["competency_breakdown"]) == 4
     assert all(b["performance_summary"] for b in body["competency_breakdown"])
     # Pillar summaries fall back to server-computed prose when synthesis fails.

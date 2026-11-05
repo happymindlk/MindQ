@@ -1753,9 +1753,19 @@ class ClientPackageService:
         summary = None
         if payload and scores_released:
             sanitized = {
+                "headline": payload.get("headline") or "",
+                "key_takeaways": payload.get("key_takeaways") or [],
                 "executive_summary": payload.get("executive_summary"),
                 "strengths": payload.get("strengths") or [],
-                "risks_and_antipatterns": payload.get("risks_and_antipatterns") or [],
+                "areas_to_explore": payload.get("areas_to_explore")
+                or payload.get("risks_and_antipatterns")
+                or [],
+                "role_alignment": payload.get("role_alignment") or [],
+                "work_environment_notes": payload.get("work_environment_notes") or [],
+                "interview_focus_areas": payload.get("interview_focus_areas") or [],
+                "verify_separately": payload.get("verify_separately") or [],
+                "support_suggestions": payload.get("support_suggestions") or [],
+                "reliability_notes": payload.get("reliability_notes") or [],
             }
             summary = sanitized["executive_summary"]
 

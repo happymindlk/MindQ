@@ -1,0 +1,26 @@
+================================================================================
+MindQ Report Synthesis — Exact LLM Prompt Export (verbatim from source)
+PROMPT_VERSION = "mindq-report-v5"
+================================================================================
+
+SOURCE LOCATIONS
+----------------
+1) System instruction (core + UNTRUSTED_DATA_RULES + JOB_DESCRIPTION_NOTE):
+   backend/app/prompts/jd_scoring.py  (SYSTEM_INSTRUCTION)
+   backend/app/prompts/boundaries.py  (UNTRUSTED_DATA_RULES)
+   backend/app/prompts/jd_scoring.py  (JOB_DESCRIPTION_NOTE)
+
+2) User prompt assembler:
+   backend/app/prompts/jd_scoring.py  (build_user_prompt)
+
+3) Output JSON schema (NOT embedded in the prompt text; constrained via
+   Gemini response_json_schema):
+   backend/app/schemas/jd_evaluation.py  (REPORT_NARRATIVE_JSON_SCHEMA)
+
+4) Caller wiring:
+   backend/app/services/jd_scoring.py  (complete_with_gemini, score_against_jd_with_model)
+   Score table for the user prompt:
+   backend/app/services/report_synthesis.py  (prompt_assessments)
+
+See MindQ_Report_Prompt_v5.md for the canonical Section 2 / Section 3 text.
+This file is a pointer; the live strings live in jd_scoring.py.

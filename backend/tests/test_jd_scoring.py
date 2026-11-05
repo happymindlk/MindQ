@@ -7,23 +7,30 @@ import pytest
 from pydantic import ValidationError
 
 from app.prompts.jd_scoring import PROMPT_VERSION, SYSTEM_INSTRUCTION, build_user_prompt
-from app.schemas.jd_evaluation import ReportSynthesis
+from app.schemas.jd_evaluation import ReportNarrative
 from app.services.jd_scoring import (
+    BANNED_LANGUAGE_ERROR,
     EVAL_STATUS_FAILED,
     EVAL_STATUS_OK,
+    BannedLanguageError,
     ModelText,
     build_evidence,
     crt_reasoning,
     evaluation_is_ok,
+    find_banned_words,
     hash_job_description,
     parse_evaluation_json,
     resolve_job_description,
     score_against_jd,
+    score_against_jd_with_model,
     synthesis_cache_key,
     JdScoringService,
 )
 from app.services.report_service import ReportService
 from app.services.report_synthesis import ModuleOutcome
+
+# Temporary alias so older local helpers keep compiling during migration.
+ReportSynthesis = ReportNarrative
 
 
 def _assessment(questions, title="Math"):
@@ -40,14 +47,52 @@ LEAKY_MCQ = {
 }
 
 VALID_SYNTHESIS = {
+    "headline": "Results align with the role's analytical priorities and leave composure to explore.",
+    "key_takeaways": [
+        "Strong alignment with analytical thinking priorities.",
+        "May prefer clearer guidance when priorities shift.",
+        "Treat self-report results as supporting evidence only.",
+    ],
     "executive_summary": "Solid quantitative reasoning with thin written evidence.",
-    "strengths": ["Accurate numerical reasoning under time pressure."],
-    "risks_and_antipatterns": ["Limited open-ended depth."],
+    "role_alignment": [
+        {
+            "capability_key": "cap_analytical",
+            "capability_label": "Analytical thinking and problem solving",
+            "importance": "critical",
+            "alignment": "results_strongly_align",
+            "confidence": "high",
+            "evidence": "CogniCheck band wording supports strong analytical performance for this role.",
+        }
+    ],
+    "strengths": [
+        "Accurate numerical reasoning under time pressure.",
+        "Applies structured logic when solving work problems.",
+        "Shows awareness of expected workplace conduct on judgment items.",
+    ],
+    "areas_to_explore": [
+        "May take longer to commit when information is incomplete.",
+        "May prefer clearer guidance when priorities shift.",
+        "May benefit from checking how they handle fast-paced change.",
+    ],
+    "work_environment_notes": [
+        "May settle well in roles with clear analytical ownership.",
+        "May prefer steady collaboration over constant switching.",
+    ],
+    "interview_focus_areas": [
+        "How they approach ambiguous analytical trade-offs.",
+        "Comfort with shifting priorities.",
+        "How they use judgment under time pressure.",
+    ],
+    "verify_separately": ["Required SQL experience"],
+    "support_suggestions": ["Pair on first complex analytical delivery"],
+    "reliability_notes": ["Open-ended evidence is thin for this package."],
     "competency_breakdown": [
         {
             "assessment_key": "A1",
             "assessment_name": "Math",
             "performance_summary": "Scored 80%, indicating strong numerical reasoning.",
+            "role_relevance": "Supports the analytical demands of the target role.",
+            "subscale_notes": [],
         }
     ],
     "category_summaries": [
@@ -90,22 +135,17 @@ def test_prompt_does_not_embed_json_schema():
     assert '"type": "object"' not in prompt
     assert "required" not in prompt
     assert "interview_questions" not in SYSTEM_INSTRUCTION
-    assert "Do not generate interview questions" in SYSTEM_INSTRUCTION
+    assert "Never write interview questions, scripts or conversation prompts." in SYSTEM_INSTRUCTION
 
 
 @pytest.mark.parametrize(
     "instruction",
     [
-        "Do not include any overall hiring recommendation (such as 'Hire', 'Strong Hire', "
-        "or 'Do Not Hire') and do not generate a 'Candidate Fit' score.",
-        "For each assessment in the competency breakdown, generate exactly one analytical "
-        "sentence summarizing the candidate's performance based on their score, band, display_score, and subscales.",
-        "Generate an executive summary and detailed bullet points for Strengths and "
-        "Risks/Anti-patterns.",
-        "The psychometric assessments are grouped into three pillars: Cognitive, Personality, "
-        "and Behavioral. Technical assessments are separate and never get a pillar summary.",
-        "category_summaries must contain one entry per psychometric category (Cognitive, "
-        "Personality, or Behavioral) present in assessment_scores",
+        "No hiring decision. Never recommend hiring, rejecting, advancing or holding a candidate.",
+        "areas_to_explore: 3-6 single-sentence bullets.",
+        "cognicheck: 16 timed reasoning questions. The total is the only result.",
+        "category_summaries: one entry per psychometric category (Cognitive, Personality, Behavioral) present in assessment_scores",
+        "job_description is HR-supplied text shown inside an untrusted_data block.",
     ],
 )
 def test_system_instruction_contains_required_directives_verbatim(instruction):
@@ -116,6 +156,7 @@ def test_prompt_includes_target_role_and_score_table():
     prompt = _prompt()
     assert "Target role: Backend Engineer" in prompt
     assert '"assessment_key":"A1"' in prompt
+    assert "job_description (HR-supplied questions and answers):" in prompt
 
 
 def test_prompt_falls_back_to_package_title_without_role():
@@ -123,7 +164,7 @@ def test_prompt_falls_back_to_package_title_without_role():
 
 
 def test_prompt_version_is_report_synthesis():
-    assert PROMPT_VERSION == "mindq-report-v3"
+    assert PROMPT_VERSION == "mindq-report-v5"
 
 
 def test_build_evidence_strips_answer_keys():
@@ -242,7 +283,7 @@ def test_score_against_jd_logs_missing_assessment_summaries(caplog):
 def test_parse_evaluation_json_strips_markdown_fences():
     fenced = "```json\n" + json.dumps(VALID_SYNTHESIS) + "\n```"
     result = parse_evaluation_json(fenced)
-    assert result.strengths == ["Accurate numerical reasoning under time pressure."]
+    assert result.strengths[0] == "Accurate numerical reasoning under time pressure."
 
 
 def test_malformed_gemini_json_raises():
@@ -263,25 +304,22 @@ def test_synthesis_drops_hallucinated_fit_and_recommendation():
         "hiring_recommendation": "strong_hire",
         "interview_questions": ["Tell me about yourself."],
     }
-    dumped = ReportSynthesis.model_validate(hallucinated).model_dump()
-    assert set(dumped) == {
-        "executive_summary",
-        "strengths",
-        "risks_and_antipatterns",
-        "competency_breakdown",
-        "category_summaries",
-    }
+    dumped = ReportNarrative.model_validate(hallucinated).model_dump()
+    assert "overall_fit" not in dumped
+    assert "hiring_recommendation" not in dumped
+    assert "areas_to_explore" in dumped
+    assert "risks_and_antipatterns" not in dumped
 
 
 def test_synthesis_without_category_summaries_still_validates():
     legacy = {k: v for k, v in VALID_SYNTHESIS.items() if k != "category_summaries"}
-    result = ReportSynthesis.model_validate(legacy)
+    result = ReportNarrative.model_validate(legacy)
     assert result.category_summaries == []
     assert result.summaries_by_category() == {}
 
 
 def test_category_summaries_first_occurrence_wins_and_rejects_technical():
-    result = ReportSynthesis.model_validate(
+    result = ReportNarrative.model_validate(
         {
             **VALID_SYNTHESIS,
             "category_summaries": [
@@ -292,19 +330,19 @@ def test_category_summaries_first_occurrence_wins_and_rejects_technical():
     )
     assert result.summaries_by_category() == {"Cognitive": "First summary."}
     with pytest.raises(ValidationError):
-        ReportSynthesis.model_validate(
+        ReportNarrative.model_validate(
             {**VALID_SYNTHESIS, "category_summaries": [{"category": "Technical", "summary": "Nope."}]}
         )
 
 
 def test_synthesis_requires_executive_summary():
     with pytest.raises(ValidationError):
-        ReportSynthesis.model_validate({**VALID_SYNTHESIS, "executive_summary": ""})
+        ReportNarrative.model_validate({**VALID_SYNTHESIS, "executive_summary": ""})
 
 
 def test_legacy_jd_fit_payload_is_not_a_valid_synthesis():
     with pytest.raises(ValidationError):
-        ReportSynthesis.model_validate(LEGACY_FIT)
+        ReportNarrative.model_validate(LEGACY_FIT)
 
 
 def test_multi_sentence_performance_summary_is_truncated_to_one():
@@ -315,13 +353,56 @@ def test_multi_sentence_performance_summary_is_truncated_to_one():
                 "assessment_key": "A1",
                 "assessment_name": "Math",
                 "performance_summary": "Scored 3.5 out of 5 on reasoning. Recommend hire.",
+                "role_relevance": "Supports analytical work on the role.",
             }
         ],
     }
-    result = ReportSynthesis.model_validate(payload)
+    result = ReportNarrative.model_validate(payload)
     assert result.competency_breakdown[0].performance_summary == (
         "Scored 3.5 out of 5 on reasoning."
     )
+
+
+def test_find_banned_words_detects_phrases():
+    assert find_banned_words({"areas_to_explore": ["This is a red flag for the role."]}) == [
+        "red flag"
+    ]
+    assert find_banned_words({"headline": "Results partly align with priorities."}) == []
+
+
+def test_banned_language_retries_once_then_holds():
+    calls = {"n": 0}
+    banned = {
+        **VALID_SYNTHESIS,
+        "areas_to_explore": [
+            "This is a red flag for shifting priorities.",
+            "May prefer clearer guidance when priorities shift.",
+            "May take longer to commit when information is incomplete.",
+        ],
+    }
+
+    def complete(_prompt: str) -> str:
+        calls["n"] += 1
+        return json.dumps(banned)
+
+    with pytest.raises(BannedLanguageError) as exc:
+        score_against_jd_with_model(
+            job_description="Role",
+            candidate_name="Pat",
+            package_title="Pkg",
+            evidence=[],
+            assessment_scores=[
+                {
+                    "assessment_key": "A1",
+                    "assessment_name": "Math",
+                    "category": "Cognitive",
+                    "score": 80.0,
+                }
+            ],
+            complete=complete,
+        )
+    assert calls["n"] == 2
+    assert BANNED_LANGUAGE_ERROR in str(exc.value)
 
 
 @pytest.mark.asyncio
@@ -385,9 +466,15 @@ def _report(**overrides):
         "synthesis_status": "ok",
         "total_assessments_completed": 2,
         "category_averages": {"Cognitive": 80.0, "Technical": 62.5},
+        "headline": "Results align with analytical priorities.",
+        "key_takeaways": [
+            "Strong analytical alignment.",
+            "Explore composure under change.",
+            "Weight self-report carefully.",
+        ],
         "executive_summary": "Solid quantitative reasoning with thin written evidence.",
         "strengths": ["Accurate numerical reasoning."],
-        "risks_and_antipatterns": ["Limited open-ended depth."],
+        "areas_to_explore": ["May take longer to commit when information is incomplete."],
         "competency_breakdown": [
             {
                 "category": "Cognitive",
@@ -412,7 +499,7 @@ def test_report_html_renders_synthesis_without_fit_or_recommendation():
     assert "Solid quantitative reasoning" in html
     assert "62.5%" not in html
     assert "strong numerical reasoning" in html
-    assert "Risks &amp; Anti-patterns" in html
+    assert "Areas to explore" in html
     assert "Overall Fit" not in html
     assert "Recommendation" not in html
     assert "MCQ Score" not in html
@@ -439,9 +526,11 @@ def test_report_html_skipped_synthesis():
     html = ReportService.render_report_html(
         _report(
             synthesis_status="skipped",
+            headline="",
+            key_takeaways=[],
             executive_summary="",
             strengths=[],
-            risks_and_antipatterns=[],
+            areas_to_explore=[],
             competency_breakdown=[],
             category_averages={},
             total_assessments_completed=0,
@@ -540,7 +629,8 @@ def test_non_complete_profile_falls_back_to_likert(derived_profile):
 
 def test_prompt_marks_interpersonal_profile_authoritative():
     assert "interpersonal_profile" in SYSTEM_INSTRUCTION
-    assert "never recompute" in SYSTEM_INSTRUCTION
+    assert "pre-computed and authoritative" in SYSTEM_INSTRUCTION
+    assert "Use display_name and describe the style neutrally" in SYSTEM_INSTRUCTION
 
 
 SJT_ITEM = {
@@ -766,7 +856,7 @@ async def test_get_or_evaluate_persists_failed_status_on_malformed_json():
     )
     assert status == "failed"
     assert session.added[0].status == EVAL_STATUS_FAILED
-    assert "ValidationError" in session.added[0].last_error
+    assert "invalid_synthesis_json" in session.added[0].last_error
 
 
 @pytest.mark.asyncio
@@ -869,7 +959,9 @@ async def test_legacy_jd_fit_row_is_regenerated_not_served():
     assert status == "generated"
     assert legacy.overall_fit is None
     assert "hiring_recommendation" not in legacy.payload
-    assert evaluation.risks_and_antipatterns == ["Limited open-ended depth."]
+    assert evaluation.areas_to_explore[0] == (
+        "May take longer to commit when information is incomplete."
+    )
 
 
 def test_cache_key_changes_with_prompt_inputs():

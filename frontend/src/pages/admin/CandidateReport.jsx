@@ -36,7 +36,7 @@ function readSynthesis(evaluation) {
   return {
     summary,
     strengths: list(payload.strengths),
-    risks: list(payload.risks_and_antipatterns),
+    risks: list(payload.areas_to_explore ?? payload.risks_and_antipatterns),
     summaryByName,
     ready: Boolean(summary),
   };

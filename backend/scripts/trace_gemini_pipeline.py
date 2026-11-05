@@ -33,7 +33,7 @@ from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.models.package import Package
 from app.prompts.jd_scoring import SYSTEM_INSTRUCTION, build_user_prompt
-from app.schemas.jd_evaluation import REPORT_SYNTHESIS_JSON_SCHEMA
+from app.schemas.jd_evaluation import REPORT_NARRATIVE_JSON_SCHEMA
 from app.services.gemini_client import (
     fallback_models,
     generate_content_sync,
@@ -254,7 +254,7 @@ async def step_jd_pipeline(session: Any, candidate_id: UUID) -> bool:
                 system_instruction=SYSTEM_INSTRUCTION,
                 temperature=0.2,
                 response_mime_type="application/json",
-                response_json_schema=REPORT_SYNTHESIS_JSON_SCHEMA,
+                response_json_schema=REPORT_NARRATIVE_JSON_SCHEMA,
             ),
         )
     except Exception as exc:  # noqa: BLE001 - diagnostic surface
@@ -271,7 +271,7 @@ async def step_jd_pipeline(session: Any, candidate_id: UUID) -> bool:
     print(
         f"parsed summaries={len(evaluation.competency_breakdown)} "
         f"strengths={len(evaluation.strengths)} "
-        f"risks={len(evaluation.risks_and_antipatterns)} (not persisted)"
+        f"areas_to_explore={len(evaluation.areas_to_explore)} (not persisted)"
     )
     return True
 

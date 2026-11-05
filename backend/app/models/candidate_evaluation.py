@@ -34,7 +34,7 @@ class CandidateEvaluation(Base):
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     overall_fit: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    # 'ok' rows carry a ReportSynthesis payload; 'failed' rows carry last_error and an empty payload.
+    # 'ok' rows carry a ReportNarrative payload; 'failed' rows carry last_error and an empty payload.
     status: Mapped[str] = mapped_column(Text, nullable=False, default="ok", server_default="ok")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

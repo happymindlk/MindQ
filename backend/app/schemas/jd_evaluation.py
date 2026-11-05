@@ -12,6 +12,52 @@ from pydantic import BaseModel, Field, field_validator
 
 _SENTENCE_END = (".", "!", "?")
 
+Alignment = Literal[
+    "results_strongly_align",
+    "results_partly_align",
+    "results_show_less_alignment",
+    "not_assessed",
+]
+Confidence = Literal["high", "moderate", "low"]
+Importance = Literal["critical", "important", "helpful"]
+Category = Literal["Cognitive", "Personality", "Behavioral"]
+# Alias kept for callers that still import the older name.
+PsychometricCategory = Category
+CapabilityKey = Literal[
+    "cap_analytical",
+    "cap_judgment",
+    "cap_initiative",
+    "cap_collaboration",
+    "cap_influence",
+    "cap_relationships",
+    "cap_organisation",
+    "cap_composure",
+    "cap_curiosity",
+    "cap_integrity",
+]
+
+ALIGNMENT_LABELS: dict[Alignment, str] = {
+    "results_strongly_align": "Results strongly align",
+    "results_partly_align": "Results partly align",
+    "results_show_less_alignment": "Results show less alignment",
+    "not_assessed": "Not assessed",
+}
+
+CAPABILITY_KEYS: frozenset[str] = frozenset(
+    {
+        "cap_analytical",
+        "cap_judgment",
+        "cap_initiative",
+        "cap_collaboration",
+        "cap_influence",
+        "cap_relationships",
+        "cap_organisation",
+        "cap_composure",
+        "cap_curiosity",
+        "cap_integrity",
+    }
+)
+
 
 def first_sentence(text: str) -> str:
     """Collapse model prose to exactly one sentence.
@@ -40,12 +86,31 @@ def first_sentence(text: str) -> str:
     return cleaned if cleaned.endswith(_SENTENCE_END) else f"{cleaned}."
 
 
-class AssessmentNarrative(BaseModel):
-    """Gemini's one-sentence read of a single completed assessment."""
+def _clean_bullet_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [" ".join(str(item).split()) for item in value if str(item or "").strip()]
+
+
+class SubscaleNote(BaseModel):
+    """One Gemini note for a trait or facet under an assessment."""
+
+    subscale_key: str
+    note: str = Field(description="One sentence, plain language, tied to the job.")
+
+
+class CompetencyBreakdownItem(BaseModel):
+    """Gemini's narrative for one completed assessment."""
 
     assessment_key: str = Field(min_length=1)
     assessment_name: str
-    performance_summary: str = Field(min_length=1)
+    performance_summary: str = Field(
+        min_length=1, description="One sentence, no line breaks or lists."
+    )
+    role_relevance: str = Field(
+        min_length=1, description="One sentence linking the result to this job."
+    )
+    subscale_notes: list[SubscaleNote] = Field(default_factory=list)
 
     @field_validator("performance_summary", mode="after")
     @classmethod
@@ -55,11 +120,20 @@ class AssessmentNarrative(BaseModel):
             raise ValueError("performance_summary must contain a sentence")
         return sentence
 
+    @field_validator("role_relevance", mode="after")
+    @classmethod
+    def normalize_role_relevance(cls, value: str) -> str:
+        cleaned = " ".join(str(value or "").split())
+        if not cleaned:
+            raise ValueError("role_relevance must not be blank")
+        return cleaned
 
-PsychometricCategory = Literal["Cognitive", "Personality", "Behavioral"]
+
+# Back-compat name used by older tests / imports during migration.
+AssessmentNarrative = CompetencyBreakdownItem
 
 
-class CategoryNarrative(BaseModel):
+class CategorySummary(BaseModel):
     """Gemini's holistic summary for one psychometric pillar.
 
     Technical is excluded: it is reported separately and never carries a
@@ -67,8 +141,8 @@ class CategoryNarrative(BaseModel):
     computed server-side.
     """
 
-    category: PsychometricCategory
-    summary: str = Field(min_length=1)
+    category: Category
+    summary: str = Field(min_length=1, description="2-3 sentences.")
 
     @field_validator("summary", mode="after")
     @classmethod
@@ -79,26 +153,65 @@ class CategoryNarrative(BaseModel):
         return cleaned
 
 
-class ReportSynthesis(BaseModel):
-    """Narrative fields of the MindQ Report produced by Gemini.
+CategoryNarrative = CategorySummary
+
+
+class RoleAlignmentItem(BaseModel):
+    """How assessment results align with one job capability priority."""
+
+    capability_key: CapabilityKey
+    capability_label: str
+    importance: Importance
+    alignment: Alignment
+    confidence: Confidence
+    evidence: str = Field(
+        description="1-2 sentences naming the assessments and what they suggest."
+    )
+
+
+class ReportNarrative(BaseModel):
+    """Narrative fields of the MindQ Report produced by Gemini (v5).
 
     Deliberately has no fit score or hiring recommendation: MindQ does not make
     employment decisions, and the report disclaimer says so.
     """
 
+    headline: str = Field(min_length=1)
+    key_takeaways: list[str] = Field(min_length=3, max_length=3)
     executive_summary: str = Field(min_length=1)
-    strengths: list[str] = Field(default_factory=list)
-    risks_and_antipatterns: list[str] = Field(default_factory=list)
-    competency_breakdown: list[AssessmentNarrative] = Field(default_factory=list)
-    # Default empty so payloads cached under older prompt versions still validate.
-    category_summaries: list[CategoryNarrative] = Field(default_factory=list)
+    role_alignment: list[RoleAlignmentItem] = Field(default_factory=list)
+    competency_breakdown: list[CompetencyBreakdownItem] = Field(default_factory=list)
+    category_summaries: list[CategorySummary] = Field(default_factory=list)
+    strengths: list[str] = Field(min_length=3, max_length=6)
+    areas_to_explore: list[str] = Field(min_length=3, max_length=6)
+    work_environment_notes: list[str] = Field(min_length=2, max_length=4)
+    interview_focus_areas: list[str] = Field(min_length=3, max_length=5)
+    verify_separately: list[str] = Field(default_factory=list)
+    support_suggestions: list[str] = Field(default_factory=list, max_length=3)
+    reliability_notes: list[str] = Field(default_factory=list)
 
-    @field_validator("strengths", "risks_and_antipatterns", mode="before")
+    @field_validator(
+        "key_takeaways",
+        "strengths",
+        "areas_to_explore",
+        "work_environment_notes",
+        "interview_focus_areas",
+        "verify_separately",
+        "support_suggestions",
+        "reliability_notes",
+        mode="before",
+    )
     @classmethod
     def clean_bullets(cls, value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        return [" ".join(str(item).split()) for item in value if str(item or "").strip()]
+        return _clean_bullet_list(value)
+
+    @field_validator("headline", "executive_summary", mode="after")
+    @classmethod
+    def normalize_prose(cls, value: str) -> str:
+        cleaned = " ".join(str(value or "").split())
+        if not cleaned:
+            raise ValueError("must not be blank")
+        return cleaned
 
     def summaries_by_key(self) -> dict[str, str]:
         """Map ``assessment_key`` → sentence (first occurrence wins).
@@ -109,6 +222,17 @@ class ReportSynthesis(BaseModel):
         out: dict[str, str] = {}
         for item in self.competency_breakdown:
             out.setdefault(item.assessment_key.strip(), item.performance_summary)
+        return out
+
+    def narratives_by_key(self) -> dict[str, CompetencyBreakdownItem]:
+        """Map ``assessment_key`` → full breakdown item (first occurrence wins).
+
+        Returns:
+            Lookup used to merge role_relevance and subscale_notes onto scores.
+        """
+        out: dict[str, CompetencyBreakdownItem] = {}
+        for item in self.competency_breakdown:
+            out.setdefault(item.assessment_key.strip(), item)
         return out
 
     def summaries_by_category(self) -> dict[str, str]:
@@ -123,13 +247,57 @@ class ReportSynthesis(BaseModel):
         return out
 
 
+# Temporary alias while call sites migrate to ReportNarrative.
+ReportSynthesis = ReportNarrative
+
+
 # Hand-written JSON Schema for Gemini (no additionalProperties / $defs).
-REPORT_SYNTHESIS_JSON_SCHEMA: dict = {
+# Array minItems/maxItems omitted — enforced by Pydantic after parse.
+REPORT_NARRATIVE_JSON_SCHEMA: dict = {
     "type": "object",
     "properties": {
+        "headline": {"type": "string"},
+        "key_takeaways": {"type": "array", "items": {"type": "string"}},
         "executive_summary": {"type": "string"},
-        "strengths": {"type": "array", "items": {"type": "string"}},
-        "risks_and_antipatterns": {"type": "array", "items": {"type": "string"}},
+        "role_alignment": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "capability_key": {
+                        "type": "string",
+                        "enum": sorted(CAPABILITY_KEYS),
+                    },
+                    "capability_label": {"type": "string"},
+                    "importance": {
+                        "type": "string",
+                        "enum": ["critical", "important", "helpful"],
+                    },
+                    "alignment": {
+                        "type": "string",
+                        "enum": [
+                            "results_strongly_align",
+                            "results_partly_align",
+                            "results_show_less_alignment",
+                            "not_assessed",
+                        ],
+                    },
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["high", "moderate", "low"],
+                    },
+                    "evidence": {"type": "string"},
+                },
+                "required": [
+                    "capability_key",
+                    "capability_label",
+                    "importance",
+                    "alignment",
+                    "confidence",
+                    "evidence",
+                ],
+            },
+        },
         "competency_breakdown": {
             "type": "array",
             "items": {
@@ -138,8 +306,25 @@ REPORT_SYNTHESIS_JSON_SCHEMA: dict = {
                     "assessment_key": {"type": "string"},
                     "assessment_name": {"type": "string"},
                     "performance_summary": {"type": "string"},
+                    "role_relevance": {"type": "string"},
+                    "subscale_notes": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "subscale_key": {"type": "string"},
+                                "note": {"type": "string"},
+                            },
+                            "required": ["subscale_key", "note"],
+                        },
+                    },
                 },
-                "required": ["assessment_key", "assessment_name", "performance_summary"],
+                "required": [
+                    "assessment_key",
+                    "assessment_name",
+                    "performance_summary",
+                    "role_relevance",
+                ],
             },
         },
         "category_summaries": {
@@ -156,12 +341,30 @@ REPORT_SYNTHESIS_JSON_SCHEMA: dict = {
                 "required": ["category", "summary"],
             },
         },
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "areas_to_explore": {"type": "array", "items": {"type": "string"}},
+        "work_environment_notes": {"type": "array", "items": {"type": "string"}},
+        "interview_focus_areas": {"type": "array", "items": {"type": "string"}},
+        "verify_separately": {"type": "array", "items": {"type": "string"}},
+        "support_suggestions": {"type": "array", "items": {"type": "string"}},
+        "reliability_notes": {"type": "array", "items": {"type": "string"}},
     },
     "required": [
+        "headline",
+        "key_takeaways",
         "executive_summary",
-        "strengths",
-        "risks_and_antipatterns",
+        "role_alignment",
         "competency_breakdown",
         "category_summaries",
+        "strengths",
+        "areas_to_explore",
+        "work_environment_notes",
+        "interview_focus_areas",
+        "verify_separately",
+        "support_suggestions",
+        "reliability_notes",
     ],
 }
+
+# Back-compat alias for scripts still importing the old name.
+REPORT_SYNTHESIS_JSON_SCHEMA = REPORT_NARRATIVE_JSON_SCHEMA

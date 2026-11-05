@@ -8,10 +8,10 @@ from uuid import uuid4
 import pytest
 
 from app.schemas.jd_evaluation import (
-    REPORT_SYNTHESIS_JSON_SCHEMA,
-    AssessmentNarrative,
-    CategoryNarrative,
-    ReportSynthesis,
+    REPORT_NARRATIVE_JSON_SCHEMA,
+    CategorySummary,
+    CompetencyBreakdownItem,
+    ReportNarrative,
     first_sentence,
 )
 from app.schemas.mindq_report import AssessmentBreakdownItem, MindQReport
@@ -24,6 +24,7 @@ from app.services.report_synthesis import (
     build_module_outcomes,
     compute_category_averages,
     fallback_performance_summary,
+    map_instrument_for_prompt,
     module_percentage,
     outcomes_fingerprint,
     performance_summaries,
@@ -34,20 +35,62 @@ from app.services.report_synthesis import (
 
 DONE = datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
 
+_BASE_NARRATIVE = {
+    "headline": "Results align with the role's top priorities.",
+    "key_takeaways": ["Takeaway one.", "Takeaway two.", "Takeaway three."],
+    "executive_summary": "Summary.",
+    "role_alignment": [],
+    "strengths": ["Strength one.", "Strength two.", "Strength three."],
+    "areas_to_explore": [
+        "May prefer clearer guidance when priorities shift.",
+        "May take longer to commit when information is incomplete.",
+        "May benefit from confirming composure under change.",
+    ],
+    "work_environment_notes": [
+        "May settle well with clear ownership.",
+        "May prefer steady collaboration.",
+    ],
+    "interview_focus_areas": ["Priority handling.", "Analytical trade-offs.", "Team pace."],
+    "verify_separately": [],
+    "support_suggestions": [],
+    "reliability_notes": [],
+    "category_summaries": [],
+    "competency_breakdown": [],
+}
 
-def _outcome(title: str, category: str, score: float | None, key: str = "A1") -> ModuleOutcome:
+
+def _outcome(
+    title: str,
+    category: str,
+    score: float | None,
+    key: str = "A1",
+    **kwargs,
+) -> ModuleOutcome:
     return ModuleOutcome(
-        key=key, id=uuid4(), title=title, category=category, score=score, completed_at=DONE  # type: ignore[arg-type]
+        key=key,
+        id=uuid4(),
+        title=title,
+        category=category,  # type: ignore[arg-type]
+        score=score,
+        completed_at=DONE,
+        **kwargs,
     )
 
 
-def _synthesis(summaries: dict[str, str]) -> ReportSynthesis:
-    return ReportSynthesis(
-        executive_summary="Summary.",
-        competency_breakdown=[
-            AssessmentNarrative(assessment_key=k, assessment_name=k, performance_summary=v)
-            for k, v in summaries.items()
-        ],
+def _synthesis(summaries: dict[str, str]) -> ReportNarrative:
+    return ReportNarrative.model_validate(
+        {
+            **_BASE_NARRATIVE,
+            "competency_breakdown": [
+                {
+                    "assessment_key": k,
+                    "assessment_name": k,
+                    "performance_summary": v,
+                    "role_relevance": f"Relevant to the role for {k}.",
+                }
+                for k, v in summaries.items()
+            ],
+        }
     )
 
 
@@ -323,12 +366,14 @@ def test_duplicate_titles_keep_distinct_summaries() -> None:
     assert [r.performance_summary for r in rows] == ["First.", "Second."]
 
 
-def _pillar_synthesis(summaries: dict[str, str]) -> ReportSynthesis:
-    return ReportSynthesis(
-        executive_summary="Summary.",
-        category_summaries=[
-            CategoryNarrative(category=k, summary=v) for k, v in summaries.items()  # type: ignore[arg-type]
-        ],
+def _pillar_synthesis(summaries: dict[str, str]) -> ReportNarrative:
+    return ReportNarrative.model_validate(
+        {
+            **_BASE_NARRATIVE,
+            "category_summaries": [
+                {"category": k, "summary": v} for k, v in summaries.items()
+            ],
+        }
     )
 
 
@@ -369,15 +414,48 @@ def test_build_category_summaries_ignores_technical_prose() -> None:
 
 
 def test_prompt_assessments_and_fingerprint() -> None:
-    scored = _outcome("Logic", "cognitive", 80.0, key="A1")
+    scored = _outcome("Logic", "cognitive", 80.0, key="A1", instrument="cognicheck")
     unscored = _outcome("Essay", "technical", None, key="A2")
     payload = prompt_assessments([scored, unscored])
     assert payload[0]["assessment_key"] == "A1"
     assert payload[0]["score"] == 80.0
     assert payload[0]["category"] == "Cognitive"
+    assert payload[0]["instrument"] == "cognicheck"
+    assert payload[0]["subscales"] == []
+    assert "server_duration_seconds" not in payload[0]
     assert len(payload) == 1
     changed = _outcome("Logic", "cognitive", 81.0, key="A1")
     assert outcomes_fingerprint([scored]) != outcomes_fingerprint([changed])
+
+
+def test_prompt_assessments_maps_instruments_and_strips_cognicheck_subscales() -> None:
+    cognicheck = _outcome(
+        "CogniCheck",
+        "cognitive",
+        72.0,
+        key="A1",
+        instrument="cognicheck",
+        subscales=({"name": "verbal", "position_pct": 80.0},),
+    )
+    big_five = _outcome(
+        "Big Five",
+        "personality",
+        None,
+        key="A2",
+        instrument="big_five",
+        score_kind="traits",
+        display_score="traits",
+        subscales=({"name": "Extraversion", "position_pct": 60.0},),
+        facet_means={"extraversion": {"mean": 3.5, "n": 4}},
+    )
+    rows = {row["assessment_key"]: row for row in prompt_assessments([cognicheck, big_five])}
+    assert rows["A1"]["subscales"] == []
+    assert rows["A1"]["instrument"] == "cognicheck"
+    assert rows["A2"]["instrument"] == "mini_ipip"
+    assert rows["A2"]["facet_means"]["extraversion"]["mean"] == 3.5
+    assert map_instrument_for_prompt("hexaco", "personality") == "hexaco_hh"
+    assert map_instrument_for_prompt("ipc", "personality") == "ipip_ipc"
+    assert map_instrument_for_prompt("initiative", "behavioral") == "personal_initiative"
 
 
 # --- schemas ------------------------------------------------------------------
@@ -401,30 +479,53 @@ def test_first_sentence(raw, expected) -> None:
 
 def test_assessment_narrative_rejects_blank_summary() -> None:
     with pytest.raises(ValueError):
-        AssessmentNarrative(assessment_key="A1", assessment_name="X", performance_summary="   ")
+        CompetencyBreakdownItem(
+            assessment_key="A1",
+            assessment_name="X",
+            performance_summary="   ",
+            role_relevance="Relevant.",
+        )
 
 
 def test_synthesis_bullets_drop_blank_and_non_list_values() -> None:
-    synthesis = ReportSynthesis.model_validate(
-        {"executive_summary": "S.", "strengths": ["  a  b ", "", None], "risks_and_antipatterns": "x"}
+    synthesis = ReportNarrative.model_validate(
+        {
+            **_BASE_NARRATIVE,
+            "strengths": ["  a  b ", "", None, "c", "d"],
+            "areas_to_explore": [
+                "  may prefer clearer guidance  ",
+                "",
+                None,
+                "May take longer to commit when information is incomplete.",
+                "May benefit from confirming composure under change.",
+            ],
+        }
     )
-    assert synthesis.strengths == ["a b"]
-    assert synthesis.risks_and_antipatterns == []
+    assert synthesis.strengths == ["a b", "c", "d"]
+    assert synthesis.areas_to_explore == [
+        "may prefer clearer guidance",
+        "May take longer to commit when information is incomplete.",
+        "May benefit from confirming composure under change.",
+    ]
+    with pytest.raises(ValueError):
+        ReportNarrative.model_validate({**_BASE_NARRATIVE, "areas_to_explore": "x"})
 
 
 def test_gemini_json_schema_matches_pydantic_model() -> None:
-    schema_fields = set(REPORT_SYNTHESIS_JSON_SCHEMA["properties"])
-    assert schema_fields == set(ReportSynthesis.model_fields)
+    schema_fields = set(REPORT_NARRATIVE_JSON_SCHEMA["properties"])
+    assert schema_fields == set(ReportNarrative.model_fields)
     item_fields = set(
-        REPORT_SYNTHESIS_JSON_SCHEMA["properties"]["competency_breakdown"]["items"]["properties"]
+        REPORT_NARRATIVE_JSON_SCHEMA["properties"]["competency_breakdown"]["items"]["properties"]
     )
-    assert item_fields == set(AssessmentNarrative.model_fields)
+    assert item_fields == set(CompetencyBreakdownItem.model_fields)
     category_fields = set(
-        REPORT_SYNTHESIS_JSON_SCHEMA["properties"]["category_summaries"]["items"]["properties"]
+        REPORT_NARRATIVE_JSON_SCHEMA["properties"]["category_summaries"]["items"]["properties"]
     )
-    assert category_fields == set(CategoryNarrative.model_fields)
+    assert category_fields == set(CategorySummary.model_fields)
     assert "overall_fit" not in schema_fields
     assert "hiring_recommendation" not in schema_fields
+    assert "areas_to_explore" in schema_fields
+    assert "risks_and_antipatterns" not in schema_fields
 
 
 def test_breakdown_item_rejects_unknown_category_and_out_of_range_score() -> None:
@@ -442,10 +543,19 @@ def test_mindq_report_has_no_fit_or_recommendation_fields() -> None:
         "target_role",
         "total_assessments_completed",
         "category_averages",
+        "headline",
+        "key_takeaways",
         "executive_summary",
+        "role_alignment",
         "strengths",
-        "risks_and_antipatterns",
+        "areas_to_explore",
+        "work_environment_notes",
+        "interview_focus_areas",
+        "verify_separately",
+        "support_suggestions",
+        "reliability_notes",
         "competency_breakdown",
         "category_summaries",
     } <= fields
+    assert "risks_and_antipatterns" not in fields
     assert not any("fit" in f or "recommendation" in f for f in fields)
