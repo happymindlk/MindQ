@@ -294,11 +294,21 @@ export const libraryApi = {
     questionId: string,
     payload: QuestionPayload,
   ): Promise<TemplateQuestion> {
-    return request<TemplateQuestion>(`/library/templates/${moduleId}/questions/${questionId}`, {
-      method: 'PUT',
-      fallback: 'Could not save this question.',
-      body: { payload },
-    });
+    // #region agent log
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'pre-fix',hypothesisId:'A,B,C,E',location:'library-api.ts:updateQuestion',message:'PUT question body before request',data:{moduleId,questionId,type:payload.type,facet:payload.facet,media_url:payload.media_url,payloadKeys:Object.keys(payload),likert:payload.type==='likert'?{scale_points:payload.scale_points,optionCount:payload.options.length,options:payload.options,scale_labels:payload.scale_labels,reverse_scored:payload.reverse_scored}:null,mcq:payload.type==='mcq'?{mode:payload.mode,optionCount:payload.options.length,correct_keys:payload.correct_keys}:null,sjt:payload.type==='sjt'?{optionCount:payload.options.length,weights:payload.options.map(o=>o.weight)}:null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    try {
+      return await request<TemplateQuestion>(`/library/templates/${moduleId}/questions/${questionId}`, {
+        method: 'PUT',
+        fallback: 'Could not save this question.',
+        body: { payload },
+      });
+    } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'pre-fix',hypothesisId:'A,B,C,E',location:'library-api.ts:updateQuestion:catch',message:'PUT question failed',data:{status:err&&typeof err==='object'&&'status' in err?(err as {status:number}).status:null,code:err&&typeof err==='object'&&'code' in err?(err as {code:string|null}).code:null,message:err instanceof Error?err.message:String(err),detail:err&&typeof err==='object'&&'detail' in err?(err as {detail:unknown}).detail:null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      throw err;
+    }
   },
 
   async deactivateQuestion(moduleId: string, questionId: string): Promise<TemplateQuestion> {
