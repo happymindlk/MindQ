@@ -299,6 +299,38 @@ def _draft_response(
     )
 
 
+def _publish_response(
+    package: Package,
+    module_ids: list[UUID],
+    custom_rows: list[CustomTechnicalQuestion],
+) -> PublishPackageResponse:
+    """Build the publish API payload from a committed published package.
+
+    ``DraftPackageResponse`` already carries ``access_code`` / ``review_token`` /
+    ``review_path`` when ``published=True``. Re-passing those keys alongside
+    ``**model_dump()`` raises ``TypeError: multiple values for keyword argument``
+    *after* the publish commit, which surfaced as HTTP 500 while the suite was
+    already live.
+
+    Args:
+        package: Package row after status flipped to published.
+        module_ids: Resolved cart module ids in order.
+        custom_rows: Persisted custom technical questions.
+
+    Returns:
+        Publish payload including the candidate portal path.
+    """
+    token = package.review_token or ""
+    payload = _draft_response(
+        package, module_ids, custom_rows, published=True
+    ).model_dump()
+    payload["access_code"] = package.access_code
+    payload["review_token"] = token
+    payload["review_path"] = f"/client/review/{token}"
+    payload["candidate_path"] = f"/portal?code={package.access_code}"
+    return PublishPackageResponse(**payload)
+
+
 def _lineage_key(module: GlobalModule) -> UUID:
     return module.lineage_id or module.id
 
@@ -1397,14 +1429,7 @@ class ClientPackageService:
         await session.commit()
         await session.refresh(package)
 
-        token = package.review_token or ""
-        return PublishPackageResponse(
-            **_draft_response(package, module_ids, custom_rows, published=True).model_dump(),
-            access_code=package.access_code,
-            review_token=token,
-            review_path=f"/client/review/{token}",
-            candidate_path=f"/portal?code={package.access_code}",
-        )
+        return _publish_response(package, module_ids, custom_rows)
 
     @staticmethod
     async def get_blind_review(

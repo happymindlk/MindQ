@@ -1,17 +1,27 @@
 """Unit tests for client-package masking and pipeline status."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
+
+import pytest
 
 from app.services.client_package import (
     pipeline_status,
     public_review_questions,
     slugify_company_name,
     PackageLockedError,
+    _draft_response,
+    _publish_response,
     _strip_answer_keys,
 )
-from app.schemas.client_package import AdminPackageUpdateRequest, DraftPackageRequest, PackageUpdate
+from app.schemas.client_package import (
+    AdminPackageUpdateRequest,
+    DraftPackageRequest,
+    PackageUpdate,
+    PublishPackageResponse,
+)
 
 
 def test_strip_answer_keys_removes_scoring_fields():
@@ -118,6 +128,54 @@ def test_slugify_company_name_strips_and_hyphenates():
 def test_published_lock_message():
     err = PackageLockedError()
     assert str(err) == "Package is published and locked"
+
+
+def _published_package(**overrides):
+    base = dict(
+        id=uuid4(),
+        corporate_id=uuid4(),
+        title="Ops Analyst Suite",
+        description=None,
+        target_role="Analyst",
+        status="published",
+        is_active=True,
+        access_code="HM-TEST01-C",
+        review_token="review-token-abc",
+        track_secret="track-secret",
+        published_at=datetime.now(timezone.utc),
+        open_time=datetime(2026, 11, 5, 12, 26, tzinfo=timezone.utc),
+        close_time=datetime(2026, 11, 6, 2, 30, tzinfo=timezone.utc),
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_publish_response_does_not_duplicate_draft_kwargs():
+    """Published dump already carries access_code/review_*; re-passing them 500s.
+
+    Regression: ``PublishPackageResponse(**draft.model_dump(), access_code=...)``
+    raised ``TypeError: multiple values for keyword argument`` *after* commit, so
+    the package was published while the UI showed Internal server error.
+    """
+    package = _published_package()
+    module_ids = [uuid4(), uuid4()]
+
+    with pytest.raises(TypeError, match="multiple values for keyword argument"):
+        PublishPackageResponse(
+            **_draft_response(package, module_ids, [], published=True).model_dump(),
+            access_code=package.access_code,
+            review_token=package.review_token,
+            review_path=f"/client/review/{package.review_token}",
+            candidate_path=f"/portal?code={package.access_code}",
+        )
+
+    resp = _publish_response(package, module_ids, [])
+    assert resp.access_code == "HM-TEST01-C"
+    assert resp.review_token == "review-token-abc"
+    assert resp.review_path == "/client/review/review-token-abc"
+    assert resp.candidate_path == "/portal?code=HM-TEST01-C"
+    assert resp.status == "published"
+    assert resp.module_ids == module_ids
 
 
 def test_admin_package_update_accepts_questions_and_target_role_aliases():
