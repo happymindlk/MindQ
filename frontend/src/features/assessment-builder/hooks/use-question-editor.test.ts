@@ -5,7 +5,9 @@ import {
   createEmptyQuestion,
   likertOptionsFromLabels,
   resolveLikertLabels,
+  isLikertOptionsForbiddenDetail,
   toApiPayload,
+  toLegacyLikertWirePayload,
   validateQuestion,
 } from '../types/question';
 import type { LikertQuestion, McqQuestion, QuestionPayload, SjtQuestion } from '../types/question';
@@ -192,6 +194,30 @@ describe('likert scale labels', () => {
       { label: 'Always', value: 5 },
     ]);
     expect(saved.scale_points).toBe(5);
+  });
+
+  it('builds a legacy Likert wire payload without options/scale_points', () => {
+    const saved = toApiPayload(likert()) as LikertQuestion;
+    const legacy = toLegacyLikertWirePayload(saved);
+    expect(legacy).toMatchObject({
+      type: 'likert',
+      reverse_scored: false,
+      scale_labels: saved.scale_labels,
+    });
+    expect(legacy).not.toHaveProperty('options');
+    expect(legacy).not.toHaveProperty('scale_points');
+  });
+
+  it('detects stale-API extra_forbidden details for Likert options', () => {
+    expect(
+      isLikertOptionsForbiddenDetail([
+        { type: 'extra_forbidden', loc: ['body', 'payload', 'likert', 'options'], msg: 'Extra inputs are not permitted' },
+        { type: 'extra_forbidden', loc: ['body', 'payload', 'likert', 'scale_points'], msg: 'Extra inputs are not permitted' },
+      ]),
+    ).toBe(true);
+    expect(isLikertOptionsForbiddenDetail([{ type: 'missing', loc: ['body', 'payload'], msg: 'Field required' }])).toBe(
+      false,
+    );
   });
 });
 
