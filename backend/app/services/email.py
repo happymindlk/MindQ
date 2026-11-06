@@ -23,7 +23,7 @@ from app.config import settings
 # Matches admin Suite Builder + candidate portal (fixed offset; no DST).
 _SRI_LANKA_TZ = timezone(timedelta(hours=5, minutes=30))
 _SRI_LANKA_ZONE_LABEL = "Sri Lanka Time - GMT+5:30"
-_ASSESSMENT_PACKAGE_SUFFIX = "Assessment Package"
+_ASSESSMENT_SUFFIX = "Assessment"
 
 
 def format_deadline_timestamp(close_time: datetime | None) -> str:
@@ -53,8 +53,8 @@ def format_deadline_timestamp(close_time: datetime | None) -> str:
 def format_package_label(title: str) -> str:
     """Normalize a package/role title for email copy.
 
-    Ensures every reference ends with ``Assessment Package`` without doubling
-    when the title already ends with ``Package`` or ``Assessment Package``.
+    Ensures every reference ends with ``Assessment`` without doubling when the
+    title already ends with ``Assessment``, ``Package``, or ``Assessment Package``.
 
     Args:
         title: Raw package or role title from the database.
@@ -64,7 +64,7 @@ def format_package_label(title: str) -> str:
     """
     cleaned = (title or "").strip()
     if not cleaned:
-        return _ASSESSMENT_PACKAGE_SUFFIX
+        return _ASSESSMENT_SUFFIX
     lower = cleaned.lower()
     while True:
         if lower.endswith("assessment package"):
@@ -75,12 +75,12 @@ def format_package_label(title: str) -> str:
             cleaned = cleaned[:-7].rstrip(" -–—:")
             lower = cleaned.lower()
             continue
+        if lower.endswith("assessment"):
+            cleaned = cleaned[: -len("assessment")].rstrip(" -–—:")
+            lower = cleaned.lower()
+            continue
         break
-    return (
-        f"{cleaned} {_ASSESSMENT_PACKAGE_SUFFIX}"
-        if cleaned
-        else _ASSESSMENT_PACKAGE_SUFFIX
-    )
+    return f"{cleaned} {_ASSESSMENT_SUFFIX}" if cleaned else _ASSESSMENT_SUFFIX
 
 
 logger = logging.getLogger("app.email")

@@ -26,16 +26,18 @@ from app.services.email_service import EmailService
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("", "Assessment Package"),
-        ("   ", "Assessment Package"),
-        ("Backend Pack", "Backend Pack Assessment Package"),
-        ("Community Coordinator Package", "Community Coordinator Assessment Package"),
+        ("", "Assessment"),
+        ("   ", "Assessment"),
+        ("Backend Pack", "Backend Pack Assessment"),
+        ("Community Coordinator Package", "Community Coordinator Assessment"),
         (
             "Community Coordinator Package assessment package",
-            "Community Coordinator Assessment Package",
+            "Community Coordinator Assessment",
         ),
-        ("Leadership assessment package", "Leadership Assessment Package"),
-        ("Leadership Assessment Package", "Leadership Assessment Package"),
+        ("Leadership assessment package", "Leadership Assessment"),
+        ("Leadership Assessment Package", "Leadership Assessment"),
+        ("Operations Assessment", "Operations Assessment"),
+        ("Operations Assessment Assessment", "Operations Assessment"),
     ],
 )
 def test_format_package_label(raw, expected):
@@ -195,8 +197,9 @@ async def test_invite_email_includes_guidelines(monkeypatch):
         origin="https://mindq.pages.dev",
     )
     assert ok is True
-    assert captured["subject"] == "Acme Corp invited you: Backend Pack Assessment Package"
-    assert "Backend Pack Assessment Package" in captured["html"]
+    assert captured["subject"] == "Acme Corp invited you: Backend Pack Assessment"
+    assert "Backend Pack Assessment" in captured["html"]
+    assert "Assessment Package" not in captured["html"]
     assert "AP-TEST-1" in captured["html"]
     assert "Acme Corp" in captured["html"]
     assert "Guidelines" in captured["html"]
@@ -473,10 +476,11 @@ async def test_hr_completion_email(monkeypatch):
     assert ok is True
     assert captured["to"] == "hr@acme.com"
     assert captured["subject"] == (
-        "Report ready: Pat Lee completed Backend Pack Assessment Package"
+        "Report ready: Pat Lee completed Backend Pack Assessment"
     )
-    assert "Backend Pack Assessment Package" in captured["html"]
-    assert captured["html"].lower().count("assessment package") == 1
+    assert "Backend Pack Assessment" in captured["html"]
+    assert "Assessment Package" not in captured["html"]
+    assert captured["html"].lower().count("assessment") >= 1
     assert "finished" in captured["html"].lower() or "completed" in captured["html"].lower()
 
 
@@ -501,10 +505,11 @@ async def test_nudge_subject_uses_assessment_package_label(monkeypatch):
     )
     assert ok is True
     assert captured["subject"] == (
-        "Friendly Reminder: Complete your Community Coordinator Assessment Package"
+        "Friendly Reminder: Complete your Community Coordinator Assessment"
     )
-    assert "Community Coordinator Assessment Package" in captured["html"]
-    assert "assessment package assessment" not in captured["html"].lower()
+    assert "Community Coordinator Assessment" in captured["html"]
+    assert "Assessment Assessment" not in captured["html"]
+    assert "Assessment Package" not in captured["html"]
 
 
 def test_templates_append_assessment_package_without_doubling():
@@ -514,7 +519,8 @@ def test_templates_append_assessment_package_without_doubling():
         access_code="HM-1",
         corporate_name="Acme",
     )
-    assert "Backend Pack Assessment Package" in invite
+    assert "Backend Pack Assessment" in invite
+    assert "Assessment Package" not in invite
 
     already = render_hr_completion_html(
         hr_name="Acme",
@@ -522,13 +528,15 @@ def test_templates_append_assessment_package_without_doubling():
         package_title="Backend Pack assessment package",
         candidate_email="pat@example.com",
     )
-    assert already.lower().count("assessment package") == 1
-    assert "assessment package Assessment Package" not in already
+    assert "Backend Pack Assessment" in already
+    assert "Assessment Assessment" not in already
+    assert "Assessment Package" not in already
 
     share = render_package_share_html(
         corporate_name="Acme",
         package_title="Analyst Package",
         access_code="HM-1",
     )
-    assert "Analyst Assessment Package" in share
-    assert "Package Assessment Package" not in share
+    assert "Analyst Assessment" in share
+    assert "Package Assessment" not in share
+    assert "Assessment Package" not in share
