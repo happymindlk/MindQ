@@ -15,7 +15,8 @@ describe('buildInvitationTemplate', () => {
     );
     expect(text).toContain('Deadline: 31 Oct 2026, 5:29 AM (Sri Lanka Time - GMT+5:30)');
     expect(text).toContain('Access PIN: PIN99');
-    expect(text).toContain('Backend Suite Assessment Package');
+    expect(text).toContain('Backend Suite Assessment');
+    expect(text).not.toContain('Assessment Package');
     expect(text).toContain('Acme Talent Team');
     expect(text).not.toMatch(/Assess\s*Pulse/i);
   });
@@ -28,6 +29,6 @@ describe('buildInvitationTemplate', () => {
     );
     expect(text).toContain('Deadline: No fixed deadline');
     expect(text).toContain('The MindQ Team');
-    expect(text).toContain('Open Suite Assessment Package');
+    expect(text).toContain('Open Suite Assessment');
   });
 });
