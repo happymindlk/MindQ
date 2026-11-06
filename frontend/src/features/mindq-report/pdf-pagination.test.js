@@ -1,5 +1,56 @@
 import { describe, expect, it } from 'vitest';
-import { computePageSlices } from './pdf-pagination';
+import { computePageSlices, findInkFreeCut } from './pdf-pagination';
+
+/**
+ * @param {[number, number][]} lines Inked [top, bottom) CSS-px ranges.
+ * @returns {(y: number) => boolean}
+ */
+const inkAt = (lines) => (y) => lines.some(([top, bottom]) => y >= top && y < bottom);
+
+describe('findInkFreeCut', () => {
+  it('keeps a cut that already sits on clean rows', () => {
+    expect(findInkFreeCut(inkAt([[100, 116]]), 130, 80)).toBe(130);
+  });
+
+  it('moves a cut off a text line to the clean gap above it', () => {
+    // Line 980-996 straddles the planned cut at 990; the gap above ends at 979.
+    const hasInk = inkAt([[950, 966], [980, 996]]);
+    const cut = findInkFreeCut(hasInk, 990, 900);
+    expect(cut).toBe(979);
+    expect(hasInk(cut)).toBe(false);
+  });
+
+  it('returns null when every row in range carries ink', () => {
+    expect(findInkFreeCut(inkAt([[0, 2000]]), 990, 900)).toBeNull();
+  });
+});
+
+describe('computePageSlices with adjustCut', () => {
+  it('applies the adjuster and continues the next page from the adjusted cut', () => {
+    const slices = computePageSlices(2500, 1000, [950, 1900], { adjustCut: (end) => end - 10 });
+    expect(slices[0]).toEqual({ start: 0, end: 940 });
+    expect(slices[1].start).toBe(940);
+    expect(slices.at(-1).end).toBe(2500);
+  });
+
+  it('ignores adjustments that move a cut down or to the page start', () => {
+    expect(computePageSlices(2000, 1000, [950], { adjustCut: (end) => end + 50 })[0].end).toBe(950);
+    expect(computePageSlices(2000, 1000, [950], { adjustCut: () => 0 })[0].end).toBe(950);
+  });
+
+  it('never slices a glyph when the planned hard cut lands on a text line', () => {
+    // No breakpoints at all: the planned cut is a hard cut at 1000, mid-line.
+    const lines = Array.from({ length: 120 }, (_, i) => [i * 20 + 4, i * 20 + 18]);
+    const hasInk = inkAt(lines);
+    const slices = computePageSlices(2400, 1000, [], {
+      adjustCut: (end, start) => findInkFreeCut(hasInk, end, start + 1) ?? end,
+    });
+    slices.slice(0, -1).forEach((s) => {
+      expect(hasInk(s.end)).toBe(false);
+      expect(hasInk(s.end - 1)).toBe(false);
+    });
+  });
+});
 
 describe('computePageSlices', () => {
   it('returns one slice when content fits a page', () => {
