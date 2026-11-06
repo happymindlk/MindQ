@@ -6,11 +6,14 @@ can never reach a report.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 _SENTENCE_END = (".", "!", "?")
+# Lightweight article cleanup for Gemini slips like "a inclination".
+_ARTICLE_A_BEFORE_VOWEL = re.compile(r"\ba ([aeiouAEIOU]\w+)\b")
 
 Alignment = Literal[
     "results_strongly_align",
@@ -59,6 +62,18 @@ CAPABILITY_KEYS: frozenset[str] = frozenset(
 )
 
 
+def fix_indefinite_articles(text: str) -> str:
+    """Correct ``a`` → ``an`` before vowel-initial words.
+
+    Args:
+        text: Prose that may contain article mismatches from the LLM.
+
+    Returns:
+        Text with lightweight article corrections applied.
+    """
+    return _ARTICLE_A_BEFORE_VOWEL.sub(r"an \1", text)
+
+
 def first_sentence(text: str) -> str:
     """Collapse model prose to exactly one sentence.
 
@@ -69,7 +84,7 @@ def first_sentence(text: str) -> str:
         The first sentence, whitespace-normalized and terminated with a period
         when the model omitted punctuation. Empty input returns "".
     """
-    cleaned = " ".join(str(text or "").split())
+    cleaned = fix_indefinite_articles(" ".join(str(text or "").split()))
     if not cleaned:
         return ""
     for index, char in enumerate(cleaned):
@@ -89,7 +104,11 @@ def first_sentence(text: str) -> str:
 def _clean_bullet_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
-    return [" ".join(str(item).split()) for item in value if str(item or "").strip()]
+    return [
+        fix_indefinite_articles(" ".join(str(item).split()))
+        for item in value
+        if str(item or "").strip()
+    ]
 
 
 class SubscaleNote(BaseModel):
@@ -123,7 +142,7 @@ class CompetencyBreakdownItem(BaseModel):
     @field_validator("role_relevance", mode="after")
     @classmethod
     def normalize_role_relevance(cls, value: str) -> str:
-        cleaned = " ".join(str(value or "").split())
+        cleaned = fix_indefinite_articles(" ".join(str(value or "").split()))
         if not cleaned:
             raise ValueError("role_relevance must not be blank")
         return cleaned
@@ -147,7 +166,7 @@ class CategorySummary(BaseModel):
     @field_validator("summary", mode="after")
     @classmethod
     def normalize_summary(cls, value: str) -> str:
-        cleaned = " ".join(str(value or "").split())
+        cleaned = fix_indefinite_articles(" ".join(str(value or "").split()))
         if not cleaned:
             raise ValueError("summary must not be blank")
         return cleaned
@@ -208,7 +227,7 @@ class ReportNarrative(BaseModel):
     @field_validator("headline", "executive_summary", mode="after")
     @classmethod
     def normalize_prose(cls, value: str) -> str:
-        cleaned = " ".join(str(value or "").split())
+        cleaned = fix_indefinite_articles(" ".join(str(value or "").split()))
         if not cleaned:
             raise ValueError("must not be blank")
         return cleaned

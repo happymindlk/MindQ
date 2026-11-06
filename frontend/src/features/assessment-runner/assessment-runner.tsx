@@ -258,11 +258,11 @@ export function AssessmentRunner({
           className="fixed inset-0 z-40 flex items-center justify-center bg-canvas/70"
           role="status"
           aria-live="assertive"
-          aria-label="Submitting"
+          aria-label="Submitting your responses"
         >
           <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-5 py-4 shadow-sm">
             <GpuSpinner />
-            <span className="text-sm font-medium text-foreground">Submitting…</span>
+            <span className="text-sm font-medium text-foreground">Submitting your responses...</span>
           </div>
         </div>
       )}
@@ -484,7 +484,7 @@ export function AssessmentRunner({
                 className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-fg hover:bg-primary-hover disabled:opacity-50"
               >
                 {submitting && <GpuSpinner className="h-3.5 w-3.5" />}
-                Confirm submit
+                {submitting ? 'Submitting your responses...' : 'Confirm submit'}
               </button>
             </div>
           </Dialog.Content>

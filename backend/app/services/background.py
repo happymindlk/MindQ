@@ -23,7 +23,10 @@ async def persist_assessment_started(
     corporate_id: UUID,
     started_at: datetime,
 ) -> None:
-    """Persist IN_PROGRESS + started_at after the runner payload already returned.
+    """Legacy helper: attempt start is now synchronous via ``POST /test/.../start``.
+
+    Kept for any in-flight BackgroundTasks queued before the cutover. Safe no-op
+    when ``started_at`` is already set.
 
     Args:
         candidate_id: Candidate opening the module.
@@ -68,7 +71,11 @@ async def persist_assessment_started(
 async def finalize_and_score_ai(
     candidate_id: UUID, assessment_id: UUID
 ) -> None:
-    """Score the submitted module, then run Gemini technical + JD pipelines.
+    """Backfill core scores if needed, then run Gemini technical + JD pipelines.
+
+    Core facet scoring normally lands in the submit transaction. This task is
+    the safety net plus the LLM / HR side-effects that must not block the
+    candidate HTTP response.
 
     Args:
         candidate_id: Candidate who just submitted.

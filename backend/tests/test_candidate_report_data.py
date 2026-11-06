@@ -464,6 +464,7 @@ def test_report_data_includes_failed_ai_eval_keys(app, corp_id, candidate_id, sy
     assert "latency" in cq["ai_evaluation"]
     assert cq["score"] is None
     assert cq["ai_eval_status"] == "failed"
-    assert body["total_assessments_completed"] == 1
+    # Unscored modules stay out of the breakdown and out of the header count.
+    assert body["total_assessments_completed"] == 0
     assert body["competency_breakdown"] == []
     assert body["category_averages"] is None

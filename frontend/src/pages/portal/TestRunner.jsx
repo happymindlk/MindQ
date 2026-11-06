@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { CheckCircle2 } from 'lucide-react';
 import Skeleton from '../../components/ui/Skeleton';
@@ -7,8 +7,10 @@ import Button from '../../components/ui/Button';
 import { api } from '../../api/client';
 import { readDraft, writeDraft, clearDraft, mergeAnswers } from '../../lib/assessment-draft';
 import { AssessmentRunner } from '../../features/assessment-runner/assessment-runner';
+import { ModuleReadyScreen } from '../../features/assessment-runner/module-ready-screen';
+import PackageCompleteScreen from '../../features/candidate-dashboard/package-complete-screen';
 import { useToast } from '../../components/ui/useToast';
-import { candidateTestKey, cachedQuery, invalidateQuery, peekQuery } from '../../lib/query-cache';
+import { candidateTestKey, cachedQuery, invalidateQuery, peekQuery, setQuery } from '../../lib/query-cache';
 import { CANDIDATE_DASHBOARD_KEY } from '../../features/candidate-dashboard/module-status';
 
 const LOCKED_DETAIL = 'Assessment already completed. Modifications are locked.';
@@ -28,6 +30,10 @@ function deferWork(work) {
   work();
 }
 
+/**
+ * Live candidate module runner with an explicit ready gate.
+ * GET loads questions without starting; POST /start arms the timer.
+ */
 export default function TestRunner() {
   const { testId } = useParams();
   const navigate = useNavigate();
@@ -44,7 +50,17 @@ export default function TestRunner() {
   const [isLoading, setIsLoading] = useState(() => !cached);
   const [lockDetail, setLockDetail] = useState(null);
   const [loadError, setLoadError] = useState(null);
-  const [phase, setPhase] = useState('running'); // running | complete | expired
+  const [startError, setStartError] = useState(null);
+  const [starting, setStarting] = useState(false);
+  const [companyName, setCompanyName] = useState(() => {
+    const dash = peekQuery(CANDIDATE_DASHBOARD_KEY);
+    return dash && typeof dash === 'object' ? dash.company_name || '' : '';
+  });
+  // instructions | running | package_complete | expired
+  const [phase, setPhase] = useState(() =>
+    cached && typeof cached === 'object' && cached.started_at ? 'running' : 'instructions',
+  );
+  const exitHandledRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +73,7 @@ export default function TestRunner() {
         if (cancelled) return;
         setInitialAnswers(mergeAnswers(data.answers || {}, readDraft(candidateId, testId)));
         setTest(data);
+        setPhase(data.started_at ? 'running' : 'instructions');
         setLoadError(null);
         setLockDetail(null);
       } catch (err) {
@@ -90,15 +107,24 @@ export default function TestRunner() {
         );
         if (result.status === 200) {
           clearDraft(candidateId, testId);
-          // Bust caches off the critical path so the submit spinner stays fluid.
+          if (result.company_name) setCompanyName(result.company_name);
+          // Bust caches off the critical path so navigation stays fluid.
           deferWork(() => {
             invalidateQuery(CANDIDATE_DASHBOARD_KEY);
             invalidateQuery(cacheKey);
           });
+          exitHandledRef.current = true;
+          if (result.package_complete) {
+            setPhase('package_complete');
+          } else {
+            // Return to the dashboard immediately; statuses refetch in the background.
+            navigate('/portal/dashboard', { replace: true });
+          }
         }
+        return result;
       },
     }),
-    [testId, candidateId, cacheKey],
+    [testId, candidateId, cacheKey, navigate],
   );
 
   const onAnswersChange = useCallback(
@@ -107,16 +133,49 @@ export default function TestRunner() {
   );
 
   const backToDashboard = useCallback(() => {
-    invalidateQuery(CANDIDATE_DASHBOARD_KEY);
+    deferWork(() => invalidateQuery(CANDIDATE_DASHBOARD_KEY));
     navigate('/portal/dashboard');
   }, [navigate]);
 
-  const onSubmitted = useCallback(() => {
-    setPhase('complete');
-    deferWork(() => invalidateQuery(CANDIDATE_DASHBOARD_KEY));
-  }, []);
+  const beginModule = useCallback(async () => {
+    if (!testId || starting) return;
+    setStarting(true);
+    setStartError(null);
+    try {
+      const started = await api.candidate.startTest(testId);
+      const next = {
+        ...test,
+        started_at: started.started_at || new Date().toISOString(),
+      };
+      setTest(next);
+      setQuery(cacheKey, next);
+      setPhase('running');
+      deferWork(() => invalidateQuery(CANDIDATE_DASHBOARD_KEY));
+    } catch (err) {
+      if (isAssessmentLocked(err)) {
+        setLockDetail(err.message || LOCKED_DETAIL);
+        return;
+      }
+      setStartError(err.message || 'Could not start this assessment. Please try again.');
+    } finally {
+      setStarting(false);
+    }
+  }, [testId, starting, test, cacheKey]);
 
   const onTimeExpired = useCallback(() => {
+    // transport.submit already navigated or showed package-complete.
+    if (exitHandledRef.current) {
+      deferWork(() => {
+        toast({
+          title: 'Time expired',
+          description:
+            'Your time for this test has ended. Your answers were automatically submitted.',
+          variant: 'warning',
+          duration: 6000,
+        });
+      });
+      return;
+    }
     setPhase('expired');
     deferWork(() => {
       invalidateQuery(CANDIDATE_DASHBOARD_KEY);
@@ -166,19 +225,19 @@ export default function TestRunner() {
     );
   }
 
-  if (phase === 'complete' || phase === 'expired') {
+  if (phase === 'package_complete') {
+    return <PackageCompleteScreen companyName={companyName} />;
+  }
+
+  if (phase === 'expired') {
     return (
       <div className="mx-auto flex w-full max-w-md flex-col items-center py-16 text-center">
         <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-success/25 bg-success/15">
           <CheckCircle2 className="h-7 w-7 text-success" aria-hidden />
         </div>
-        <h1 className="text-lg font-semibold text-foreground">
-          {phase === 'expired' ? 'Time is up — answers submitted' : 'Assessment submitted'}
-        </h1>
+        <h1 className="text-lg font-semibold text-foreground">Time is up — answers submitted</h1>
         <p className="mt-2 text-sm text-muted">
-          {phase === 'expired'
-            ? 'Your saved answers were locked when the timer ended.'
-            : 'Your responses are saved. You can return to the dashboard to continue other modules.'}
+          Your saved answers were locked when the timer ended.
         </p>
         <Button variant="primary" size="sm" className="mt-6" onClick={backToDashboard}>
           Back to dashboard
@@ -200,6 +259,20 @@ export default function TestRunner() {
     );
   }
 
+  if (phase === 'instructions') {
+    return (
+      <ModuleReadyScreen
+        title={test.title}
+        description={test.description}
+        durationSeconds={test.duration_seconds}
+        onBegin={() => void beginModule()}
+        busy={starting}
+        error={startError}
+        onExit={backToDashboard}
+      />
+    );
+  }
+
   return (
     <AssessmentRunner
       test={test}
@@ -207,7 +280,7 @@ export default function TestRunner() {
       initialAnswers={initialAnswers}
       transport={transport}
       onAnswersChange={onAnswersChange}
-      onSubmitted={onSubmitted}
+      onSubmitted={() => undefined}
       onTimeExpired={onTimeExpired}
       onLocked={setLockDetail}
       onExit={backToDashboard}

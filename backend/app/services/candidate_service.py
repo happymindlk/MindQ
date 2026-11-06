@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import run_db_op_with_retry
 from app.models.candidate import Candidate
+from app.models.corporate import Corporate
 from app.models.package import Package
 from app.models.assessment import Assessment
 from app.models.candidate_progress import CandidateProgress
@@ -408,11 +409,40 @@ class CandidateService:
         return await run_db_op_with_retry(_load, session=session)
 
     @staticmethod
+    async def get_company_name(session: AsyncSession, candidate: Candidate) -> str:
+        """Resolve the hiring organization display name for completion copy.
+
+        Args:
+            session: Async database session.
+            candidate: Authenticated candidate (provides ``corporate_id``).
+
+        Returns:
+            Corporate name, or an empty string when the tenant row is missing.
+        """
+        corporate = (
+            await session.execute(
+                select(Corporate.name).where(Corporate.id == candidate.corporate_id)
+            )
+        ).scalar_one_or_none()
+        return corporate or ""
+
+    @staticmethod
     async def get_dashboard(session: AsyncSession, candidate: Candidate) -> dict:
+        """Build the portal summary in a fixed number of queries (no N+1).
+
+        Loads package, corporate name, assessments, and progress rows once each,
+        then joins statuses in memory.
+        """
+
         async def _load() -> dict:
             package = (
                 await session.execute(select(Package).where(Package.id == candidate.package_id))
             ).scalars().first()
+            company_name = (
+                await session.execute(
+                    select(Corporate.name).where(Corporate.id == candidate.corporate_id)
+                )
+            ).scalar_one_or_none() or ""
 
             assessments = (
                 await session.execute(
@@ -459,6 +489,7 @@ class CandidateService:
 
             return {
                 "package_title": package.title if package else "",
+                "company_name": company_name,
                 "candidate_name": candidate.full_name,
                 "candidate_first_name": candidate.first_name,
                 "open_time": open_time.isoformat() if open_time else None,
@@ -652,10 +683,11 @@ class CandidateService:
         assessment: Assessment,
         progress: CandidateProgress | None,
     ) -> CandidateProgress:
-        """Start the attempt clock when the runner first loads the module.
+        """Start the attempt clock after the candidate confirms they are ready.
 
-        Strict timers must count from first view, not first answer, otherwise a
-        candidate could read every item before the countdown begins.
+        Called from ``POST /test/{id}/start`` (instruction screen CTA), not from
+        ``GET /test``. Timers therefore begin only on explicit consent, while a
+        resume of an already-started attempt is a no-op.
 
         Args:
             session: Async database session.
@@ -742,6 +774,40 @@ class CandidateService:
         return response
 
     @staticmethod
+    def _apply_core_scores(
+        progress: CandidateProgress,
+        assessment: Assessment,
+        responses: list[CandidateResponse],
+        server_seconds: float | None,
+    ) -> None:
+        """Write local facet / profile / score_details onto a progress row in-memory.
+
+        Args:
+            progress: Progress row being completed.
+            assessment: Assessment with the question bank.
+            responses: Persisted (or flushed) answer rows for this attempt.
+            server_seconds: Server-measured module duration, if known.
+        """
+        result = score_assessment_detailed(assessment.questions, responses)
+        progress.score = result.score
+        progress.facet_scores = result.facet_scores or None
+        progress.derived_profile = derive_profile_payload(
+            assessment, result, responses, server_seconds
+        )
+        progress.scoring_version = SCORING_VERSION
+        progress.score_details = build_score_details(
+            questions=assessment.questions,
+            result=result,
+            derived_profile=progress.derived_profile,
+            category=(
+                "cognitive"
+                if (getattr(assessment, "module_kind", None) or "").strip().lower()
+                == "psychometric"
+                else "technical"
+            ),
+        )
+
+    @staticmethod
     async def submit_test(
         session: AsyncSession,
         candidate: Candidate,
@@ -749,12 +815,11 @@ class CandidateService:
         pending_responses: list[ResponseSave] | None = None,
         client_duration_seconds: float | None = None,
     ):
-        """Persist pending answers and mark COMPLETED without blocking on scoring.
+        """Persist answers, compute core scores, and mark COMPLETED in one commit.
 
         Timed modules past their deadline still finalize, but late pending
-        answers are discarded so only work saved in time counts. Facet scores,
-        derived profiles, and score_details are filled by
-        ``finalize_submission_scores`` (BackgroundTasks).
+        answers are discarded so only work saved in time counts. LLM technical
+        eval, JD synthesis, and HR email stay on BackgroundTasks.
 
         Args:
             session: Async database session.
@@ -791,7 +856,6 @@ class CandidateService:
         if progress.started_at is not None:
             server_seconds = max(0.0, (now - progress.started_at).total_seconds())
 
-        # Acknowledge completion immediately; scoring / HR email run in BackgroundTasks.
         progress.status = COMPLETED_STATUS
         progress.completed_at = now
         progress.client_duration_seconds = _elapsed_decimal(client_duration_seconds)
@@ -800,15 +864,29 @@ class CandidateService:
             duration = _assessment_duration(assessment)
             progress.overtime = bool(duration and server_seconds > duration)
 
+        # Score from the same flushed response set before commit so the HTTP
+        # round-trip still stays in the 1–2s band for typical modules.
+        responses = (
+            await session.execute(
+                select(CandidateResponse).where(
+                    CandidateResponse.candidate_id == candidate.id,
+                    CandidateResponse.assessment_id == assessment.id,
+                )
+            )
+        ).scalars().all()
+        CandidateService._apply_core_scores(
+            progress, assessment, list(responses), server_seconds
+        )
+
         try:
             await session.commit()
         except IntegrityError as exc:
             # A concurrent first-time submit inserted the progress row first.
             await session.rollback()
             raise AssessmentAlreadySubmittedError() from exc
-        # Skip session.refresh + is_package_complete: both are extra round-trips.
-        # JD/HR side-effects check completeness inside BackgroundTasks.
-        return progress, False
+
+        package_complete = await CandidateService.is_package_complete(session, candidate)
+        return progress, package_complete
 
     @staticmethod
     async def _upsert_pending_responses(
@@ -903,6 +981,11 @@ class CandidateService:
         if progress is None or progress.status != COMPLETED_STATUS:
             return None
 
+        # Idempotent: submit already wrote core scores; background retries refill
+        # only when a prior submit was interrupted before scoring landed.
+        if progress.scoring_version == SCORING_VERSION and progress.score_details is not None:
+            return progress
+
         responses = (
             await session.execute(
                 select(CandidateResponse).where(
@@ -912,7 +995,6 @@ class CandidateService:
             )
         ).scalars().all()
 
-        result = score_assessment_detailed(assessment.questions, responses)
         server_seconds: float | None = None
         if progress.server_duration_seconds is not None:
             server_seconds = float(progress.server_duration_seconds)
@@ -921,22 +1003,8 @@ class CandidateService:
                 0.0, (progress.completed_at - progress.started_at).total_seconds()
             )
 
-        progress.score = result.score
-        progress.facet_scores = result.facet_scores or None
-        progress.derived_profile = derive_profile_payload(
-            assessment, result, responses, server_seconds
-        )
-        progress.scoring_version = SCORING_VERSION
-        progress.score_details = build_score_details(
-            questions=assessment.questions,
-            result=result,
-            derived_profile=progress.derived_profile,
-            category=(
-                "cognitive"
-                if (getattr(assessment, "module_kind", None) or "").strip().lower()
-                == "psychometric"
-                else "technical"
-            ),
+        CandidateService._apply_core_scores(
+            progress, assessment, list(responses), server_seconds
         )
         await session.commit()
         await session.refresh(progress)

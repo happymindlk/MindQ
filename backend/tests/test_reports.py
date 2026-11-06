@@ -118,6 +118,8 @@ def test_report_allows_ops_other_tenant(home_corp, candidate_id):
     assert res.content == b"<html>ok</html>"
     assert res.headers["X-Report-Synthesis-Status"] == "skipped"
     assert 'filename="MindQ Report - Pat.html"' in res.headers["Content-Disposition"]
+    assert "Content-Disposition" in res.headers.get("Access-Control-Expose-Headers", "")
+    assert res.headers["content-type"].startswith("text/html")
     rendered = generate.call_args.kwargs["report"]
     assert rendered["candidate_full_name"] == "Pat"
     assert "overall_fit" not in rendered

@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, FileText } from 'lucide-react';
+import { Loader2, RefreshCw, FileText } from 'lucide-react';
 import StatusTile from '../../components/ui/StatusTile';
 import PageHeader from '../../components/ui/PageHeader';
 import EmptyState from '../../components/ui/EmptyState';
@@ -8,6 +8,7 @@ import Button from '../../components/ui/Button';
 import Skeleton from '../../components/ui/Skeleton';
 import { api } from '../../api/client';
 import DeadlineNotice from '../../features/candidate-dashboard/deadline-notice';
+import PackageCompleteScreen from '../../features/candidate-dashboard/package-complete-screen';
 import {
   lockedReasonFor,
   usePackageWindow,
@@ -30,6 +31,7 @@ export default function TestDashboard() {
     data: dashboardData,
     error: loadError,
     isLoading,
+    isValidating,
     reload: loadDashboard,
   } = useCachedQuery(CANDIDATE_DASHBOARD_KEY, fetcher, { staleTime: 0 });
 
@@ -70,10 +72,14 @@ export default function TestDashboard() {
     );
   }
 
-  const { candidate_name, tests } = dashboardData;
+  const { candidate_name, tests, company_name: companyName } = dashboardData;
   const remainingTests = tests.filter(
     (t) => normalizeModuleStatus(t.status) !== 'completed',
   ).length;
+
+  if (tests.length > 0 && remainingTests === 0) {
+    return <PackageCompleteScreen companyName={companyName} />;
+  }
 
   return (
     <div className="w-full py-6 space-y-4">
@@ -83,7 +89,19 @@ export default function TestDashboard() {
         closeTime={dashboardData.close_time}
       />
 
-      <PageHeader title={`Hello, ${candidate_name}`} />
+      <div className="flex items-start justify-between gap-3">
+        <PageHeader title={`Hello, ${candidate_name}`} />
+        {isValidating ? (
+          <span
+            className="inline-flex items-center gap-1.5 pt-1 text-xs text-muted"
+            role="status"
+            aria-live="polite"
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            Updating…
+          </span>
+        ) : null}
+      </div>
 
       <div className="rounded-lg border border-border bg-surface px-4 py-3">
         <h3 className="text-sm font-semibold text-foreground">Before You Begin</h3>
@@ -103,9 +121,7 @@ export default function TestDashboard() {
       </div>
 
       <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        {remainingTests === 0
-          ? 'All assessments in your suite are complete.'
-          : `You have ${remainingTests} test${remainingTests !== 1 ? 's' : ''} remaining in your assessment suite.`}
+        {`You have ${remainingTests} test${remainingTests !== 1 ? 's' : ''} remaining in your assessment suite.`}
       </p>
 
       {tests.length === 0 ? (
@@ -127,6 +143,7 @@ export default function TestDashboard() {
                 durationLabel={formatDurationBadge(resolveTestDurationSeconds(test))}
                 lockedReason={lockedReasonFor(status, windowState)}
                 onPrefetch={() => {
+                  // Prefetch is safe: GET /test no longer marks IN_PROGRESS.
                   void cachedQuery(
                     candidateTestKey(test.id),
                     () => api.candidate.getTest(test.id),

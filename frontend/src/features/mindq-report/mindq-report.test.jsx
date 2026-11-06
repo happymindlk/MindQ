@@ -5,7 +5,7 @@ import MindQReport from './mindq-report';
 import { FIT_DISCLAIMER, FOOTER_NOTICE, REPORT_TITLE } from './report-copy';
 
 const SPEC_FOOTER =
-  'This is an auto-generated MindQ report. This cannot be reproduced, edited or redistributed without the written consent of MindQ (Pvt.) Ltd.';
+  'This is an auto-generated MindQ report. This document cannot be reproduced, edited, or redistributed without the written consent of MindQ (Pvt.) Ltd.';
 
 const SPEC_FIT_DISCLAIMER =
   'This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.';
@@ -274,6 +274,57 @@ describe('MindQReport', () => {
     expect(screen.getByText('Fast numerical reasoning.')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Areas to explore' })).toBeInTheDocument();
     expect(screen.getByText('May over-index on detail.')).toBeInTheDocument();
+  });
+
+  it('renders Strengths and Areas to Explore as bulleted lists', () => {
+    const { container } = render(
+      <MindQReport
+        data={{
+          ...BASE,
+          strengths: ['One', 'Two', 'Three', 'Four', 'Five'],
+          areas_to_explore: ['A', 'B', 'C', 'D', 'E'],
+        }}
+      />,
+    );
+    const strengths = container.querySelector('.strengths-block ul');
+    const areas = container.querySelector('.areas-block ul');
+    expect(strengths).toBeTruthy();
+    expect(areas).toBeTruthy();
+    expect(strengths.querySelectorAll('li')).toHaveLength(5);
+    expect(areas.querySelectorAll('li')).toHaveLength(5);
+    expect(container.querySelector('.list-section')).toBeTruthy();
+  });
+
+  it('renders timed-out modules and aligns the assessments completed count', () => {
+    const { container } = render(
+      <MindQReport
+        data={{
+          ...BASE,
+          total_assessments_completed: 99,
+          competency_breakdown: [
+            row('Cognitive', 'Numerical Reasoning', 90),
+            {
+              category: 'Cognitive',
+              assessment_name: 'Verbal Reasoning',
+              score: null,
+              display_score: 'Incomplete',
+              band: 'Timed Out / Incomplete',
+              status: 'TIMED_OUT',
+              timed_out: true,
+              status_note:
+                'Candidate ran out of time before completing all items. Displayed score reflects attempted responses only.',
+              performance_summary: 'Timed out after answering 2 of 10 items.',
+            },
+          ],
+        }}
+      />,
+    );
+    expect(within(container.querySelector('.mq-meta-grid')).getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('Verbal Reasoning')).toBeInTheDocument();
+    expect(screen.getAllByText('Timed Out / Incomplete').length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/Candidate ran out of time before completing all items/i),
+    ).toBeInTheDocument();
   });
 
   it('shows a retry message when the summary failed', () => {

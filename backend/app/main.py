@@ -232,6 +232,7 @@ app.add_middleware(
         "X-Process-Time",
         "X-Report-Type",
         "X-Report-Synthesis-Status",
+        "Content-Disposition",
     ],
 )
 

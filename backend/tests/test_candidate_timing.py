@@ -139,7 +139,8 @@ async def test_submit_after_deadline_discards_pending_and_flags_overtime(monkeyp
 
     session.add.assert_not_called()
     session.add_all.assert_not_called()
-    session.execute.assert_not_awaited()
+    # Late pending answers are skipped; execute only loads rows for core scoring.
+    session.execute.assert_awaited()
     assert package_complete is False
     assert result.status == "COMPLETED"
     assert float(result.server_duration_seconds) == 500.0
@@ -180,22 +181,13 @@ async def test_submit_in_time_stores_elapsed_and_facets(monkeypatch):
         pending_responses=pending,
     )
 
-    # Completeness / HR email are deferred to BackgroundTasks.
-    assert complete is False
+    # LLM / HR email stay deferred; core facets land in the submit transaction.
+    assert complete is True
     assert float(added[0].elapsed_seconds) == 7.46
-    assert result.facet_scores is None
+    assert result.facet_scores == {"Pace": {"mean": 4.0, "n": 1, "sum": 4.0}}
     assert result.overtime is False
     assert result.client_duration_seconds is None
-
-    progress.status = "COMPLETED"
-    monkeypatch.setattr(
-        CandidateService, "get_assessment_for_candidate", AsyncMock(return_value=assessment)
-    )
-    monkeypatch.setattr(CandidateService, "_get_progress", AsyncMock(return_value=progress))
-    session.execute = AsyncMock(return_value=all_rows)
-    scored = await CandidateService.finalize_submission_scores(session, candidate, assessment.id)
-    assert scored.facet_scores == {"Pace": {"mean": 4.0, "n": 1, "sum": 4.0}}
-    assert scored.derived_profile is None
+    assert result.derived_profile is None
 
 
 OCTANT_CODES = ("PA", "BC", "DE", "FG", "HI", "JK", "LM", "NO")
@@ -244,17 +236,8 @@ async def _submit_ipc(monkeypatch, rows):
     result, _ = await CandidateService.submit_test(session, candidate, assessment.id)
     session.commit.assert_awaited_once()
     assert result.status == "COMPLETED"
-    assert result.derived_profile is None
-
-    progress.status = "COMPLETED"
-    progress.completed_at = NOW
-    progress.server_duration_seconds = 300.0
-    monkeypatch.setattr(
-        CandidateService, "get_assessment_for_candidate", AsyncMock(return_value=assessment)
-    )
-    monkeypatch.setattr(CandidateService, "_get_progress", AsyncMock(return_value=progress))
-    scored = await CandidateService.finalize_submission_scores(session, candidate, assessment.id)
-    return scored
+    # Core facets + derived profiles land in the submit transaction.
+    return result
 
 
 @pytest.mark.asyncio

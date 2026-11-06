@@ -157,7 +157,8 @@ async def test_get_test_response_omits_answer_keys(candidate_client, monkeypatch
     assert "correct_answer" not in question
     assert "is_correct" not in question
     assert body["answers"] == {"q1": "4"}
-    assert body["started_at"] is not None
+    # GET must not start the clock; started_at stays null until POST /start.
+    assert body["started_at"] is None
 
 
 @pytest.mark.asyncio
@@ -393,6 +394,11 @@ async def test_submit_passes_pending_responses_atomically(candidate_client, monk
 
     monkeypatch.setattr(CandidateService, "submit_test", submit)
 
+    async def company_name(session, candidate):
+        return "Acme Corp"
+
+    monkeypatch.setattr(CandidateService, "get_company_name", company_name)
+
     async def _noop_score(*_a, **_k):
         return None
 
@@ -420,6 +426,8 @@ async def test_submit_passes_pending_responses_atomically(candidate_client, monk
     body = response.json()
     assert body["status"] == "COMPLETED"
     assert "score" not in body
+    assert body["package_complete"] is False
+    assert body["company_name"] == "Acme Corp"
     assert body["jd_scoring_queued"] is True
     assert captured["aid"] == assessment_id
     assert captured["pending"] is not None
