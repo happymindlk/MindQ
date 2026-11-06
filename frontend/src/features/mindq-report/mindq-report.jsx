@@ -1,6 +1,7 @@
 import React from 'react';
 import MindQBrandMark from './mindq-brand-mark';
 import { CATEGORY_ORDER, FIT_DISCLAIMER, FOOTER_NOTICE, REPORT_TITLE } from './report-copy';
+import { REPORT_FONT_FACE_CSS } from './report-fonts';
 import { safeLogoUrl } from './report-logo';
 import { REPORT_CSS } from './report-styles';
 
@@ -250,7 +251,7 @@ function CategoryBreakdown({ group }) {
         {group.rows.map((row, index) => (
           <li
             key={`${row.assessmentName}-${index}`}
-            className={`mq-score-item competency-card ${KEEP_TOGETHER}`}
+            className={`mq-score-item competency-card module-card assessment-card ${KEEP_TOGETHER}`}
             data-pdf-row
           >
             <div className="mq-score-row">
@@ -264,7 +265,7 @@ function CategoryBreakdown({ group }) {
               <span className="mq-score-value">{formatRowValue(row)}</span>
             </div>
             {row.subscales.length > 0 && (
-              <ul className="mq-subscales">
+              <ul className="mq-subscales subscale-group">
                 {row.subscales.map((facet) => {
                   const facetValue =
                     facet.positionPct != null
@@ -311,6 +312,7 @@ export default function MindQReport({ data, logoSrc }) {
 
   return (
     <div className="mindq-report">
+      <style data-report-fonts>{REPORT_FONT_FACE_CSS}</style>
       <style>{REPORT_CSS}</style>
 
       <div className="mq-print-frame">
@@ -368,7 +370,7 @@ export default function MindQReport({ data, logoSrc }) {
               </section>
             )}
 
-            <section className="mq-card">
+            <section className="mq-card summary-box">
               <h2>Executive Summary</h2>
               {vm.summary ? (
                 <p className="mq-summary">{vm.summary}</p>
@@ -378,7 +380,7 @@ export default function MindQReport({ data, logoSrc }) {
             </section>
           </div>
 
-          <section className="mq-section" aria-label="Competency Breakdown">
+          <section className="mq-section competency-section" aria-label="Competency Breakdown">
             {firstGroup ? (
               <>
                 {/* Title travels with the first group so it is never orphaned at a page end. */}

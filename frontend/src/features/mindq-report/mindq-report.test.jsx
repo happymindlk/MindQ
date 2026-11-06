@@ -46,7 +46,8 @@ const BASE = {
 
 describe('report copy', () => {
   it('matches the contractual footer and disclaimer text exactly', () => {
-    expect(FOOTER_NOTICE).toBe(SPEC_FOOTER);
+    expect(FOOTER_NOTICE.replace(/\u00a0/g, ' ')).toBe(SPEC_FOOTER);
+    expect(FOOTER_NOTICE).toContain('MindQ\u00a0(Pvt.)\u00a0Ltd.');
     expect(FIT_DISCLAIMER).toBe(SPEC_FIT_DISCLAIMER);
   });
 });

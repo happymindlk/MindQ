@@ -11,7 +11,7 @@ export const REPORT_CSS = `
   padding: 32px 32px 24px;
   background: #ffffff;
   color: #111827;
-  font-family: "Montserrat", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: "MindQ Report Sans", "Montserrat", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   font-size: 13px;
   line-height: 1.5;
   text-align: left;
@@ -39,11 +39,11 @@ export const REPORT_CSS = `
 .mq-eyebrow {
   margin-bottom: 4px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
   color: #7048E2; font-weight: 700;
-  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-title {
   margin-bottom: 16px !important; font-size: 26px; font-weight: 700; color: #111827; line-height: 1.2;
-  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-meta-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px 24px; margin: 0; }
 .mq-meta-grid dt {
@@ -60,7 +60,7 @@ export const REPORT_CSS = `
 .mq-card h2, .mq-sr-col h2, .mq-section-title {
   margin-bottom: 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
   color: #111827; font-weight: 700; border-bottom: 1px solid #d1d5db; padding-bottom: 8px;
-  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-section-title { margin-bottom: 16px; }
 
@@ -76,11 +76,11 @@ export const REPORT_CSS = `
 }
 .mq-dash-label {
   margin-bottom: 8px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280;
-  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-dash-value {
   font-size: 28px; font-weight: 700; color: #111827; font-variant-numeric: tabular-nums;
-  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
 }
 
 .mq-summary { white-space: pre-wrap; color: #1f2937; }
@@ -92,12 +92,12 @@ export const REPORT_CSS = `
 }
 .mq-group-head h3 {
   font-size: 15px; font-weight: 700; color: #111827;
-  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-avg {
   display: inline-flex; align-items: baseline; gap: 8px; font-size: 18px; font-weight: 700;
   color: #7048E2; font-variant-numeric: tabular-nums;
-  font-family: "Poppins", "Montserrat", "Segoe UI", sans-serif;
+  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
 }
 .mq-avg-label {
   font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; font-weight: 600;
@@ -206,7 +206,7 @@ export const REPORT_CSS = `
   border-top: 1px solid #d1d5db; background: #ffffff;
 }
 .mq-footer-notes { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.mq-footer-text { font-size: 10px; line-height: 1.5; color: #6b7280; }
+.mq-footer-text { font-size: 10px; line-height: 1.5; color: #6b7280; text-wrap: pretty; }
 .mq-footer-disclaimer { color: #92400e; font-weight: 600; }
 .mq-brand { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .mq-brand img { display: block; }
@@ -214,6 +214,18 @@ export const REPORT_CSS = `
 .mindq-report [data-pdf-block], .mq-score-item {
   break-inside: avoid; page-break-inside: avoid; break-after: auto; page-break-after: auto;
 }
+.mindq-report .competency-section > *,
+.mindq-report .module-card,
+.mindq-report .assessment-card,
+.mindq-report .subscale-group,
+.mindq-report .summary-box,
+.mindq-report .strengths-block,
+.mindq-report .areas-block {
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+.mindq-report p, .mindq-report li { orphans: 3; widows: 3; }
+.mindq-report h2, .mindq-report h3 { break-after: avoid; page-break-after: avoid; }
 .mq-print-footer-space,
 .mq-print-footer-spacer {
   display: none !important;

@@ -44,6 +44,17 @@
             break-inside: avoid;
             page-break-inside: avoid;
         }
+        .module-card,
+        .assessment-card,
+        .subscale-group,
+        .summary-box,
+        .strengths-block,
+        .areas-block {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+        }
+        p, li { orphans: 3; widows: 3; }
+        h2, h3 { break-after: avoid; page-break-after: avoid; }
         .exec-card {
             width: 100%;
             border: 1px solid #e2e8f0;
@@ -213,7 +224,7 @@
 
     <h2>Executive Summary</h2>
     {% if report.executive_summary %}
-    <div class="summary">{{ report.executive_summary }}</div>
+    <div class="summary summary-box">{{ report.executive_summary }}</div>
     {% elif report.synthesis_status == 'skipped' %}
     <p class="muted">An executive summary needs a target role and at least one completed assessment.</p>
     {% elif report.synthesis_status == 'failed' %}
@@ -225,7 +236,7 @@
     <h2>Competency Breakdown</h2>
     {% if report.category_summaries %}
         {% for item in report.category_summaries %}
-    <div class="summary">
+    <div class="summary summary-box">
         <strong>{{ item.category }}</strong>
         <p style="margin: 4px 0 0 0;">{{ item.summary }}</p>
     </div>
@@ -243,7 +254,7 @@
         </thead>
         <tbody>
             {% for item in report.competency_breakdown %}
-            <tr class="competency-card">
+            <tr class="competency-card module-card assessment-card">
                 <td>{{ item.category }}</td>
                 <td>
                     {{ item.assessment_name }}
@@ -268,7 +279,7 @@
     {% endif %}
 
     {% if report.headline %}
-    <div class="summary">{{ report.headline }}</div>
+    <div class="summary summary-box">{{ report.headline }}</div>
     {% endif %}
 
     {% if report.key_takeaways %}
@@ -319,7 +330,7 @@
     <div class="footer">
         <span class="mq-badge">MindQ</span>
         <p class="muted" style="margin-top: 8px;">
-            This is an auto-generated MindQ report. This document cannot be reproduced, edited, or redistributed without the written consent of MindQ (Pvt.) Ltd.
+            This is an auto-generated MindQ report. This document cannot be reproduced, edited, or redistributed without the written consent of MindQ&nbsp;(Pvt.)&nbsp;Ltd.
         </p>
         <p class="disclaimer">
             This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.
