@@ -379,15 +379,30 @@ async def test_dashboard_reports_closed_window_and_launchable_flags():
         SimpleNamespace(assessment_id=done.id, status="COMPLETED", started_at=now - 3 * HOUR),
     ]
     session = AsyncMock()
+    # package → company_name → assessments → progresses
+    company = MagicMock()
+    company.scalar_one_or_none.return_value = "Acme Labs"
     session.execute = AsyncMock(
-        side_effect=[_ListResult(package), _ListResult([fresh, started, done]), _ListResult(progresses)]
+        side_effect=[
+            _ListResult(package),
+            company,
+            _ListResult([fresh, started, done]),
+            _ListResult(progresses),
+        ]
     )
-    candidate = SimpleNamespace(id=uuid4(), package_id=uuid4(), full_name="Ada L", first_name="Ada")
+    candidate = SimpleNamespace(
+        id=uuid4(),
+        package_id=uuid4(),
+        corporate_id=uuid4(),
+        full_name="Ada L",
+        first_name="Ada",
+    )
 
     data = await CandidateService.get_dashboard(session, candidate)
 
     assert data["window_state"] == "closed"
     assert data["close_time"] == close_time.isoformat()
+    assert data["company_name"] == "Acme Labs"
     flags = {t["title"]: (t["status"], t["launchable"]) for t in data["tests"]}
     assert flags == {
         "CogniCheck (based on ICAR-16)": ("not_started", False),

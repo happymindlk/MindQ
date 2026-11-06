@@ -1,7 +1,6 @@
 from uuid import UUID
 from typing import NoReturn
 import logging
-from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
@@ -9,7 +8,7 @@ from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.response import ResponseSave, ResponseSubmit
 from app.services.candidate_service import CandidateService
-from app.services.background import finalize_and_score_ai, persist_assessment_started
+from app.services.background import finalize_and_score_ai
 from app.services.runner_payload import build_runner_payload
 from app.auth import get_current_candidate
 from app.exceptions import (
@@ -56,16 +55,19 @@ async def get_dashboard(
 @router.get("/test/{assessment_id}", response_model=CandidateTestResponse)
 async def get_test(
     assessment_id: UUID,
-    background_tasks: BackgroundTasks,
     candidate: Candidate = Depends(get_current_candidate),
     db: AsyncSession = Depends(get_db),
 ):
+    """Load the runner payload without starting the attempt clock.
+
+    ``started_at`` is null until the candidate explicitly posts ``/start``
+    (instruction screen → "I'm ready to begin"). Prefetch from the dashboard
+    is therefore safe and will not mark modules ``IN_PROGRESS``.
+    """
     try:
         assessment, progress = await CandidateService.require_writable_assessment(
             db, candidate, assessment_id
         )
-        # Load answers without waiting on the IN_PROGRESS commit; start the clock
-        # optimistically and persist status in the background.
         answers = await CandidateService.get_saved_answers(db, candidate.id, assessment_id)
     except (
         AssessmentNotFoundError,
@@ -76,15 +78,6 @@ async def get_test(
         _raise_integrity(exc)
 
     started_at = getattr(progress, "started_at", None) if progress else None
-    if started_at is None:
-        started_at = datetime.now(timezone.utc)
-        background_tasks.add_task(
-            persist_assessment_started,
-            candidate.id,
-            assessment.id,
-            candidate.corporate_id,
-            started_at,
-        )
 
     return build_runner_payload(
         assessment_id=assessment.id,
@@ -106,6 +99,33 @@ async def get_test(
         ),
         confidentiality_notice_text=getattr(assessment, "confidentiality_notice_text", None),
     )
+
+
+@router.post("/test/{assessment_id}/start")
+async def start_test(
+    assessment_id: UUID,
+    candidate: Candidate = Depends(get_current_candidate),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark the module ``IN_PROGRESS`` and start the countdown after explicit consent."""
+    try:
+        assessment, progress = await CandidateService.require_writable_assessment(
+            db, candidate, assessment_id, for_update=True
+        )
+        progress = await CandidateService.ensure_started(db, candidate, assessment, progress)
+    except (
+        AssessmentNotFoundError,
+        AssessmentAlreadySubmittedError,
+        PackageNotOpenError,
+        PackageClosedError,
+    ) as exc:
+        _raise_integrity(exc)
+
+    return {
+        "assessment_id": str(assessment.id),
+        "status": progress.status,
+        "started_at": progress.started_at,
+    }
 
 
 @router.post("/autosave")
@@ -137,7 +157,7 @@ async def submit_test(
     body: ResponseSubmit | None = None,
 ):
     try:
-        progress, _package_complete = await CandidateService.submit_test(
+        progress, package_complete = await CandidateService.submit_test(
             db,
             candidate,
             assessment_id,
@@ -151,13 +171,17 @@ async def submit_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
-    # Acknowledge after responses are written; scoring, JD, and HR email run after.
+    # Core facet scoring already ran in the submit transaction. LLM technical
+    # eval, JD synthesis, and HR email stay off the candidate hot path.
     background_tasks.add_task(finalize_and_score_ai, candidate.id, assessment_id)
+    company_name = await CandidateService.get_company_name(db, candidate)
     # Scores stay server-side: echoing them lets candidates calibrate answers
     # across modules or share keyed results.
     return {
         "assessment_id": str(progress.assessment_id),
         "status": progress.status,
         "completed_at": progress.completed_at,
+        "package_complete": package_complete,
+        "company_name": company_name,
         "jd_scoring_queued": True,
     }

@@ -20,7 +20,7 @@ type PreviewState =
   | { status: 'ready'; tests: RunnerTest[] }
   | { status: 'error'; message: string };
 
-const PREVIEW_SRC = `/portal?code=${PREVIEW_ACCESS_CODE}`;
+const PREVIEW_SRC = `/portal?code=${PREVIEW_ACCESS_CODE}&preview=true`;
 
 export function LivePreviewDrawer({ open, onOpenChange, packageTitle, moduleIds, moduleOverrides }: LivePreviewDrawerProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);

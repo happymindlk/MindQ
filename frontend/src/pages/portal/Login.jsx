@@ -104,7 +104,9 @@ function Field({
 
 export default function Login() {
   const [searchParams] = useSearchParams();
-  if (searchParams.get('code') === PREVIEW_ACCESS_CODE) {
+  const isPreview =
+    searchParams.get('preview') === 'true' || searchParams.get('code') === PREVIEW_ACCESS_CODE;
+  if (isPreview) {
     return <PreviewRunner />;
   }
   return <CandidateLogin initialAccessCode={(searchParams.get('code') || '').trim()} />;

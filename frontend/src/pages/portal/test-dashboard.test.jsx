@@ -113,6 +113,7 @@ describe('TestDashboard deadline', () => {
   it('places a single Before You Begin card between greeting and counter', async () => {
     vi.mocked(api.candidate.getDashboard).mockResolvedValue({
       candidate_name: 'Ada Lovelace',
+      company_name: 'Acme',
       open_time: null,
       close_time: null,
       window_state: 'open',
@@ -138,6 +139,25 @@ describe('TestDashboard deadline', () => {
     expect(
       screen.getByText(/each assessment is timed and the timer keeps running if you leave the page/i),
     ).toBeInTheDocument();
+  });
+
+  it('shows the closed completion screen with no back button when every module is done', async () => {
+    vi.mocked(api.candidate.getDashboard).mockResolvedValue({
+      candidate_name: 'Ada Lovelace',
+      company_name: 'Acme Labs',
+      open_time: null,
+      close_time: null,
+      window_state: 'open',
+      tests: tests.map((t) => ({ ...t, status: 'completed', launchable: false })),
+    });
+    renderDashboard();
+
+    expect(await screen.findByText(/you've completed all assessments!/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/your responses have been submitted to Acme Labs/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /back to/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Before You Begin')).not.toBeInTheDocument();
   });
 
   it('renders no deadline banner for packages without a close time', async () => {

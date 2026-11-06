@@ -73,6 +73,13 @@ export const api = {
       const res = await fetch(`${API_BASE}/candidate/test/${assessmentId}`, { headers: getAuthHeaders() });
       return handleResponse(res);
     },
+    startTest: async (assessmentId) => {
+      const res = await fetch(`${API_BASE}/candidate/test/${assessmentId}/start`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      return handleResponse(res);
+    },
     autosave: async (data) => {
       const res = await fetch(`${API_BASE}/candidate/autosave`, {
         method: 'POST',
