@@ -65,7 +65,7 @@ export function useModuleTimer({
       }
       // #region agent log
       if (raw <= 2 || raw % 30 === 0) {
-        fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5f236f'},body:JSON.stringify({sessionId:'5f236f',runId:'pre-fix',hypothesisId:'A',location:'use-module-timer.ts:tick',message:'client timer tick',data:{raw,deadline,now:nowRef.current(),startedAt},timestamp:Date.now()})}).catch(()=>{});
+        fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5f236f'},body:JSON.stringify({sessionId:'5f236f',runId:'pre-fix',hypothesisId:'A',location:'use-module-timer.ts:tick',message:'client timer tick',data:{raw,deadline,now:nowRef.current()},timestamp:Date.now()})}).catch(()=>{});
       }
       // #endregion
       setRemaining(Math.max(0, raw));
