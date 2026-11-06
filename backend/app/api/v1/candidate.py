@@ -1,13 +1,16 @@
 from uuid import UUID
-from typing import NoReturn
+from typing import NoReturn, Any
+import json
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.response import ResponseSave, ResponseSubmit
-from app.services.candidate_service import CandidateService
+from app.services.candidate_service import CandidateService, _assessment_duration
 from app.services.background import finalize_and_score_ai
 from app.services.runner_payload import build_runner_payload
 from app.auth import get_current_candidate
@@ -23,6 +26,42 @@ from app.exceptions import (
 logger = logging.getLogger("app.candidate")
 
 router = APIRouter()
+
+
+def _agent_debug_log(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict[str, Any],
+) -> None:
+    # #region agent log
+    try:
+        payload = {
+            "sessionId": "5f236f",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        }
+        path = Path(r"d:\happy-mind-psychometrics\.cursor\debug-5f236f.log")
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+
+def _server_remaining_seconds(started_at: datetime | None, duration_seconds: int | None) -> int | None:
+    if not duration_seconds:
+        return None
+    if started_at is None:
+        return int(duration_seconds)
+    now_utc = datetime.now(timezone.utc)
+    started = started_at if started_at.tzinfo is not None else started_at.replace(tzinfo=timezone.utc)
+    elapsed = (now_utc - started).total_seconds()
+    return max(0, int(duration_seconds - elapsed))
 
 
 def _raise_integrity(exc: Exception) -> NoReturn:
@@ -78,6 +117,25 @@ async def get_test(
         _raise_integrity(exc)
 
     started_at = getattr(progress, "started_at", None) if progress else None
+    duration = _assessment_duration(assessment)
+    remaining = _server_remaining_seconds(started_at, duration)
+    # #region agent log
+    _agent_debug_log(
+        "A",
+        "candidate.py:get_test",
+        "GET test payload timing fields",
+        {
+            "candidate_id": str(candidate.id),
+            "assessment_id": str(assessment_id),
+            "status": getattr(progress, "status", None) if progress else None,
+            "started_at": started_at.isoformat() if started_at else None,
+            "started_at_tzinfo": str(getattr(started_at, "tzinfo", None)) if started_at else None,
+            "duration_seconds": duration,
+            "server_remaining_seconds": remaining,
+            "now_utc": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    # #endregion
 
     return build_runner_payload(
         assessment_id=assessment.id,
@@ -120,6 +178,28 @@ async def start_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
+
+    duration = _assessment_duration(assessment)
+    remaining = _server_remaining_seconds(progress.started_at, duration)
+    # #region agent log
+    _agent_debug_log(
+        "E",
+        "candidate.py:start_test",
+        "POST start response timing fields",
+        {
+            "candidate_id": str(candidate.id),
+            "assessment_id": str(assessment.id),
+            "status": progress.status,
+            "started_at": progress.started_at.isoformat() if progress.started_at else None,
+            "started_at_tzinfo": str(getattr(progress.started_at, "tzinfo", None))
+            if progress.started_at
+            else None,
+            "duration_seconds": duration,
+            "server_remaining_seconds": remaining,
+            "now_utc": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    # #endregion
 
     return {
         "assessment_id": str(assessment.id),

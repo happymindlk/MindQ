@@ -44,7 +44,11 @@ export function useModuleTimer({
   const [deadline] = useState<number | null>(() => {
     if (!durationSeconds) return null;
     const anchor = startedAt ? Date.parse(startedAt) : nowRef.current();
-    return (Number.isFinite(anchor) ? anchor : nowRef.current()) + durationSeconds * 1000;
+    const resolved = (Number.isFinite(anchor) ? anchor : nowRef.current()) + durationSeconds * 1000;
+    // #region agent log
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5f236f'},body:JSON.stringify({sessionId:'5f236f',runId:'pre-fix',hypothesisId:'A',location:'use-module-timer.ts:deadline',message:'client timer deadline init',data:{startedAt,startedAtParsed:startedAt?Date.parse(startedAt):null,startedAtFinite:startedAt?Number.isFinite(Date.parse(startedAt)):null,durationSeconds,now:nowRef.current(),deadline:resolved,initialRemaining:Math.ceil((resolved-nowRef.current())/1000),tzOffsetMinutes:new Date().getTimezoneOffset()},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return resolved;
   });
   const [remaining, setRemaining] = useState<number | null>(() => {
     const raw = computeRemaining(deadline, nowRef.current());
@@ -59,6 +63,11 @@ export function useModuleTimer({
         setRemaining(null);
         return;
       }
+      // #region agent log
+      if (raw <= 2 || raw % 30 === 0) {
+        fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5f236f'},body:JSON.stringify({sessionId:'5f236f',runId:'pre-fix',hypothesisId:'A',location:'use-module-timer.ts:tick',message:'client timer tick',data:{raw,deadline,now:nowRef.current(),startedAt},timestamp:Date.now()})}).catch(()=>{});
+      }
+      // #endregion
       setRemaining(Math.max(0, raw));
       if (raw <= 0 && !firedRef.current) {
         firedRef.current = true;

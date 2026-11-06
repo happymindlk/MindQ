@@ -147,6 +147,9 @@ export default function TestRunner() {
         ...test,
         started_at: started.started_at || new Date().toISOString(),
       };
+      // #region agent log
+      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5f236f'},body:JSON.stringify({sessionId:'5f236f',runId:'pre-fix',hypothesisId:'E',location:'TestRunner.jsx:beginModule',message:'startTest response applied',data:{testId,status:started.status,started_at_raw:started.started_at,started_at_used:next.started_at,started_at_parsed:Date.parse(next.started_at),duration_seconds:next.duration_seconds,clientNowIso:new Date().toISOString(),tzOffsetMinutes:new Date().getTimezoneOffset()},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setTest(next);
       setQuery(cacheKey, next);
       setPhase('running');

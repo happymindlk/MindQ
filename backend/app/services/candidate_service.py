@@ -36,6 +36,35 @@ from app.exceptions import (
 
 logger = logging.getLogger(__name__)
 
+
+def _agent_debug_log(
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict[str, Any],
+) -> None:
+    # #region agent log
+    try:
+        import json
+        from pathlib import Path
+
+        payload = {
+            "sessionId": "5f236f",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+        }
+        path = Path(r"d:\happy-mind-psychometrics\.cursor\debug-5f236f.log")
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, default=str) + "\n")
+    except Exception:
+        pass
+    # #endregion
+
+
 COMPLETED_STATUS = "COMPLETED"
 IN_PROGRESS_STATUS = "IN_PROGRESS"
 NOT_STARTED_STATUS = "NOT_STARTED"
@@ -699,6 +728,22 @@ class CandidateService:
             Progress row with ``started_at`` set.
         """
         if progress is not None and progress.started_at is not None:
+            # #region agent log
+            _agent_debug_log(
+                "C",
+                "candidate_service.py:ensure_started:resume",
+                "ensure_started no-op resume",
+                {
+                    "candidate_id": str(candidate.id),
+                    "assessment_id": str(assessment.id),
+                    "status": progress.status,
+                    "started_at": progress.started_at.isoformat()
+                    if progress.started_at
+                    else None,
+                    "started_at_tzinfo": str(getattr(progress.started_at, "tzinfo", None)),
+                },
+            )
+            # #endregion
             return progress
         if progress is None:
             progress = CandidateProgress(
@@ -721,6 +766,37 @@ class CandidateService:
             if existing is None:
                 raise
             return existing
+        # #region agent log
+        sibling_rows = (
+            await session.execute(
+                select(
+                    CandidateProgress.assessment_id,
+                    CandidateProgress.status,
+                    CandidateProgress.started_at,
+                ).where(CandidateProgress.candidate_id == candidate.id)
+            )
+        ).all()
+        _agent_debug_log(
+            "C",
+            "candidate_service.py:ensure_started:commit",
+            "ensure_started committed; sibling progress snapshot",
+            {
+                "candidate_id": str(candidate.id),
+                "started_assessment_id": str(assessment.id),
+                "started_at": progress.started_at.isoformat() if progress.started_at else None,
+                "started_at_tzinfo": str(getattr(progress.started_at, "tzinfo", None)),
+                "duration_seconds": _assessment_duration(assessment),
+                "siblings": [
+                    {
+                        "assessment_id": str(row.assessment_id),
+                        "status": row.status,
+                        "started_at": row.started_at.isoformat() if row.started_at else None,
+                    }
+                    for row in sibling_rows
+                ],
+            },
+        )
+        # #endregion
         return progress
 
     @staticmethod
@@ -733,6 +809,18 @@ class CandidateService:
         ensure_known_question(assessment, save_data.question_id)
 
         if not progress:
+            # #region agent log
+            _agent_debug_log(
+                "B",
+                "candidate_service.py:autosave:create",
+                "autosave creating IN_PROGRESS progress (eager start)",
+                {
+                    "candidate_id": str(candidate.id),
+                    "assessment_id": str(assessment.id),
+                    "question_id": str(save_data.question_id),
+                },
+            )
+            # #endregion
             progress = CandidateProgress(
                 corporate_id=candidate.corporate_id,
                 candidate_id=candidate.id,
@@ -742,6 +830,18 @@ class CandidateService:
             )
             session.add(progress)
         elif progress.status == "NOT_STARTED":
+            # #region agent log
+            _agent_debug_log(
+                "B",
+                "candidate_service.py:autosave:promote",
+                "autosave promoting NOT_STARTED to IN_PROGRESS",
+                {
+                    "candidate_id": str(candidate.id),
+                    "assessment_id": str(assessment.id),
+                    "question_id": str(save_data.question_id),
+                },
+            )
+            # #endregion
             progress.status = "IN_PROGRESS"
             progress.started_at = _utcnow()
 
