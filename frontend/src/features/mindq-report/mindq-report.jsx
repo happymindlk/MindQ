@@ -96,7 +96,7 @@ function SynthesisFallback({ status }) {
 
 /**
  * @typedef {{ name: string, mean: number | null, positionPct: number | null, band: string | null }} SubscaleRow
- * @typedef {{ category: string, assessmentName: string, score: number | null, displayScore: string | null, band: string | null, scoreKind: string | null, summary: string, subscales: SubscaleRow[] }} BreakdownRow
+ * @typedef {{ category: string, assessmentName: string, score: number | null, displayScore: string | null, band: string | null, scoreKind: string | null, summary: string, subscales: SubscaleRow[], timedOut: boolean, statusNote: string | null }} BreakdownRow
  * @typedef {{ category: string, average: number | null, rows: BreakdownRow[], summary: string | null }} CategoryGroup
  */
 
@@ -145,16 +145,31 @@ function toBreakdownRows(raw) {
       const displayScore = item.display_score != null && String(item.display_score).trim()
         ? String(item.display_score).trim()
         : null;
-      if (score == null && !displayScore && subscales.length === 0) return null;
+      const timedOut =
+        item.timed_out === true || String(item.status || '').toUpperCase() === 'TIMED_OUT';
+      const statusNote =
+        item.status_note != null && String(item.status_note).trim()
+          ? String(item.status_note).trim()
+          : timedOut
+            ? 'Candidate ran out of time before completing all items. Displayed score reflects attempted responses only.'
+            : null;
+      // Timed-out modules always render so the header count matches the cards.
+      if (!timedOut && score == null && !displayScore && subscales.length === 0) return null;
       return {
         category: String(item.category || 'Technical'),
         assessmentName,
-        score,
-        displayScore,
-        band: item.band != null && String(item.band).trim() ? String(item.band).trim() : null,
+        score: timedOut && score == null && !displayScore ? 0 : score,
+        displayScore: timedOut && score == null && !displayScore ? 'Incomplete' : displayScore,
+        band: timedOut
+          ? 'Timed Out / Incomplete'
+          : item.band != null && String(item.band).trim()
+            ? String(item.band).trim()
+            : null,
         scoreKind: item.score_kind != null ? String(item.score_kind) : null,
         summary: String(item.performance_summary || '').trim(),
         subscales,
+        timedOut,
+        statusNote,
       };
     })
     .filter(Boolean);
@@ -200,13 +215,19 @@ function toViewModel(data) {
     typeof data.executive_summary === 'string' && data.executive_summary.trim()
       ? data.executive_summary.trim()
       : null;
+  // Prefer the rendered module count so the header never disagrees with the cards.
+  const reportedCompleted = asNumber(data.total_assessments_completed);
+  const totalCompleted =
+    breakdown.length > 0
+      ? breakdown.length
+      : Math.max(0, reportedCompleted ?? 0);
 
   return {
     companyName: String(data.company_name || '').trim(),
     candidateName: String(data.candidate_full_name || 'Candidate'),
     candidateEmail: String(data.candidate_email || '—'),
     targetRole: data.target_role ? String(data.target_role) : '—',
-    totalCompleted: Math.max(0, asNumber(data.total_assessments_completed) ?? 0),
+    totalCompleted,
     scoreCards: [],
     summary,
     synthesisStatus: typeof data.synthesis_status === 'string' ? data.synthesis_status : 'pending',
@@ -227,9 +248,18 @@ function CategoryBreakdown({ group }) {
       {group.summary && <p className="mq-group-summary">{group.summary}</p>}
       <ul className="mq-score-list">
         {group.rows.map((row, index) => (
-          <li key={`${row.assessmentName}-${index}`} className="mq-score-item" data-pdf-row>
+          <li
+            key={`${row.assessmentName}-${index}`}
+            className={`mq-score-item competency-card ${KEEP_TOGETHER}`}
+            data-pdf-row
+          >
             <div className="mq-score-row">
-              <span className="mq-score-name">{row.assessmentName}</span>
+              <span className="mq-score-name">
+                {row.assessmentName}
+                {row.timedOut && (
+                  <span className="mq-timed-out-badge">Timed Out / Incomplete</span>
+                )}
+              </span>
               {row.score != null ? <ScoreBar score={row.score} /> : <span />}
               <span className="mq-score-value">{formatRowValue(row)}</span>
             </div>
@@ -251,6 +281,7 @@ function CategoryBreakdown({ group }) {
               </ul>
             )}
             {row.summary && <p className="mq-score-summary">{row.summary}</p>}
+            {row.statusNote && <p className="mq-status-note">{row.statusNote}</p>}
           </li>
         ))}
       </ul>
@@ -367,8 +398,8 @@ export default function MindQReport({ data, logoSrc }) {
             )}
           </section>
 
-          <section className={`mq-strengths-risks ${KEEP_TOGETHER}`} data-pdf-block>
-            <div className="mq-sr-col mq-sr-strengths">
+          <section className={`mq-strengths-risks list-section ${KEEP_TOGETHER}`} data-pdf-block>
+            <div className="mq-sr-col mq-sr-strengths strengths-block">
               <h2>Strengths</h2>
               {vm.strengths.length === 0 ? (
                 <p className="mq-fallback">No strengths recorded yet.</p>
@@ -380,7 +411,7 @@ export default function MindQReport({ data, logoSrc }) {
                 </ul>
               )}
             </div>
-            <div className="mq-sr-col mq-sr-risks">
+            <div className="mq-sr-col mq-sr-risks areas-block">
               <h2>Areas to explore</h2>
               {vm.risks.length === 0 ? (
                 <p className="mq-fallback">No areas to explore recorded yet.</p>

@@ -41,7 +41,8 @@ class AssessmentBreakdownItem(BaseModel):
     """One package assessment in the competency breakdown.
 
     Numerical fields stay null until the candidate's entire package is
-    ``COMPLETED`` (``scores_released=False``).
+    ``COMPLETED`` (``scores_released=False``). Timed-out modules still render
+    with a ``TIMED_OUT`` status and an explicit incomplete band.
     """
 
     category: ReportCategory
@@ -57,6 +58,9 @@ class AssessmentBreakdownItem(BaseModel):
     subscale_notes: list[ReportSubscaleNote] = Field(default_factory=list)
     status: str | None = None
     scores_released: bool = True
+    timed_out: bool = False
+    # Explains timed-out / partial submissions under the competency card.
+    status_note: str | None = None
 
 
 PsychometricCategory = Literal["Cognitive", "Personality", "Behavioral"]

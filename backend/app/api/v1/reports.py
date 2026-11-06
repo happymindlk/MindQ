@@ -1,8 +1,10 @@
 from uuid import UUID
+import io
 import logging
 import re
 from urllib.parse import quote
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 from app.database import get_db
@@ -63,16 +65,26 @@ async def generate_candidate_report(
     )
 
     # Best-effort archive to Supabase Storage (never blocks the download).
-    await run_in_threadpool(
-        storage_service.upload_report, candidate.corporate_id, candidate.id, content, is_pdf
-    )
+    # Cold or misconfigured storage must not break the browser download path.
+    try:
+        await run_in_threadpool(
+            storage_service.upload_report, candidate.corporate_id, candidate.id, content, is_pdf
+        )
+    except Exception:
+        logger.exception(
+            "report_storage_archive_failed candidate_id=%s", candidate.id
+        )
 
     ext = "pdf" if is_pdf else "html"
-    return Response(
-        content=content,
-        media_type="application/pdf" if is_pdf else "text/html",
+    media_type = "application/pdf" if is_pdf else "text/html"
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=media_type,
         headers={
             "Content-Disposition": report_content_disposition(report.candidate_full_name, ext),
+            "Access-Control-Expose-Headers": (
+                "Content-Disposition, X-Report-Type, X-Report-Synthesis-Status"
+            ),
             "X-Report-Type": "PDF" if is_pdf else "HTML",
             "X-Report-Synthesis-Status": report.synthesis_status,
         },

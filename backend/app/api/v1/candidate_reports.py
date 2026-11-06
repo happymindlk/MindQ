@@ -303,6 +303,7 @@ def _progress_with_facet_scores(
                 facet_scores=facet_scores,
                 derived_profile=getattr(row, "derived_profile", None),
                 score_details=getattr(row, "score_details", None),
+                overtime=bool(getattr(row, "overtime", False)),
             )
         )
     return coerced
@@ -400,12 +401,20 @@ async def build_technical_report_data(
     summaries = performance_summaries(candidate.full_name, outcomes, synthesis)
     breakdown = build_competency_breakdown(outcomes, summaries, synthesis)
 
+    # Header counter must match the competency cards actually rendered — never
+    # count a COMPLETED-but-unscored module that the breakdown silently drops.
+    # While scores are withheld the breakdown lists every package module, so
+    # fall back to finalized attempts only.
     completed_times = [
         o.completed_at
         for o in outcomes
-        if o.status == "COMPLETED" and o.completed_at is not None
+        if o.status in {"COMPLETED", "TIMED_OUT"} and o.completed_at is not None
     ]
-    completed_count = sum(1 for o in outcomes if o.status == "COMPLETED")
+    completed_count = (
+        len(breakdown)
+        if scores_released
+        else sum(1 for o in outcomes if o.status in {"COMPLETED", "TIMED_OUT"})
+    )
     return MindQReportResponse(
         candidate_id=candidate.id,
         company_name=corporate.name if corporate else "",

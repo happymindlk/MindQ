@@ -48,6 +48,13 @@ from app.services.scoring import (
     score_assessment_detailed,
 )
 
+TIMED_OUT_STATUS = "TIMED_OUT"
+TIMED_OUT_BAND = "Timed Out / Incomplete"
+TIMED_OUT_NOTE = (
+    "Candidate ran out of time before completing all items. "
+    "Displayed score reflects attempted responses only."
+)
+
 # Internal score_details instrument → Gemini v5 instrument key.
 _INSTRUMENT_PROMPT_KEYS: dict[str, str] = {
     "cognicheck": "cognicheck",
@@ -115,8 +122,9 @@ class ModuleOutcome:
         category: Resolved competency category.
         score: Percentage (0–100), or None when masked / ungradable.
         completed_at: Completion timestamp.
-        status: Progress status (``COMPLETED``, ``PENDING``, …).
+        status: Progress status (``COMPLETED``, ``TIMED_OUT``, ``PENDING``, …).
         scores_released: False until every package assessment is COMPLETED.
+        timed_out: True when the attempt finalized after the timer expired.
     """
 
     key: str
@@ -136,6 +144,7 @@ class ModuleOutcome:
     interpersonal_profile: dict[str, Any] | None = None
     status: str = COMPLETED_STATUS
     scores_released: bool = True
+    timed_out: bool = False
 
 
 def map_instrument_for_prompt(instrument: str | None, category: CategoryKey) -> str | None:
@@ -432,11 +441,43 @@ def _progress_status(prog: CandidateProgress | None) -> str:
     return status
 
 
+def _is_attempt_finalized(status: str) -> bool:
+    """Whether a progress status counts as a finished attempt for score release."""
+    return status in {COMPLETED_STATUS, TIMED_OUT_STATUS}
+
+
+def _module_timed_out(prog: CandidateProgress | None, completeness: Mapping[str, Any] | None) -> bool:
+    """Detect timer expiry / partial submission for report rendering.
+
+    Args:
+        prog: Progress row (``overtime`` is set on expired submits).
+        completeness: Score-details completeness payload when available.
+
+    Returns:
+        True when the attempt should render as timed out / incomplete.
+    """
+    if prog is None:
+        return False
+    if bool(getattr(prog, "overtime", False)):
+        return True
+    status = _progress_status(prog)
+    if status == TIMED_OUT_STATUS:
+        return True
+    if not isinstance(completeness, Mapping):
+        return False
+    # Expired submits always set overtime; treat sparse incomplete finals the
+    # same when the stored status already says timed out above.
+    return False
+
+
 def package_scores_released(
     assessments: Sequence[Assessment],
     progresses: Iterable[CandidateProgress],
 ) -> bool:
     """True only when every package assessment is marked COMPLETED.
+
+    Timed-out finals still store ``COMPLETED`` on the progress row (with
+    ``overtime=True``); both count as finalized for score release.
 
     Args:
         assessments: Package assessments.
@@ -449,7 +490,7 @@ def package_scores_released(
         return False
     progress_by_id = {p.assessment_id: p for p in progresses}
     return all(
-        _progress_status(progress_by_id.get(assessment.id)) == COMPLETED_STATUS
+        _is_attempt_finalized(_progress_status(progress_by_id.get(assessment.id)))
         for assessment in assessments
     )
 
@@ -493,7 +534,7 @@ def build_module_outcomes(
             else None,
             assessment.questions,
         )
-        if not released or status != COMPLETED_STATUS or prog is None:
+        if not released or not _is_attempt_finalized(status) or prog is None:
             outcomes.append(
                 ModuleOutcome(
                     key=f"A{len(outcomes) + 1}",
@@ -504,6 +545,7 @@ def build_module_outcomes(
                     completed_at=getattr(prog, "completed_at", None) if prog is not None else None,
                     status=status,
                     scores_released=False,
+                    timed_out=_module_timed_out(prog, None),
                 )
             )
             continue
@@ -519,9 +561,28 @@ def build_module_outcomes(
         details = details or {}
         instrument = details.get("instrument")
         subscales = tuple(details.get("subscales") or ())
+        completeness = _strip_timing(details.get("completeness"))
+        timed_out = _module_timed_out(prog, completeness)
         # CogniCheck: total only — never send logic-area subscales to Gemini.
         if map_instrument_for_prompt(instrument, category) == "cognicheck":
             subscales = ()
+        display_score = details.get("display_score")
+        band = details.get("band")
+        band_label = details.get("band_label")
+        score_kind = details.get("score_kind")
+        if timed_out:
+            # Never drop a timed-out module: keep attempted score, else 0 / Incomplete.
+            if (
+                score is None
+                and not subscales
+                and not display_score
+                and score_kind not in {"traits", "circumplex", "count", "domain"}
+            ):
+                score = 0.0
+                display_score = "Incomplete"
+            band = "timed_out"
+            band_label = TIMED_OUT_BAND
+        report_status = TIMED_OUT_STATUS if timed_out else status
         outcomes.append(
             ModuleOutcome(
                 key=f"A{len(outcomes) + 1}",
@@ -530,17 +591,18 @@ def build_module_outcomes(
                 category=category,
                 score=score,
                 completed_at=prog.completed_at,
-                score_kind=details.get("score_kind"),
-                display_score=details.get("display_score"),
-                band=details.get("band"),
-                band_label=details.get("band_label"),
+                score_kind=score_kind,
+                display_score=display_score,
+                band=band,
+                band_label=band_label,
                 subscales=subscales,
                 instrument=instrument,
-                completeness=_strip_timing(details.get("completeness")),
+                completeness=completeness,
                 facet_means=_facet_means_payload(getattr(prog, "facet_scores", None)),
                 interpersonal_profile=_interpersonal_profile_payload(prog),
-                status=status,
+                status=report_status,
                 scores_released=True,
+                timed_out=timed_out,
             )
         )
     return outcomes
@@ -592,6 +654,21 @@ def fallback_performance_summary(candidate_name: str, outcome: ModuleOutcome) ->
     if not outcome.scores_released:
         return ""
     first = _first_name(candidate_name)
+    if outcome.timed_out:
+        answered = None
+        total = None
+        if isinstance(outcome.completeness, Mapping):
+            answered = outcome.completeness.get("items_answered")
+            total = outcome.completeness.get("items_total")
+        if isinstance(answered, int) and isinstance(total, int) and total > 0:
+            return (
+                f"{first} timed out on {outcome.title} after answering "
+                f"{answered} of {total} items; the score reflects attempted responses only."
+            )
+        return (
+            f"{first} timed out on {outcome.title} before completing all items; "
+            "the displayed score reflects attempted responses only."
+        )
     if outcome.score_kind == "traits" and outcome.subscales:
         parts = [
             f"{row['name']} {row.get('band_label') or row.get('band')}"
@@ -648,6 +725,9 @@ def performance_summaries(
 
 def _has_breakdown_row(outcome: ModuleOutcome) -> bool:
     if not outcome.scores_released:
+        return True
+    # Timed-out modules always render so the header count matches the cards.
+    if outcome.timed_out or outcome.status == TIMED_OUT_STATUS:
         return True
     return (
         outcome.score is not None
@@ -750,6 +830,10 @@ def build_competency_breakdown(
             ReportSubscaleNote(subscale_key=n.subscale_key, note=n.note)
             for n in (narrative.subscale_notes if narrative else [])
         ]
+        timed_out = o.timed_out or o.status == TIMED_OUT_STATUS
+        band = (o.band_label or o.band) if o.scores_released else None
+        if o.scores_released and timed_out:
+            band = TIMED_OUT_BAND
         rows.append(
             AssessmentBreakdownItem(
                 category=CATEGORY_LABELS[o.category],
@@ -760,7 +844,7 @@ def build_competency_breakdown(
                     else None
                 ),
                 display_score=o.display_score if o.scores_released else None,
-                band=(o.band_label or o.band) if o.scores_released else None,
+                band=band,
                 score_kind=o.score_kind if o.scores_released else None,
                 subscales=list(o.subscales) if o.scores_released else [],
                 performance_summary=summaries[o.id] if o.scores_released else None,
@@ -768,8 +852,10 @@ def build_competency_breakdown(
                     narrative.role_relevance if o.scores_released and narrative else None
                 ),
                 subscale_notes=notes if o.scores_released else [],
-                status=o.status,
+                status=TIMED_OUT_STATUS if timed_out else o.status,
                 scores_released=o.scores_released,
+                timed_out=timed_out,
+                status_note=TIMED_OUT_NOTE if timed_out and o.scores_released else None,
             )
         )
     return rows

@@ -13,6 +13,7 @@ from app.schemas.jd_evaluation import (
     CompetencyBreakdownItem,
     ReportNarrative,
     first_sentence,
+    fix_indefinite_articles,
 )
 from app.schemas.mindq_report import AssessmentBreakdownItem, MindQReport
 from app.services.instrument_results import SCORING_VERSION
@@ -213,13 +214,16 @@ def _assessment(title: str, kind: str = "technical", questions=None, global_modu
     )
 
 
-def _progress(assessment, status="COMPLETED", score=None, facet_scores=None):
+def _progress(assessment, status="COMPLETED", score=None, facet_scores=None, overtime=False):
     return SimpleNamespace(
         assessment_id=assessment.id,
         status=status,
         score=score,
         facet_scores=facet_scores,
         completed_at=DONE,
+        overtime=overtime,
+        score_details=None,
+        derived_profile=None,
     )
 
 
@@ -351,6 +355,69 @@ def test_breakdown_orders_by_category_and_skips_unscored() -> None:
     ]
 
 
+def test_timed_out_module_renders_incomplete_band_and_note() -> None:
+    done = _assessment("SQL")
+    timed = _assessment(
+        "CogniCheck",
+        kind="psychometric",
+        questions=[{"id": "q1", "type": "mcq", "correct_answer": "A", "options": ["A", "B"]}],
+    )
+    outcomes = build_module_outcomes(
+        [done, timed],
+        [
+            _progress(done, score=80.0),
+            _progress(timed, score=None, overtime=True),
+        ],
+        [],
+        {},
+    )
+    assert outcomes[1].timed_out is True
+    assert outcomes[1].status == "TIMED_OUT"
+    assert outcomes[1].band_label == "Timed Out / Incomplete"
+    assert outcomes[1].score == 0.0
+    summaries = performance_summaries("Ada", outcomes, None)
+    rows = build_competency_breakdown(outcomes, summaries)
+    assert len(rows) == 2
+    timed_row = next(r for r in rows if r.assessment_name == "CogniCheck")
+    assert timed_row.timed_out is True
+    assert timed_row.status == "TIMED_OUT"
+    assert timed_row.band == "Timed Out / Incomplete"
+    assert timed_row.score == 0.0
+    assert timed_row.status_note is not None
+    assert "ran out of time" in timed_row.status_note
+    assert "timed out" in (timed_row.performance_summary or "").lower()
+
+
+def test_timed_out_module_keeps_partial_attempted_score() -> None:
+    timed = _assessment(
+        "Logic",
+        kind="psychometric",
+        questions=[
+            {"id": "q1", "type": "mcq", "correct_answer": "A", "options": ["A", "B"]},
+            {"id": "q2", "type": "mcq", "correct_answer": "B", "options": ["A", "B"]},
+        ],
+    )
+    responses = [
+        SimpleNamespace(
+            assessment_id=timed.id,
+            question_id="q1",
+            response={"answer": "A"},
+        ),
+    ]
+    outcomes = build_module_outcomes(
+        [timed],
+        [_progress(timed, score=50.0, overtime=True)],
+        responses,
+        {},
+    )
+    assert outcomes[0].timed_out is True
+    assert outcomes[0].score == 50.0
+    rows = build_competency_breakdown(outcomes, performance_summaries("Ada", outcomes, None))
+    assert len(rows) == 1
+    assert rows[0].band == "Timed Out / Incomplete"
+    assert rows[0].score == 50.0
+
+
 def test_breakdown_scores_come_from_server_not_model() -> None:
     cog = _outcome("Logic", "cognitive", 42.0, key="A1")
     synthesis = _synthesis({"A1": "Scored 99% which is outstanding."})
@@ -475,6 +542,21 @@ def test_prompt_assessments_maps_instruments_and_strips_cognicheck_subscales() -
 )
 def test_first_sentence(raw, expected) -> None:
     assert first_sentence(raw) == expected
+
+
+def test_fix_indefinite_articles_corrects_a_before_vowel() -> None:
+    assert fix_indefinite_articles("shows a inclination toward detail") == (
+        "shows an inclination toward detail"
+    )
+    narrative = ReportNarrative.model_validate(
+        {
+            **_BASE_NARRATIVE,
+            "strengths": ["Shows a inclination toward ownership.", "Steady.", "Curious."],
+            "executive_summary": "Has a aptitude for analysis under pressure.",
+        }
+    )
+    assert narrative.strengths[0] == "Shows an inclination toward ownership."
+    assert narrative.executive_summary == "Has an aptitude for analysis under pressure."
 
 
 def test_assessment_narrative_rejects_blank_summary() -> None:

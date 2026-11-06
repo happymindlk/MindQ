@@ -506,6 +506,7 @@ def test_report_html_renders_synthesis_without_fit_or_recommendation():
     assert "Assess Pulse" not in html
     assert "AI " not in html
     assert "auto-generated MindQ report" in html
+    assert "This document cannot be reproduced, edited, or redistributed" in html
     assert "MindQ (Pvt.) Ltd." in html
     assert "Mind Queue" not in html
     assert "not an indication of whether the candidate is a good fit" in html

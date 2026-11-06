@@ -127,16 +127,22 @@ export const adminApi = {
     const reportType = res.headers.get('x-report-type') || '';
     const synthesisStatus = res.headers.get('x-report-synthesis-status') || '';
     const isHtml = reportType === 'HTML' || (res.headers.get('content-type') || '').includes('text/html');
+    const disposition = res.headers.get('content-disposition') || '';
+    const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+    const asciiName = /filename="([^"]+)"/i.exec(disposition)?.[1];
+    const filename = encodedName
+      ? decodeURIComponent(encodedName)
+      : asciiName || `MindQ Report - ${candidateId}.${isHtml ? 'html' : 'pdf'}`;
+    // Blob + anchor download — never window.open (popup blockers / CORS).
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const disposition = res.headers.get('content-disposition') || '';
-    const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
-    a.download = encodedName
-      ? decodeURIComponent(encodedName)
-      : `MindQ Report - ${candidateId}.${isHtml ? 'html' : 'pdf'}`;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
     a.click();
-    window.URL.revokeObjectURL(url);
+    a.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
     return { isHtml, synthesisStatus };
   },
 

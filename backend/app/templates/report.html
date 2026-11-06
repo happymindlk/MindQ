@@ -39,7 +39,8 @@
         }
         .subtitle { color: #64748b; font-size: 10pt; margin: 0 0 16px 0; }
 
-        .exec-card, .summary, .panel, .results-table tr, .footer {
+        .exec-card, .summary, .panel, .results-table tr, .footer,
+        .competency-card, .list-section, .strengths-block, .areas-block {
             break-inside: avoid;
             page-break-inside: avoid;
         }
@@ -106,8 +107,18 @@
             font-size: 10pt;
             color: #0f172a;
         }
-        .panel ul { margin: 0; padding-left: 16px; }
-        .panel li { margin-bottom: 4px; font-size: 9.5pt; color: #334155; }
+        .panel ul, .list-section ul, .strengths-block ul, .areas-block ul {
+            margin: 0;
+            padding-left: 1.25rem;
+            list-style-type: disc;
+            list-style-position: outside;
+        }
+        .panel li, .list-section li, .strengths-block li, .areas-block li {
+            display: list-item;
+            margin-bottom: 4px;
+            font-size: 9.5pt;
+            color: #334155;
+        }
         .panel-risks { border-color: #fecaca; background: #fff7f7; }
 
         .results-table {
@@ -232,11 +243,22 @@
         </thead>
         <tbody>
             {% for item in report.competency_breakdown %}
-            <tr>
+            <tr class="competency-card">
                 <td>{{ item.category }}</td>
-                <td>{{ item.assessment_name }}</td>
-                <td class="score-cell">{{ '%.1f' | format(item.score) }}%</td>
-                <td>{{ item.performance_summary }}</td>
+                <td>
+                    {{ item.assessment_name }}
+                    {% if item.timed_out or item.status == 'TIMED_OUT' %}
+                    <div class="muted">{{ item.band or 'Timed Out / Incomplete' }}</div>
+                    {% endif %}
+                </td>
+                <td class="score-cell">
+                    {% if item.display_score %}{{ item.display_score }}{% elif item.score is not none %}{{ '%.1f' | format(item.score) }}%{% else %}—{% endif %}
+                    {% if item.band %}<div class="muted">{{ item.band }}</div>{% endif %}
+                </td>
+                <td>
+                    {{ item.performance_summary or '' }}
+                    {% if item.status_note %}<div class="muted" style="margin-top: 4px;">{{ item.status_note }}</div>{% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -260,10 +282,10 @@
 
     {% if report.strengths or report.areas_to_explore %}
     <h2>Analysis</h2>
-    <table class="two-col">
+    <table class="two-col list-section">
         <tr>
             <td class="col-left">
-                <div class="panel">
+                <div class="panel strengths-block">
                     <h3>Strengths</h3>
                     {% if report.strengths %}
                     <ul>
@@ -277,7 +299,7 @@
                 </div>
             </td>
             <td class="col-right">
-                <div class="panel panel-risks">
+                <div class="panel panel-risks areas-block">
                     <h3>Areas to explore</h3>
                     {% if report.areas_to_explore %}
                     <ul>
@@ -297,7 +319,7 @@
     <div class="footer">
         <span class="mq-badge">MindQ</span>
         <p class="muted" style="margin-top: 8px;">
-            This is an auto-generated MindQ report. This cannot be reproduced, edited or redistributed without the written consent of MindQ (Pvt.) Ltd.
+            This is an auto-generated MindQ report. This document cannot be reproduced, edited, or redistributed without the written consent of MindQ (Pvt.) Ltd.
         </p>
         <p class="disclaimer">
             This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.

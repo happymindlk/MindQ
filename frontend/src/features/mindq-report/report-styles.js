@@ -109,7 +109,10 @@ export const REPORT_CSS = `
 .mq-score-row {
   display: grid; grid-template-columns: minmax(0, 220px) 1fr max-content; align-items: center; gap: 16px;
 }
-.mq-score-name { color: #111827; font-weight: 600; overflow-wrap: anywhere; }
+.mq-score-name {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  color: #111827; font-weight: 600; overflow-wrap: anywhere;
+}
 .mq-score-value {
   display: inline-flex; align-items: center; justify-content: flex-end; gap: 0;
   padding: 4px 10px; border-radius: 999px; background: #f3eefc;
@@ -140,12 +143,30 @@ export const REPORT_CSS = `
   display: block; height: 100%; min-height: 8px; border-radius: 999px; background: #7048E2;
   max-width: 100%;
 }
+.mq-strengths-risks, .list-section, .strengths-block, .areas-block, .competency-card {
+  break-inside: avoid; page-break-inside: avoid;
+}
 .mq-strengths-risks { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 .mq-sr-col { border-radius: 8px; padding: 16px; border: 1px solid #e5e7eb; }
 .mq-sr-strengths { background: #f0fdf4; border-color: #86efac; }
 .mq-sr-risks { background: #fff7ed; border-color: #fdba74; }
-.mq-sr-col ul { margin: 0; padding-left: 18px; }
-.mq-sr-col li { margin-bottom: 4px; color: #1f2937; }
+.mq-sr-col ul, .strengths-block ul, .areas-block ul, .list-section ul {
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style-type: disc;
+  list-style-position: outside;
+}
+.mq-sr-col li, .strengths-block li, .areas-block li, .list-section li {
+  display: list-item;
+  margin-bottom: 4px;
+  color: #1f2937;
+}
+.mq-status-note { margin-top: 4px !important; font-size: 11.5px; color: #92400e; font-style: italic; }
+.mq-timed-out-badge {
+  display: inline-flex; align-items: center; margin-top: 4px;
+  padding: 2px 8px; border-radius: 999px; background: #fff7ed; color: #9a3412;
+  font-size: 11px; font-weight: 600;
+}
 
 .mq-q-stack { display: flex; flex-direction: column; gap: 16px; }
 .mq-q-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
