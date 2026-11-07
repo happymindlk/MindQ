@@ -128,6 +128,59 @@ export function createDraftSaveController() {
 }
 
 /**
+ * Tracks in-flight draft writes (PUT saves, add-template calls) so publish can
+ * wait for every one of them to land before locking the package server-side.
+ *
+ * @returns {{
+ *   track: <T>(promise: Promise<T>) => Promise<T>,
+ *   settle: () => Promise<void>,
+ *   readonly size: number,
+ * }}
+ */
+export function createPendingWriteTracker() {
+  /** @type {Set<Promise<unknown>>} */
+  const pending = new Set();
+
+  return {
+    track(promise) {
+      pending.add(promise);
+      const remove = () => {
+        pending.delete(promise);
+      };
+      promise.then(remove, remove);
+      return promise;
+    },
+
+    async settle() {
+      // Loop: a settling write can enqueue a follow-up (e.g. PUT after first create).
+      while (pending.size > 0) {
+        await Promise.allSettled(Array.from(pending));
+      }
+    },
+
+    get size() {
+      return pending.size;
+    },
+  };
+}
+
+// 409 is shared with "template already attached", so match the lock wording too.
+const PACKAGE_LOCKED_PATTERN = /published and locked|already published/i;
+
+/**
+ * True when the backend rejected a write because the package is already published.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isPackageLockedError(err) {
+  if (!err || typeof err !== 'object') return false;
+  if (!('status' in err) || err.status !== 409) return false;
+  const message = 'message' in err ? String(err.message ?? '') : '';
+  return PACKAGE_LOCKED_PATTERN.test(message);
+}
+
+/**
  * True when a rejected save should be ignored (user navigated away / publish locked).
  *
  * @param {unknown} err

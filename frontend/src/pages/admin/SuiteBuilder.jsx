@@ -27,7 +27,9 @@ import {
 import {
   createDraftIdGate,
   createDraftSaveController,
+  createPendingWriteTracker,
   isAbortError,
+  isPackageLockedError,
   isPackageSaveAllowed,
 } from '../../features/suite-builder/package-draft-autosave';
 import {
@@ -365,6 +367,9 @@ export default function SuiteBuilder() {
   const draftIdGate = useRef(createDraftIdGate(loadPackageId || null));
   /** Once true, the editor is leaving after publish — block any residual saves. */
   const publishLeaving = useRef(false);
+  /** Set synchronously on Publish click; blocks new autosaves / add-template calls. */
+  const publishInFlight = useRef(false);
+  const pendingWrites = useRef(createPendingWriteTracker());
   const hydratedPackageIdRef = useRef(null);
   const formSnapshotRef = useRef({});
 
@@ -532,6 +537,7 @@ export default function SuiteBuilder() {
   const selectedIds = useMemo(() => new Set(cartIds), [cartIds]);
 
   const locked = !isPackageSaveAllowed({ status });
+  const readOnly = locked || isPublishing;
 
   const applyJdPdfText = useCallback(
     (result, fileName) => {
@@ -553,7 +559,7 @@ export default function SuiteBuilder() {
 
   const handleJdPdfFile = useCallback(
     async (file) => {
-      if (!file || locked || jdPdfBusy) return;
+      if (!file || readOnly || jdPdfBusy) return;
       setJdPdfError(null);
       const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
       if (!isPdf) {
@@ -579,7 +585,7 @@ export default function SuiteBuilder() {
         setJdPdfBusy(false);
       }
     },
-    [locked, jdPdfBusy, description, applyJdPdfText],
+    [readOnly, jdPdfBusy, description, applyJdPdfText],
   );
 
   useEffect(() => {
@@ -667,6 +673,26 @@ export default function SuiteBuilder() {
     };
   }, []);
 
+  const exitLockedEditor = useCallback(() => {
+    if (publishLeaving.current) return;
+    publishLeaving.current = true;
+    draftSave.current.cancelAll();
+    skipSave.current = true;
+    const snap = formSnapshotRef.current;
+    clearSuiteDraft(snap.packageId);
+    clearSuiteDraft(null);
+    setStatus('published');
+    setSaveState('idle');
+    toast({
+      title: 'This suite is already published',
+      description: 'Published suites are locked, so further edits were not saved.',
+      variant: 'warning',
+    });
+    navigate(snap.corporateId ? `/admin/corporates/${snap.corporateId}` : '/admin/corporates', {
+      replace: true,
+    });
+  }, [navigate, toast]);
+
   const cartQuestionsFor = useCallback(
     (mod) => {
       if (!mod) return [];
@@ -678,7 +704,15 @@ export default function SuiteBuilder() {
 
   const addModule = useCallback(
     async (mod, nextIds) => {
-      if (!mod?.id || locked || selectedIds.has(mod.id)) return;
+      if (
+        !mod?.id ||
+        locked ||
+        publishInFlight.current ||
+        publishLeaving.current ||
+        selectedIds.has(mod.id)
+      ) {
+        return;
+      }
       setCartIds((prev) => (Array.isArray(nextIds) ? nextIds : [...prev, mod.id]));
       // Eager local snapshot for every module kind so suite edits stay isolated.
       setModuleOverrides((prev) => {
@@ -688,7 +722,10 @@ export default function SuiteBuilder() {
       });
       if (packageId) {
         try {
-          const result = await adminApi.addTemplateToPackage(packageId, mod.id);
+          const result = await pendingWrites.current.track(
+            adminApi.addTemplateToPackage(packageId, mod.id),
+          );
+          if (publishLeaving.current) return;
           // Only adopt server questions when the user has not started editing this module.
           if (Array.isArray(result.questions)) {
             setModuleOverrides((prev) => {
@@ -703,6 +740,11 @@ export default function SuiteBuilder() {
             });
           }
         } catch (err) {
+          if (publishLeaving.current) return;
+          if (isPackageLockedError(err)) {
+            exitLockedEditor();
+            return;
+          }
           // Already attached is fine; other errors surface to the user.
           if (!String(err.message || '').toLowerCase().includes('already')) {
             toast({
@@ -713,7 +755,7 @@ export default function SuiteBuilder() {
         }
       }
     },
-    [locked, selectedIds, packageId, toast],
+    [locked, selectedIds, packageId, toast, exitLockedEditor],
   );
 
   const onModuleQuestionsChange = useCallback((moduleId, nextQuestions) => {
@@ -761,11 +803,12 @@ export default function SuiteBuilder() {
 
   // Read the latest form via formSnapshotRef so this callback identity stays
   // stable; field edits schedule via a separate effect without recreating persist.
-  const persist = useCallback(async () => {
+  const persist = useCallback(async ({ fromPublish = false } = {}) => {
     const snap = formSnapshotRef.current;
     const windowError = scheduleWindowError(snap.openTime, snap.closeTime);
     if (
       publishLeaving.current ||
+      (publishInFlight.current && !fromPublish) ||
       !isPackageSaveAllowed({ status: snap.status, isLocked: locked }) ||
       !snap.corporateId ||
       !String(snap.title || '').trim() ||
@@ -810,7 +853,7 @@ export default function SuiteBuilder() {
 
     setSaveState('saving');
     const gate = draftIdGate.current;
-    try {
+    const write = async () => {
       let pkgId = gate.getId();
       if (!pkgId) {
         // First create is not abortable — aborting mid-POST leaves orphan drafts while
@@ -852,20 +895,31 @@ export default function SuiteBuilder() {
       }
       setSaveState('saved');
       return saved || { id: pkgId };
+    };
+    try {
+      return await pendingWrites.current.track(write());
     } catch (err) {
       if (isAbortError(err) || publishLeaving.current) return null;
+      if (isPackageLockedError(err)) {
+        exitLockedEditor();
+        return null;
+      }
       console.error(err);
       setSaveState('error');
       throw err;
     }
-  }, [locked, loadPackageId, navigate]);
+  }, [locked, loadPackageId, navigate, exitLockedEditor]);
 
   useEffect(() => {
     if (skipSave.current) {
       skipSave.current = false;
       return undefined;
     }
-    if (publishLeaving.current || !isPackageSaveAllowed({ status, isLocked: locked })) {
+    if (
+      publishLeaving.current ||
+      publishInFlight.current ||
+      !isPackageSaveAllowed({ status, isLocked: locked })
+    ) {
       return undefined;
     }
     const controller = draftSave.current;
@@ -921,6 +975,7 @@ export default function SuiteBuilder() {
   }, [cartIds, moduleOverrides]);
 
   const onPublish = async () => {
+    if (publishInFlight.current || publishLeaving.current) return;
     setPublishError(null);
     if (scheduleError) {
       setPublishError(scheduleError);
@@ -930,18 +985,23 @@ export default function SuiteBuilder() {
       setPublishError('Add a module or custom question');
       return;
     }
+    publishInFlight.current = true;
+    setIsPublishing(true);
     try {
-      setIsPublishing(true);
-      // Flush the latest draft once, then kill any leftover debounce / in-flight PUT
-      // before publish so a race cannot fire after status flips to published.
-      const saved = await persist();
-      const id = saved?.id || packageId;
+      // Drop the pending debounce but let in-flight PUT / add-template calls land:
+      // aborting client-side does not stop the server, so they could still commit
+      // (or 503 on the row lock) while publish runs.
+      draftSave.current.clearScheduled();
+      await pendingWrites.current.settle();
+      if (publishLeaving.current) return;
+      const saved = await persist({ fromPublish: true });
+      if (publishLeaving.current) return;
+      const id = saved?.id || draftIdGate.current.getId() || packageId;
       if (!id) {
         setPublishError('Save a draft first');
         return;
       }
       draftSave.current.cancelAll();
-      skipSave.current = true;
       const published = await adminApi.publishDraftPackage(id);
       publishLeaving.current = true;
       draftSave.current.cancelAll();
@@ -963,9 +1023,13 @@ export default function SuiteBuilder() {
         navigate('/admin/corporates', { replace: true });
       }
     } catch (err) {
-      publishLeaving.current = false;
-      setPublishError(err.message || 'Publish failed');
+      if (isPackageLockedError(err)) {
+        exitLockedEditor();
+        return;
+      }
+      setPublishError(friendlyErrorMessage(err, 'Publish failed. Please try again.'));
     } finally {
+      publishInFlight.current = false;
       setIsPublishing(false);
     }
   };
@@ -1054,14 +1118,14 @@ export default function SuiteBuilder() {
             <Button
               size="sm"
               onClick={onUpdateDraft}
-              disabled={isUpdating}
+              disabled={isUpdating || isPublishing}
               isLoading={isUpdating}
             >
               Update Draft
             </Button>
           )}
           {!locked && (
-            <Button size="sm" variant="ghost" onClick={onDiscardDraft}>
+            <Button size="sm" variant="ghost" onClick={onDiscardDraft} disabled={isPublishing}>
               Discard Draft
             </Button>
           )}
@@ -1098,7 +1162,7 @@ export default function SuiteBuilder() {
 
       <ComposerDndProvider
         cartIds={cartIds}
-        locked={locked}
+        locked={readOnly}
         catalogById={catalogById}
         onReorder={setCartIds}
         onAdd={onComposerAdd}
@@ -1122,7 +1186,7 @@ export default function SuiteBuilder() {
               modules={catalog}
               search={search}
               selectedIds={selectedIds}
-              locked={locked}
+              locked={readOnly}
               onAdd={(id) => {
                 const mod = moduleById.get(id);
                 if (mod) addModule(mod);
@@ -1142,7 +1206,7 @@ export default function SuiteBuilder() {
                 <CompanySelect
                   corporates={corporates}
                   value={corporateId}
-                  disabled={locked}
+                  disabled={readOnly}
                   onChange={setCorporateId}
                 />
                 <p id="company-help" className="mt-1.5 text-xs text-slate-400 dark:text-slate-500">
@@ -1152,14 +1216,14 @@ export default function SuiteBuilder() {
               <Input
                 label="Suite Title"
                 value={title}
-                disabled={locked}
+                disabled={readOnly}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Junior Data Analyst"
               />
               <Input
                 label="Target role"
                 value={targetRole}
-                disabled={locked}
+                disabled={readOnly}
                 onChange={(e) => setTargetRole(e.target.value)}
                 placeholder="Analyst"
               />
@@ -1167,14 +1231,14 @@ export default function SuiteBuilder() {
                 label="Opens (IST / GMT+5:30)"
                 type="datetime-local"
                 value={openTime}
-                disabled={locked}
+                disabled={readOnly}
                 onChange={(e) => setOpenTime(e.target.value)}
               />
               <Input
                 label="Closes (IST / GMT+5:30)"
                 type="datetime-local"
                 value={closeTime}
-                disabled={locked}
+                disabled={readOnly}
                 onChange={(e) => setCloseTime(e.target.value)}
                 error={scheduleError || undefined}
               />
@@ -1239,7 +1303,7 @@ export default function SuiteBuilder() {
               </div>
               <div
                 onDragOver={(e) => {
-                  if (locked) return;
+                  if (readOnly) return;
                   e.preventDefault();
                   setJdPdfDragOver(true);
                 }}
@@ -1247,7 +1311,7 @@ export default function SuiteBuilder() {
                 onDrop={(e) => {
                   e.preventDefault();
                   setJdPdfDragOver(false);
-                  if (locked) return;
+                  if (readOnly) return;
                   void handleJdPdfFile(e.dataTransfer.files?.[0]);
                 }}
                 className={jdPdfDragOver ? 'rounded-md ring-2 ring-primary/60 ring-offset-1' : undefined}
@@ -1256,7 +1320,7 @@ export default function SuiteBuilder() {
                   id="role-assessment-brief"
                   rows={5}
                   maxLength={50000}
-                  disabled={locked}
+                  disabled={readOnly}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Position details, role description, assessment requirements and HR contact. Used for role-fit scoring. Or drop a JD PDF here."
@@ -1278,7 +1342,7 @@ export default function SuiteBuilder() {
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             <ComposerSequence
               cartIds={cart.map((m) => m.id)}
-              locked={locked}
+              locked={readOnly}
               emptyState={
                 <div className="rounded-md border border-dashed border-slate-200 dark:border-slate-800 px-3 py-8 text-center">
                   <p className="text-xs uppercase tracking-wider text-slate-500 dark:text-slate-400">No assessments yet</p>
@@ -1295,9 +1359,9 @@ export default function SuiteBuilder() {
                     mod={mod}
                     dragHandle={handle}
                     questions={cartQuestionsFor(mod)}
-                    editable={!locked}
-                    onQuestionsChange={!locked ? onModuleQuestionsChange : undefined}
-                    onRemove={locked ? undefined : removeFromCart}
+                    editable={!readOnly}
+                    onQuestionsChange={!readOnly ? onModuleQuestionsChange : undefined}
+                    onRemove={readOnly ? undefined : removeFromCart}
                   />
                 );
               }}
@@ -1329,7 +1393,7 @@ export default function SuiteBuilder() {
                     <Button
                       type="button"
                       size="sm"
-                      disabled={!libraryPickId || selectedIds.has(libraryPickId)}
+                      disabled={readOnly || !libraryPickId || selectedIds.has(libraryPickId)}
                       onClick={() => {
                         const mod = moduleById.get(libraryPickId);
                         if (mod) {
@@ -1351,6 +1415,7 @@ export default function SuiteBuilder() {
                     type="button"
                     variant="ghost"
                     size="sm"
+                    disabled={readOnly}
                     onClick={() => setCustomQuestions((prev) => [...prev, emptyCustom()])}
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -1367,7 +1432,7 @@ export default function SuiteBuilder() {
                       </span>
                       <textarea
                         rows={2}
-                        disabled={locked}
+                        disabled={readOnly}
                         className={`${fieldClass} resize-y min-h-[48px]`}
                         placeholder="Question prompt"
                         value={q.prompt}
@@ -1412,7 +1477,7 @@ export default function SuiteBuilder() {
                       )}
                       <button
                         type="button"
-                        disabled={locked}
+                        disabled={readOnly}
                         onClick={() =>
                           setCustomQuestions((prev) => prev.filter((_, i) => i !== index))
                         }
@@ -1424,7 +1489,7 @@ export default function SuiteBuilder() {
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <select
-                        disabled={locked}
+                        disabled={readOnly}
                         className={`${fieldClass} h-9`}
                         value={q.question_type}
                         onChange={(e) => {
@@ -1440,7 +1505,7 @@ export default function SuiteBuilder() {
                         type="number"
                         min={1}
                         max={5}
-                        disabled={locked}
+                        disabled={readOnly}
                         className={`${fieldClass} h-9 tabular-nums`}
                         value={q.weight}
                         onChange={(e) => {
@@ -1455,7 +1520,7 @@ export default function SuiteBuilder() {
                         {(q.options || ['', '', '', '']).map((opt, oi) => (
                           <input
                             key={oi}
-                            disabled={locked}
+                            disabled={readOnly}
                             className={`${fieldClass} h-8`}
                             placeholder={`Option ${oi + 1}`}
                             value={opt}
@@ -1473,7 +1538,7 @@ export default function SuiteBuilder() {
                     {q.question_type === 'open_ended' && (
                       <textarea
                         rows={2}
-                        disabled={locked}
+                        disabled={readOnly}
                         className={`${fieldClass} resize-y`}
                         placeholder="Rubric"
                         value={q.correct_answer_or_rubric}
