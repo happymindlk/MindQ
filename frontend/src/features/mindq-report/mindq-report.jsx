@@ -1,9 +1,16 @@
 import React from 'react';
 import MindQBrandMark from './mindq-brand-mark';
-import { CATEGORY_ORDER, FIT_DISCLAIMER, FOOTER_NOTICE, REPORT_TITLE } from './report-copy';
+import {
+  CATEGORY_ORDER,
+  FIT_DISCLAIMER,
+  FOOTER_ENTITY,
+  FOOTER_NOTICE_PREFIX,
+  REPORT_TITLE,
+} from './report-copy';
 import { REPORT_FONT_FACE_CSS } from './report-fonts';
 import { safeLogoUrl } from './report-logo';
 import { REPORT_CSS } from './report-styles';
+import { visibleSubscales } from './report-subscales';
 
 /**
  * Applied to every section that must never be split across pages. The same
@@ -132,7 +139,7 @@ function toBreakdownRows(raw) {
       if (!item || typeof item !== 'object') return null;
       const assessmentName = String(item.assessment_name || '').trim();
       if (!assessmentName) return null;
-      const subscales = Array.isArray(item.subscales)
+      const parsedSubscales = Array.isArray(item.subscales)
         ? item.subscales
             .filter((row) => row && typeof row === 'object' && String(row.name || '').trim())
             .map((row) => ({
@@ -142,6 +149,8 @@ function toBreakdownRows(raw) {
               band: String(row.band_label || row.band || '').trim() || null,
             }))
         : [];
+      // Keep parsedSubscales for the empty-row gate; hide duplicate facets in the UI only.
+      const subscales = visibleSubscales(assessmentName, parsedSubscales);
       const score = asNumber(item.score);
       const displayScore = item.display_score != null && String(item.display_score).trim()
         ? String(item.display_score).trim()
@@ -155,7 +164,7 @@ function toBreakdownRows(raw) {
             ? 'Candidate ran out of time before completing all items. Displayed score reflects attempted responses only.'
             : null;
       // Timed-out modules always render so the header count matches the cards.
-      if (!timedOut && score == null && !displayScore && subscales.length === 0) return null;
+      if (!timedOut && score == null && !displayScore && parsedSubscales.length === 0) return null;
       return {
         category: String(item.category || 'Technical'),
         assessmentName,
@@ -502,7 +511,10 @@ export default function MindQReport({ data, logoSrc }) {
       <footer className="mq-footer" data-pdf-footer>
         <MindQBrandMark />
         <div className="mq-footer-notes">
-          <p className="mq-footer-text">{FOOTER_NOTICE}</p>
+          <p className="mq-footer-text">
+            {FOOTER_NOTICE_PREFIX}
+            <span className="mq-entity">{FOOTER_ENTITY}</span>
+          </p>
           <p className="mq-footer-text mq-footer-disclaimer">{FIT_DISCLAIMER}</p>
         </div>
       </footer>

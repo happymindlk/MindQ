@@ -2,7 +2,13 @@ import React from 'react';
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import MindQReport from './mindq-report';
-import { FIT_DISCLAIMER, FOOTER_NOTICE, REPORT_TITLE } from './report-copy';
+import {
+  FIT_DISCLAIMER,
+  FOOTER_ENTITY,
+  FOOTER_NOTICE,
+  FOOTER_NOTICE_PREFIX,
+  REPORT_TITLE,
+} from './report-copy';
 
 const SPEC_FOOTER =
   'This is an auto-generated MindQ report. This document cannot be reproduced, edited, or redistributed without the written consent of MindQ (Pvt.) Ltd.';
@@ -46,8 +52,9 @@ const BASE = {
 
 describe('report copy', () => {
   it('matches the contractual footer and disclaimer text exactly', () => {
-    expect(FOOTER_NOTICE.replace(/\u00a0/g, ' ')).toBe(SPEC_FOOTER);
-    expect(FOOTER_NOTICE).toContain('MindQ\u00a0(Pvt.)\u00a0Ltd.');
+    expect(FOOTER_ENTITY).toBe('MindQ (Pvt.) Ltd.');
+    expect(`${FOOTER_NOTICE_PREFIX}${FOOTER_ENTITY}`).toBe(SPEC_FOOTER);
+    expect(FOOTER_NOTICE).toBe(SPEC_FOOTER);
     expect(FIT_DISCLAIMER).toBe(SPEC_FIT_DISCLAIMER);
   });
 });
@@ -83,8 +90,41 @@ describe('MindQReport', () => {
     const { container } = render(<MindQReport data={BASE} />);
     const footer = container.querySelector('[data-pdf-footer]');
     expect(within(footer).getByLabelText('MindQ')).toBeInTheDocument();
-    expect(within(footer).getByText(SPEC_FOOTER)).toBeInTheDocument();
+    const notice = footer.querySelector('.mq-footer-text:not(.mq-footer-disclaimer)');
+    expect(notice?.textContent).toBe(SPEC_FOOTER);
     expect(within(footer).getByText(SPEC_FIT_DISCLAIMER)).toBeInTheDocument();
+    const entity = footer.querySelector('.mq-entity');
+    expect(entity).toHaveTextContent('MindQ (Pvt.) Ltd.');
+    expect(entity).toHaveClass('mq-entity');
+  });
+
+  it('hides a redundant Personal Initiative subscale row', () => {
+    const { container } = render(
+      <MindQReport
+        data={{
+          ...BASE,
+          total_assessments_completed: 1,
+          competency_breakdown: [
+            {
+              category: 'Personality',
+              assessment_name: 'Personal Initiative Scale',
+              score: 78,
+              performance_summary: 'Shows strong self-starting behaviour.',
+              subscales: [
+                {
+                  name: 'Personal Initiative',
+                  mean: 4.2,
+                  position_pct: 78,
+                  band_label: 'High',
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText('Personal Initiative Scale')).toBeInTheDocument();
+    expect(container.querySelector('.mq-subscale-row')).toBeNull();
   });
 
   it('does not render unlike-test pillar average cards', () => {
