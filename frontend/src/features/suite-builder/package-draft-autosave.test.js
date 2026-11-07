@@ -1,10 +1,115 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '../../lib/api-error';
 import {
   createDraftIdGate,
   createDraftSaveController,
+  createPendingWriteTracker,
   isAbortError,
+  isPackageLockedError,
   isPackageSaveAllowed,
 } from './package-draft-autosave';
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe('isPackageLockedError', () => {
+  it('matches the 409 lock raised by draft saves and add-template', () => {
+    expect(isPackageLockedError(new ApiError('Package is published and locked', 409))).toBe(true);
+  });
+
+  it('matches the 409 raised by a duplicate publish', () => {
+    expect(isPackageLockedError(new ApiError('Package is already published', 409))).toBe(true);
+  });
+
+  it('ignores the add-template "already attached" 409', () => {
+    expect(isPackageLockedError(new ApiError('Template already attached to package', 409))).toBe(
+      false,
+    );
+  });
+
+  it('ignores lock wording on non-409 statuses', () => {
+    expect(isPackageLockedError(new ApiError('Package is published and locked', 503))).toBe(false);
+    expect(isPackageLockedError(new ApiError('Package is published and locked', 0, 'NETWORK'))).toBe(
+      false,
+    );
+  });
+
+  it('ignores non-error values', () => {
+    expect(isPackageLockedError(null)).toBe(false);
+    expect(isPackageLockedError(undefined)).toBe(false);
+    expect(isPackageLockedError('Package is published and locked')).toBe(false);
+    expect(isPackageLockedError(new Error('Package is published and locked'))).toBe(false);
+  });
+});
+
+describe('createPendingWriteTracker', () => {
+  it('settles immediately with nothing pending', async () => {
+    const tracker = createPendingWriteTracker();
+    await expect(tracker.settle()).resolves.toBeUndefined();
+    expect(tracker.size).toBe(0);
+  });
+
+  it('waits for every in-flight write, including rejected ones', async () => {
+    const tracker = createPendingWriteTracker();
+    const save = deferred();
+    const addTemplate = deferred();
+    const saveResult = tracker.track(save.promise);
+    const addResult = tracker.track(addTemplate.promise).catch((err) => err);
+
+    let settled = false;
+    const settling = tracker.settle().then(() => {
+      settled = true;
+    });
+
+    save.resolve({ id: 'pkg-1' });
+    await saveResult;
+    expect(settled).toBe(false);
+
+    const failure = new ApiError('Service unavailable', 503);
+    addTemplate.reject(failure);
+    await settling;
+    expect(settled).toBe(true);
+    expect(tracker.size).toBe(0);
+    await expect(addResult).resolves.toBe(failure);
+  });
+
+  it('returns the original promise so callers still see rejections', async () => {
+    const tracker = createPendingWriteTracker();
+    const err = new ApiError('Package is published and locked', 409);
+    await expect(tracker.track(Promise.reject(err))).rejects.toBe(err);
+    await tracker.settle();
+    expect(tracker.size).toBe(0);
+  });
+
+  it('also waits for writes enqueued while settling', async () => {
+    const tracker = createPendingWriteTracker();
+    const first = deferred();
+    const followUp = deferred();
+    tracker.track(first.promise);
+
+    let settled = false;
+    const settling = tracker.settle().then(() => {
+      settled = true;
+    });
+
+    first.promise.then(() => tracker.track(followUp.promise));
+    first.resolve();
+    await first.promise;
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    followUp.resolve();
+    await settling;
+    expect(settled).toBe(true);
+  });
+});
 
 describe('isPackageSaveAllowed', () => {
   it('allows draft packages', () => {
