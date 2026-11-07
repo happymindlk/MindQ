@@ -205,9 +205,10 @@ export const REPORT_CSS = `
   display: flex; align-items: flex-start; gap: 16px; margin-top: 24px; padding-top: 12px;
   border-top: 1px solid #d1d5db; background: #ffffff;
 }
-.mq-footer-notes { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mq-footer-notes { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: 100%; }
 .mq-footer-text { font-size: 10px; line-height: 1.5; color: #6b7280; text-wrap: pretty; }
 .mq-footer-disclaimer { color: #92400e; font-weight: 600; }
+.mq-entity { white-space: nowrap; }
 .mq-brand { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .mq-brand img { display: block; }
 
@@ -220,7 +221,11 @@ export const REPORT_CSS = `
 .mindq-report .subscale-group,
 .mindq-report .summary-box,
 .mindq-report .strengths-block,
-.mindq-report .areas-block {
+.mindq-report .areas-block,
+.mindq-report li,
+.mindq-report .mq-subscale-row,
+.mindq-report .mq-score-summary,
+.mindq-report .mq-status-note {
   break-inside: avoid !important;
   page-break-inside: avoid !important;
 }
