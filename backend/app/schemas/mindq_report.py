@@ -16,7 +16,10 @@ from app.schemas.jd_evaluation import (
 )
 
 ReportCategory = Literal["Cognitive", "Personality", "Behavioral", "Technical"]
-SynthesisStatus = Literal["ok", "failed", "skipped", "pending"]
+# ``pending``: package not finished, so scores are withheld and no narrative is due.
+# ``generating``: scores are final and a background job is writing the narrative;
+# clients should poll.
+SynthesisStatus = Literal["ok", "failed", "skipped", "pending", "generating"]
 
 
 class SubscaleScore(BaseModel):

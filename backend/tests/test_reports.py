@@ -110,8 +110,9 @@ def test_report_allows_ops_other_tenant(home_corp, candidate_id):
             "app.api.v1.reports.build_technical_report_data",
             new=AsyncMock(return_value=report),
         ),
-        patch("app.api.v1.reports.ReportService.generate_report_bytes", new=generate),
-        patch("app.api.v1.reports.storage_service.upload_report", return_value=None),
+        patch("app.services.report_pdf.ReportService.generate_report_bytes", new=generate),
+        patch("app.services.report_pdf.storage_service.fetch_cached_report", return_value=None),
+        patch("app.services.report_pdf.storage_service.store_cached_report", return_value=None),
     ):
         res = TestClient(app).get(f"/api/v1/admin/candidates/{candidate_id}/report")
     assert res.status_code == 200

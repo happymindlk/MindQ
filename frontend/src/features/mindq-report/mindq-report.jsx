@@ -94,11 +94,37 @@ function SynthesisFallback({ status }) {
       </p>
     );
   }
+  if (status === 'generating') {
+    return (
+      <p className="mq-fallback">
+        The executive summary is still being generated. Reopen this report in a minute.
+      </p>
+    );
+  }
   return (
     <p className="mq-fallback">
       The executive summary is not available yet. Scoring may still be in progress; reopen this
       report shortly.
     </p>
+  );
+}
+
+const SKELETON_LINE_WIDTHS = ['100%', '96%', '92%', '88%', '64%'];
+
+/**
+ * Shimmer placeholder for AI narrative still generating in the background.
+ * On-screen only: the PDF export never passes `narrativeLoading`, so exported
+ * files fall back to static copy instead of a frozen shimmer.
+ *
+ * @param {{ lines: number, label: string }} props
+ */
+function NarrativeSkeleton({ lines, label }) {
+  return (
+    <div className="mq-skeleton" role="status" aria-live="polite" aria-label={label}>
+      {SKELETON_LINE_WIDTHS.slice(-lines).map((width, index) => (
+        <span key={index} className="mq-skeleton-line" style={{ width }} />
+      ))}
+    </div>
   );
 }
 
@@ -310,10 +336,11 @@ function CategoryBreakdown({ group }) {
  * - `data-pdf-row` elements are safe cut points inside oversized blocks.
  * - `data-pdf-footer` is repeated at the bottom of every page.
  *
- * @param {{ data: Record<string, any> | null | undefined, logoSrc?: string | null }} props
+ * @param {{ data: Record<string, any> | null | undefined, logoSrc?: string | null, narrativeLoading?: boolean }} props
  *   `logoSrc` overrides the client logo URL (PDF export passes an inlined data URL).
+ *   `narrativeLoading` shows shimmer placeholders for AI sections still generating.
  */
-export default function MindQReport({ data, logoSrc }) {
+export default function MindQReport({ data, logoSrc, narrativeLoading = false }) {
   if (!data) return null;
   const vm = toViewModel(data);
   const logo = safeLogoUrl(logoSrc ?? data.company_logo_url);
@@ -383,6 +410,8 @@ export default function MindQReport({ data, logoSrc }) {
               <h2>Executive Summary</h2>
               {vm.summary ? (
                 <p className="mq-summary">{vm.summary}</p>
+              ) : narrativeLoading ? (
+                <NarrativeSkeleton lines={5} label="Generating executive summary" />
               ) : (
                 <SynthesisFallback status={vm.synthesisStatus} />
               )}
@@ -412,7 +441,9 @@ export default function MindQReport({ data, logoSrc }) {
           <section className={`mq-strengths-risks list-section ${KEEP_TOGETHER}`} data-pdf-block>
             <div className="mq-sr-col mq-sr-strengths strengths-block">
               <h2>Strengths</h2>
-              {vm.strengths.length === 0 ? (
+              {vm.strengths.length === 0 && narrativeLoading ? (
+                <NarrativeSkeleton lines={3} label="Generating strengths" />
+              ) : vm.strengths.length === 0 ? (
                 <p className="mq-fallback">No strengths recorded yet.</p>
               ) : (
                 <ul>
@@ -424,7 +455,9 @@ export default function MindQReport({ data, logoSrc }) {
             </div>
             <div className="mq-sr-col mq-sr-risks areas-block">
               <h2>Areas to explore</h2>
-              {vm.risks.length === 0 ? (
+              {vm.risks.length === 0 && narrativeLoading ? (
+                <NarrativeSkeleton lines={3} label="Generating areas to explore" />
+              ) : vm.risks.length === 0 ? (
                 <p className="mq-fallback">No areas to explore recorded yet.</p>
               ) : (
                 <ul>

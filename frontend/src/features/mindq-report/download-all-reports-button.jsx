@@ -4,16 +4,16 @@ import { useBulkReportDownload } from './use-bulk-report-download';
 
 /**
  * @param {{
+ *   packageId: string,
  *   packageTitle: string,
  *   candidates: Array<object>,
- *   fetchReportData: (candidateId: string) => Promise<Record<string, any>>,
  * }} props
  */
-function DownloadAllReportsButton({ packageTitle, candidates, fetchReportData }) {
-  const { start, progress, readyCount, running } = useBulkReportDownload({
+function DownloadAllReportsButton({ packageId, packageTitle, candidates }) {
+  const { start, readyCount, running } = useBulkReportDownload({
+    packageId,
     packageTitle,
     candidates,
-    fetchReportData,
   });
   const disabled = running || readyCount === 0;
 
@@ -35,11 +35,7 @@ function DownloadAllReportsButton({ packageTitle, candidates, fetchReportData })
       ) : (
         <FolderDown className="h-3.5 w-3.5" aria-hidden="true" />
       )}
-      <span aria-live="polite">
-        {running && progress
-          ? `Preparing ${progress.done} of ${progress.total}…`
-          : 'Download All Reports'}
-      </span>
+      <span aria-live="polite">{running ? 'Preparing zip…' : 'Download All Reports'}</span>
       {!running && readyCount > 0 && (
         <span className="rounded bg-surface-raised px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-muted">
           {readyCount}

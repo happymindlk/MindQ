@@ -11,7 +11,7 @@ import MetricStrip from '../../components/ui/MetricStrip';
 import InviteCandidateForm from '../../components/InviteCandidateForm';
 import { SkeletonTable } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/useToast';
-import { downloadMindQReport } from '../../features/mindq-report/render-report-pdf';
+import { reportDownloadToast } from '../../features/mindq-report/report-download-toast';
 import {
   adminApi,
   candidateStatus,
@@ -98,12 +98,7 @@ export default function CandidateTracker() {
     async (candidateId) => {
       setDownloadingId(candidateId);
       try {
-        await downloadMindQReport(() => adminApi.getReportData(candidateId));
-        toast({
-          title: 'Report ready',
-          description: 'Assessment report PDF downloaded.',
-          variant: 'success',
-        });
+        toast(reportDownloadToast(await adminApi.downloadReport(candidateId)));
         const data = await adminApi.getCandidates(packageId);
         setCandidates(data || []);
       } catch (err) {

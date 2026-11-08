@@ -1593,6 +1593,66 @@ class ClientPackageService:
         return rows
 
     @staticmethod
+    async def get_package_completed_candidates(
+        session: AsyncSession, package_id: UUID, corporate_id: UUID
+    ) -> tuple[Package, list[Candidate]]:
+        """Load a tenant-owned published package and its completed candidates.
+
+        Completion matches the dashboard ``report_available`` rule: every
+        assessment in the package is submitted. Cross-tenant or unpublished
+        packages are indistinguishable from missing ones (``LookupError``).
+
+        Args:
+            session: Async database session.
+            package_id: Package to export reports for.
+            corporate_id: Authenticated HR tenant from the client JWT.
+
+        Returns:
+            The package row and candidates ready for MindQ Report export.
+
+        Raises:
+            LookupError: Package missing, inactive, unpublished, or not in tenant.
+        """
+        package = (
+            await session.execute(
+                select(Package).where(
+                    Package.id == package_id,
+                    Package.corporate_id == corporate_id,
+                    Package.status == "published",
+                    Package.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
+        if package is None:
+            raise LookupError("Package not found")
+
+        candidates = (
+            await session.execute(
+                select(Candidate)
+                .where(
+                    Candidate.corporate_id == corporate_id,
+                    Candidate.package_id == package_id,
+                )
+                .order_by(Candidate.full_name, Candidate.created_at)
+            )
+        ).scalars().all()
+        if not candidates:
+            return package, []
+
+        agg = await _candidate_aggregates(session, list(candidates), [package_id])
+        completed = [
+            cand
+            for cand in candidates
+            if client_status(
+                completed=agg.completed.get(cand.id, 0),
+                total=agg.total_for(cand),
+                logged_in=bool(cand.logged_in_at),
+            )
+            == "completed"
+        ]
+        return package, completed
+
+    @staticmethod
     async def get_client_dashboard(
         session: AsyncSession, corporate_id: UUID
     ) -> ClientDashboardResponse:

@@ -86,6 +86,20 @@ export const REPORT_CSS = `
 .mq-summary { white-space: pre-wrap; color: #1f2937; }
 .mq-fallback { color: #6b7280; font-style: italic; }
 
+.mq-skeleton { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.mq-skeleton-line {
+  display: block; height: 12px; border-radius: 4px;
+  background: linear-gradient(90deg, #eef0f3 0%, #e0e3e8 40%, #eef0f3 80%);
+  background-size: 200% 100%;
+  animation: mq-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes mq-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) { .mq-skeleton-line { animation: none; } }
+@media print { .mq-skeleton-line { animation: none; } }
+
 .mq-group + .mq-group, .mq-section > div + .mq-group { margin-top: 16px; }
 .mq-group-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 8px;

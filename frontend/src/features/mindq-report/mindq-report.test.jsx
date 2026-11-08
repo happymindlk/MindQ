@@ -383,6 +383,38 @@ describe('MindQReport', () => {
     expect(screen.getByText(/needs a target role/)).toBeInTheDocument();
   });
 
+  describe('while the narrative is generating', () => {
+    const GENERATING = {
+      ...BASE,
+      executive_summary: '',
+      strengths: [],
+      areas_to_explore: [],
+      synthesis_status: 'generating',
+    };
+
+    it('shows shimmer placeholders for AI sections and keeps scores visible', () => {
+      const { container } = render(<MindQReport data={GENERATING} narrativeLoading />);
+      expect(screen.getByRole('status', { name: 'Generating executive summary' })).toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Generating strengths' })).toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Generating areas to explore' })).toBeInTheDocument();
+      expect(screen.queryByText('No strengths recorded yet.')).not.toBeInTheDocument();
+      expect(container.querySelectorAll('.mq-score-item').length).toBeGreaterThan(0);
+    });
+
+    it('renders static copy instead of a shimmer when not polling (PDF export)', () => {
+      const { container } = render(<MindQReport data={GENERATING} />);
+      expect(container.querySelector('.mq-skeleton')).toBeNull();
+      expect(screen.getByText(/still being generated/i)).toBeInTheDocument();
+      expect(screen.getByText('No strengths recorded yet.')).toBeInTheDocument();
+    });
+
+    it('prefers real narrative text over the shimmer', () => {
+      render(<MindQReport data={{ ...BASE, synthesis_status: 'ok' }} narrativeLoading />);
+      expect(screen.getByText('Strong analytical candidate.')).toBeInTheDocument();
+      expect(screen.queryByRole('status', { name: 'Generating executive summary' })).toBeNull();
+    });
+  });
+
   it('drops malformed breakdown rows instead of crashing', () => {
     render(
       <MindQReport

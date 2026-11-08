@@ -2,6 +2,7 @@ import { supabase } from './supabaseClient';
 import { API_ORIGIN as API_BASE } from './api-origin';
 import { ApiError } from './api-error';
 import { apiFetch, BAD_RESPONSE_MESSAGE, requestJson } from './api-request';
+import { saveReportResponse } from './download-response';
 
 /**
  * Build FastAPI auth headers from the HR user's Supabase session.
@@ -123,27 +124,7 @@ export const adminApi = {
       { headers: await authHeaders(false) },
       'Failed to download report',
     );
-    const blob = await res.blob();
-    const reportType = res.headers.get('x-report-type') || '';
-    const synthesisStatus = res.headers.get('x-report-synthesis-status') || '';
-    const isHtml = reportType === 'HTML' || (res.headers.get('content-type') || '').includes('text/html');
-    const disposition = res.headers.get('content-disposition') || '';
-    const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
-    const asciiName = /filename="([^"]+)"/i.exec(disposition)?.[1];
-    const filename = encodedName
-      ? decodeURIComponent(encodedName)
-      : asciiName || `MindQ Report - ${candidateId}.${isHtml ? 'html' : 'pdf'}`;
-    // Blob + anchor download — never window.open (popup blockers / CORS).
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
-    return { isHtml, synthesisStatus };
+    return saveReportResponse(res, `MindQ Report - ${candidateId}`);
   },
 
   async inviteCandidate({ candidateEmail, packageId, corporateId }) {

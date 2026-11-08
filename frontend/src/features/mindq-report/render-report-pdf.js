@@ -449,15 +449,3 @@ export function saveBlob(blob, filename) {
   anchor.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-
-/**
- * Fetch report data and download `MindQ Report - ${candidateFullName}.pdf`.
- *
- * @param {() => Promise<Record<string, any>>} fetchReportData
- * @returns {Promise<void>}
- */
-export async function downloadMindQReport(fetchReportData) {
-  const data = await fetchReportData();
-  const { blob, filename } = await renderReportPdf(data);
-  saveBlob(blob, filename);
-}

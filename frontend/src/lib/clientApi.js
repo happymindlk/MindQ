@@ -4,6 +4,8 @@ import {
   writeClientSession,
 } from '../pages/client/client-session';
 import { API_ORIGIN as API_BASE } from './api-origin';
+import { saveAttachmentResponse, saveReportResponse } from './download-response';
+import { reportsZipFilename } from '../features/mindq-report/report-filename';
 
 export class ClientAuthError extends Error {
   constructor(message = 'Your session has expired. Please sign in again.') {
@@ -24,14 +26,20 @@ async function readError(res, fallback) {
 }
 
 /**
- * Authenticated fetch against the client API using the client JWT only.
+ * Authenticated request against the client API using the client JWT only.
  * A 401 means the token expired or was revoked: drop it so the route guard
  * sends the user back to /client/login.
+ *
+ * @param {string} path Path starting with `/api`.
+ * @param {string} fallback Message used when the error body carries nothing readable.
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {Promise<Response>} A successful (2xx) response.
  */
-async function clientFetch(path, fallback) {
+async function clientRequest(path, fallback, { signal } = {}) {
   const session = readClientSession();
   if (!session) throw new ClientAuthError();
   const res = await fetch(`${API_BASE}${path}`, {
+    signal,
     headers: {
       Authorization: `Bearer ${session.token}`,
       'Content-Type': 'application/json',
@@ -43,7 +51,11 @@ async function clientFetch(path, fallback) {
     throw new ClientAuthError();
   }
   if (!res.ok) throw new Error(await readError(res, fallback));
-  return res.json();
+  return res;
+}
+
+async function clientFetch(path, fallback) {
+  return (await clientRequest(path, fallback)).json();
 }
 
 /**
@@ -107,12 +119,50 @@ export const clientApi = {
     );
   },
 
-  /** Technical-only report payload for client-side PDF export. */
+  /** Report payload for the on-screen preview. */
   getReportData(candidateId) {
     return clientFetch(
       `/api/v1/client/candidates/${encodeURIComponent(candidateId)}/report-data`,
       'Failed to load report data',
     );
+  },
+
+  /**
+   * Download the server-rendered (WeasyPrint, cached) report PDF — the same
+   * file admins get from `adminApi.downloadReport`.
+   *
+   * @param {string} candidateId
+   * @returns {Promise<import('./download-response').ReportDownloadResult>}
+   */
+  async downloadReport(candidateId) {
+    const res = await clientRequest(
+      `/api/v1/client/candidates/${encodeURIComponent(candidateId)}/report`,
+      'Failed to download report',
+    );
+    return saveReportResponse(res, `MindQ Report - ${candidateId}`);
+  },
+
+  /**
+   * Download every completed MindQ Report in a package as one server-built ZIP.
+   *
+   * @param {string} packageId
+   * @param {string} [packageTitle] Fallback filename stem when the response
+   *   omits `Content-Disposition`.
+   * @param {{ signal?: AbortSignal }} [options]
+   * @returns {Promise<import('./download-response').ZipDownloadResult>}
+   */
+  async downloadPackageReportsZip(packageId, packageTitle = '', { signal } = {}) {
+    const res = await clientRequest(
+      `/api/v1/client/packages/${encodeURIComponent(packageId)}/reports-zip`,
+      'Failed to download reports',
+      { signal },
+    );
+    const filename = await saveAttachmentResponse(res, reportsZipFilename(packageTitle));
+    return {
+      filename,
+      succeeded: Number(res.headers.get('x-report-zip-count') || 0),
+      failed: Number(res.headers.get('x-report-zip-failed') || 0),
+    };
   },
 
   async getBlindReview(packageToken) {

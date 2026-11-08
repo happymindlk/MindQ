@@ -8,7 +8,7 @@ import PageHeader from '../../components/ui/PageHeader';
 import Skeleton, { SkeletonKpi, SkeletonRows } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/useToast';
 import { adminApi, candidateStatus, maskEmail } from '../../lib/adminApi';
-import { downloadMindQReport } from '../../features/mindq-report/render-report-pdf';
+import { reportDownloadToast } from '../../features/mindq-report/report-download-toast';
 
 /**
  * Narrative fields of a stored report synthesis; empty when the evaluation is
@@ -237,12 +237,7 @@ export default function CandidateReport() {
   const handleDownload = async () => {
     setDownloading(true);
     try {
-      await downloadMindQReport(() => adminApi.getReportData(candidateId));
-      toast({
-        title: 'Report ready',
-        description: 'Assessment report PDF downloaded.',
-        variant: 'success',
-      });
+      toast(reportDownloadToast(await adminApi.downloadReport(candidateId)));
     } catch (err) {
       toast({ title: 'Download failed', description: err.message, variant: 'error' });
     } finally {

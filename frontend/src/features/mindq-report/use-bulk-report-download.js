@@ -1,44 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useToast } from '../../components/ui/useToast';
-import { buildReportsZip } from './build-reports-zip';
-import { saveBlob } from './render-report-pdf';
-import { reportsZipFilename } from './report-filename';
+import { clientApi } from '../../lib/clientApi';
 import { isReportReady } from './report-readiness';
 
 /**
- * Bulk-download every completed MindQ Report in a package as one zip.
+ * Bulk-download every completed MindQ Report in a package as one server ZIP.
  *
  * @param {object} options
+ * @param {string} options.packageId
  * @param {string} options.packageTitle
  * @param {Array<{ candidate_id: string, name?: string, status?: string, report_available?: boolean }>} options.candidates
- * @param {(candidateId: string) => Promise<Record<string, any>>} options.fetchReportData
  */
-export function useBulkReportDownload({ packageTitle, candidates, fetchReportData }) {
+export function useBulkReportDownload({ packageId, packageTitle, candidates }) {
   const { toast } = useToast();
-  const [progress, setProgress] = useState(/** @type {{ done: number, total: number } | null} */ (null));
+  const [running, setRunning] = useState(false);
   const controllerRef = useRef(/** @type {AbortController | null} */ (null));
 
-  const ready = useMemo(() => candidates.filter(isReportReady), [candidates]);
+  const readyCount = useMemo(() => candidates.filter(isReportReady).length, [candidates]);
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
   const start = useCallback(async () => {
-    if (controllerRef.current || ready.length === 0) return;
+    if (controllerRef.current || !packageId || readyCount === 0) return;
     const controller = new AbortController();
     controllerRef.current = controller;
-    setProgress({ done: 0, total: ready.length });
+    setRunning(true);
     try {
-      const { blob, succeeded, failures } = await buildReportsZip({
-        candidates: ready,
-        fetchReportData,
-        onProgress: setProgress,
-        signal: controller.signal,
-      });
-      saveBlob(blob, reportsZipFilename(packageTitle));
-      if (failures.length > 0) {
+      const { succeeded, failed } = await clientApi.downloadPackageReportsZip(
+        packageId,
+        packageTitle,
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
+      if (failed > 0) {
         toast({
-          title: `${succeeded} of ${ready.length} reports downloaded`,
-          description: `Skipped: ${failures.map((f) => f.name).join(', ')}. Retry these individually.`,
+          title: `${succeeded} of ${succeeded + failed} reports downloaded`,
+          description: 'Some reports could not be generated. Retry those candidates individually.',
           variant: 'warning',
           duration: 8000,
         });
@@ -59,9 +56,9 @@ export function useBulkReportDownload({ packageTitle, candidates, fetchReportDat
       }
     } finally {
       controllerRef.current = null;
-      setProgress(null);
+      setRunning(false);
     }
-  }, [fetchReportData, packageTitle, ready, toast]);
+  }, [packageId, packageTitle, readyCount, toast]);
 
-  return { start, progress, readyCount: ready.length, running: progress !== null };
+  return { start, readyCount, running };
 }

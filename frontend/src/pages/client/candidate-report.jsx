@@ -8,23 +8,25 @@ import { SkeletonRows } from '../../components/ui/Skeleton';
 import { useToast } from '../../components/ui/useToast';
 import { clientApi } from '../../lib/clientApi';
 import MindQReport from '../../features/mindq-report/mindq-report';
-import { renderReportPdf, saveBlob } from '../../features/mindq-report/render-report-pdf';
 import { REPORT_TITLE } from '../../features/mindq-report/report-copy';
+import { reportDownloadToast } from '../../features/mindq-report/report-download-toast';
 import { useReportData } from '../../features/mindq-report/use-report-data';
 
 export default function ClientCandidateReport() {
   const { candidateId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { data, error, loading, retry } = useReportData(candidateId, clientApi.getReportData);
+  const { data, error, loading, retry, narrativeLoading } = useReportData(
+    candidateId,
+    clientApi.getReportData,
+  );
   const [downloading, setDownloading] = useState(false);
 
   const onDownload = async () => {
     if (!data) return;
     setDownloading(true);
     try {
-      const { blob, filename } = await renderReportPdf(data);
-      saveBlob(blob, filename);
+      toast(reportDownloadToast(await clientApi.downloadReport(candidateId)));
     } catch (err) {
       toast({
         title: 'Download failed',
@@ -72,7 +74,7 @@ export default function ClientCandidateReport() {
       {!loading && !error && data && (
         <div className="overflow-x-auto rounded-lg border border-border bg-surface-raised p-4 sm:p-8 print:overflow-visible print:rounded-none print:border-0 print:bg-white print:p-0">
           <div className="mx-auto w-fit rounded-sm shadow-lg ring-1 ring-black/5 print:w-full print:shadow-none print:ring-0">
-            <MindQReport data={data} />
+            <MindQReport data={data} narrativeLoading={narrativeLoading} />
           </div>
         </div>
       )}
