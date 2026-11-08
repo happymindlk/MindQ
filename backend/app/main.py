@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from starlette.datastructures import MutableHeaders
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.api.v1.beta_access import router as beta_access_router
@@ -214,11 +215,12 @@ class ProcessTimeMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
-# Security headers innermost, process-time around the app, CORS last (outermost):
+# Security headers innermost, then process-time, then GZip, CORS last (outermost):
 # Starlette runs the last-added middleware outermost, so preflight (OPTIONS) is
 # answered by CORSMiddleware before any inner middleware can reject or reroute it.
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(ProcessTimeMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.add_middleware(
     CORSMiddleware,
@@ -227,11 +229,17 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Browsers cache successful preflights; Chrome may clamp to ~2h but 86400 is
+    # the correct server-side value for Authorization + Content-Type CORS.
+    max_age=86400,
     expose_headers=[
         "X-Request-Id",
         "X-Process-Time",
         "X-Report-Type",
         "X-Report-Synthesis-Status",
+        "X-Report-Cache",
+        "X-Report-Zip-Count",
+        "X-Report-Zip-Failed",
         "Content-Disposition",
     ],
 )

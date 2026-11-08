@@ -64,6 +64,9 @@ def test_preflight_from_qa_origin_succeeds():
         == "https://qa.app.mindqtalent.com"
     )
     assert res.headers["access-control-allow-credentials"] == "true"
+    assert res.headers["access-control-max-age"] == "86400"
+
+
 PATH = "/api/v1/packages/corporates"
 
 

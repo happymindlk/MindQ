@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
+import { useCachedQuery } from '../../../hooks/use-cached-query';
 import { adminApi } from '../../../lib/adminApi';
+
+/**
+ * @param {string | undefined} corporateId
+ * @returns {string | null}
+ */
+export function corporatePackagesQueryKey(corporateId) {
+  return corporateId ? `admin:corporate-packages:${corporateId}` : null;
+}
 
 /**
  * @typedef {object} CorporatePackage
@@ -32,43 +41,35 @@ import { adminApi } from '../../../lib/adminApi';
  * }}
  */
 export function useCorporatePackages(corporateId) {
-  const [packages, setPackages] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const requestIdRef = useRef(0);
+  const key = corporatePackagesQueryKey(corporateId);
+  const fetcher = useCallback(
+    async () => (corporateId ? (await adminApi.listCorporatePackages(corporateId)) || [] : []),
+    [corporateId],
+  );
+  const { data, error, isLoading, reload, mutate } = useCachedQuery(key, fetcher, {
+    enabled: Boolean(corporateId),
+  });
 
-  const reload = useCallback(async () => {
-    if (!corporateId) return;
-    const requestId = ++requestIdRef.current;
-    setIsLoading(true);
-    setError(null);
-    try {
-      const rows = await adminApi.listCorporatePackages(corporateId);
-      if (requestId === requestIdRef.current) setPackages(rows || []);
-    } catch (err) {
-      if (requestId === requestIdRef.current) {
-        setError(err.message || 'Failed to load packages');
-      }
-    } finally {
-      if (requestId === requestIdRef.current) setIsLoading(false);
-    }
-  }, [corporateId]);
+  const patchPackage = useCallback(
+    (id, patch) => {
+      mutate((prev) => (Array.isArray(prev) ? prev.map((p) => (p.id === id ? { ...p, ...patch } : p)) : prev));
+    },
+    [mutate],
+  );
 
-  useEffect(() => {
-    setPackages([]);
-    reload();
-    return () => {
-      requestIdRef.current += 1;
-    };
-  }, [reload]);
+  const removePackage = useCallback(
+    (id) => {
+      mutate((prev) => (Array.isArray(prev) ? prev.filter((p) => p.id !== id) : prev));
+    },
+    [mutate],
+  );
 
-  const patchPackage = useCallback((id, patch) => {
-    setPackages((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
-  }, []);
-
-  const removePackage = useCallback((id) => {
-    setPackages((prev) => prev.filter((p) => p.id !== id));
-  }, []);
-
-  return { packages, isLoading, error, reload, patchPackage, removePackage };
+  return {
+    packages: Array.isArray(data) ? data : [],
+    isLoading,
+    error,
+    reload,
+    patchPackage,
+    removePackage,
+  };
 }

@@ -1,39 +1,26 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useCachedQuery } from '../../hooks/use-cached-query';
 import { clientApi } from '../../lib/clientApi';
+
+/** Cache key for the HR client portal dashboard payload. */
+export const CLIENT_DASHBOARD_KEY = 'client:dashboard';
 
 /**
  * Loads `GET /client/dashboard` and exposes a memoized, search-filtered view.
  * A package matches on title/role (all candidates kept); otherwise only the
  * matching candidates are kept and empty packages are dropped.
+ *
+ * Remounts (including React StrictMode) paint from cache / share one inflight GET.
  */
 export function useClientDashboard() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const fetcher = useCallback(() => clientApi.getDashboard(), []);
+  const {
+    data,
+    error,
+    isLoading,
+    reload,
+  } = useCachedQuery(CLIENT_DASHBOARD_KEY, fetcher);
   const [search, setSearch] = useState('');
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    clientApi
-      .getDashboard()
-      .then((payload) => {
-        if (!cancelled) setData(payload);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message || 'Failed to load dashboard');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
-
-  const refetch = useCallback(() => setReloadKey((k) => k + 1), []);
 
   const packages = useMemo(() => {
     const all = data?.packages ?? [];
@@ -65,10 +52,10 @@ export function useClientDashboard() {
     packages,
     totals,
     hasPackages: (data?.packages?.length ?? 0) > 0,
-    loading,
+    loading: isLoading,
     error,
     search,
     setSearch,
-    refetch,
+    refetch: reload,
   };
 }

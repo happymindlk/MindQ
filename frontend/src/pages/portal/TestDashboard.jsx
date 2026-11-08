@@ -33,7 +33,7 @@ export default function TestDashboard() {
     isLoading,
     isValidating,
     reload: loadDashboard,
-  } = useCachedQuery(CANDIDATE_DASHBOARD_KEY, fetcher, { staleTime: 0 });
+  } = useCachedQuery(CANDIDATE_DASHBOARD_KEY, fetcher);
 
   const windowState = usePackageWindow(
     dashboardData?.window_state,
@@ -144,9 +144,6 @@ export default function TestDashboard() {
                 lockedReason={lockedReasonFor(status, windowState)}
                 onPrefetch={() => {
                   // Prefetch is safe: GET /test no longer marks IN_PROGRESS.
-                  // #region agent log
-                  fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5f236f'},body:JSON.stringify({sessionId:'5f236f',runId:'pre-fix',hypothesisId:'D',location:'TestDashboard.jsx:onPrefetch',message:'dashboard prefetch GET test',data:{assessmentId:test.id,status:test.status},timestamp:Date.now()})}).catch(()=>{});
-                  // #endregion
                   void cachedQuery(
                     candidateTestKey(test.id),
                     () => api.candidate.getTest(test.id),

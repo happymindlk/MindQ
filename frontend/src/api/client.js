@@ -1,13 +1,18 @@
 // Thin FastAPI service client for the candidate flow, reports, and chat.
 // HR admin data access lives in src/lib/adminApi.js (supabase-js + RLS).
 import { API_ORIGIN } from '../lib/api-origin';
+import { requestJson } from '../lib/api-request';
 
 const API_BASE = `${API_ORIGIN}/api/v1`;
 
-const getAuthHeaders = () => {
+/**
+ * @param {{ json?: boolean }} [options] Set `json` when the request carries a JSON body.
+ * @returns {Record<string, string>}
+ */
+const getAuthHeaders = ({ json = false } = {}) => {
   const token = localStorage.getItem('candidateToken');
   return {
-    'Content-Type': 'application/json',
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
     ...(token && { Authorization: `Bearer ${token}` }),
   };
 };
@@ -66,12 +71,14 @@ export const api = {
       return handleResponse(res);
     },
     getDashboard: async () => {
-      const res = await fetch(`${API_BASE}/candidate/dashboard`, { headers: getAuthHeaders() });
-      return handleResponse(res);
+      return requestJson(`${API_BASE}/candidate/dashboard`, { headers: getAuthHeaders() }, 'Failed to load dashboard');
     },
     getTest: async (assessmentId) => {
-      const res = await fetch(`${API_BASE}/candidate/test/${assessmentId}`, { headers: getAuthHeaders() });
-      return handleResponse(res);
+      return requestJson(
+        `${API_BASE}/candidate/test/${assessmentId}`,
+        { headers: getAuthHeaders() },
+        'Failed to load test',
+      );
     },
     startTest: async (assessmentId) => {
       const res = await fetch(`${API_BASE}/candidate/test/${assessmentId}/start`, {
@@ -83,7 +90,7 @@ export const api = {
     autosave: async (data) => {
       const res = await fetch(`${API_BASE}/candidate/autosave`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getAuthHeaders({ json: true }),
         body: JSON.stringify(data),
       });
       return handleResponse(res);
@@ -91,7 +98,7 @@ export const api = {
     submitTest: async (assessmentId, responses = [], totalModuleDurationSeconds = null) => {
       const res = await fetch(`${API_BASE}/candidate/test/${assessmentId}/submit`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: getAuthHeaders({ json: true }),
         body: JSON.stringify({
           responses,
           total_module_duration_seconds: totalModuleDurationSeconds,
