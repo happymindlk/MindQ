@@ -232,6 +232,9 @@ app.add_middleware(
         "X-Process-Time",
         "X-Report-Type",
         "X-Report-Synthesis-Status",
+        "X-Report-Cache",
+        "X-Report-Zip-Count",
+        "X-Report-Zip-Failed",
         "Content-Disposition",
     ],
 )

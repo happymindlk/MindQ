@@ -182,3 +182,71 @@ describe('clientApi.downloadReport', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('clientApi.downloadPackageReportsZip', () => {
+  function zipResponse(headers, { ok = true, status = 200 } = {}) {
+    return {
+      ok,
+      status,
+      headers: new Headers(headers),
+      blob: async () => new Blob(['PK'], { type: 'application/zip' }),
+      json: async () => ({ detail: 'No completed reports to download' }),
+    };
+  }
+
+  let anchor;
+
+  beforeEach(() => {
+    writeClientSession({ access_token: 'client-jwt', expires_in: 3600, corporate: { id: 'c1' } });
+    window.URL.createObjectURL = vi.fn(() => 'blob:zip');
+    window.URL.revokeObjectURL = vi.fn();
+    anchor = null;
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag) => {
+      const el = createElement(tag);
+      if (tag === 'a') {
+        anchor = el;
+        vi.spyOn(el, 'click').mockImplementation(() => {});
+      }
+      return el;
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('downloads the server ZIP with the client JWT and returns counts', async () => {
+    fetch.mockResolvedValue(
+      zipResponse({
+        'content-type': 'application/zip',
+        'content-disposition':
+          'attachment; filename="MindQ Reports - Senior Engineer.zip"; filename*=UTF-8\'\'MindQ%20Reports%20-%20Senior%20Engineer.zip',
+        'x-report-zip-count': '3',
+        'x-report-zip-failed': '1',
+      }),
+    );
+
+    await expect(
+      clientApi.downloadPackageReportsZip('pkg 1', 'Senior Engineer'),
+    ).resolves.toEqual({
+      filename: 'MindQ Reports - Senior Engineer.zip',
+      succeeded: 3,
+      failed: 1,
+    });
+
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/client\/packages\/pkg%201\/reports-zip$/);
+    expect(init.headers.Authorization).toBe('Bearer client-jwt');
+    expect(anchor.download).toBe('MindQ Reports - Senior Engineer.zip');
+    expect(anchor.click).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a 404 when the package has no completed reports', async () => {
+    fetch.mockResolvedValue(zipResponse({}, { ok: false, status: 404 }));
+    await expect(clientApi.downloadPackageReportsZip('pkg-1')).rejects.toThrow(
+      'No completed reports to download',
+    );
+    expect(anchor).toBeNull();
+  });
+});
