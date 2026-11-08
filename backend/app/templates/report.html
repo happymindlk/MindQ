@@ -232,6 +232,8 @@
     <p class="muted">An executive summary needs a target role and at least one completed assessment.</p>
     {% elif report.synthesis_status == 'failed' %}
     <p class="muted">The executive summary was unavailable when this report was generated.</p>
+    {% elif report.synthesis_status == 'generating' %}
+    <p class="muted">The executive summary is still being generated. Download the report again in a minute.</p>
     {% else %}
     <p class="muted">The executive summary is not available for this candidate yet.</p>
     {% endif %}

@@ -4,7 +4,6 @@ import CandidateShareBanner from './candidate-share-banner';
 import CandidateTable from './candidate-table';
 import DownloadAllReportsButton from '../../features/mindq-report/download-all-reports-button';
 import DeadlineLabel from '../../features/package-schedule/deadline-label';
-import { clientApi } from '../../lib/clientApi';
 import { formatPackageLabel } from '../../lib/format-package-label';
 
 /**
@@ -61,9 +60,9 @@ function PackageAccordion({ pkg, open, onToggle, companyName }) {
                 Candidate Roster
               </h3>
               <DownloadAllReportsButton
+                packageId={pkg.id}
                 packageTitle={pkg.title}
                 candidates={pkg.candidates}
-                fetchReportData={clientApi.getReportData}
               />
             </div>
             <CandidateTable candidates={pkg.candidates} />

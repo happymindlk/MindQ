@@ -1,11 +1,10 @@
 """MindQ Report data for on-screen preview and client-side PDF export."""
 from __future__ import annotations
 
-import logging
 from types import SimpleNamespace
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,11 +20,17 @@ from app.schemas.jd_evaluation import ReportNarrative
 from app.schemas.mindq_report import (
     MindQReportResponse,
     ReportCustomQuestion,
+    SynthesisStatus,
     role_alignment_for_report,
 )
-from app.security import enforce_user_rate_limit, report_limiter
+from app.security import enforce_user_rate_limit, report_view_limiter
+from app.services.background import (
+    claim_report_refresh,
+    is_ai_job_inflight,
+    refresh_report_synthesis,
+)
 from app.services.client_package import PSYCHOMETRIC, TECHNICAL, _strip_answer_keys
-from app.services.jd_scoring import JdScoringService
+from app.services.jd_scoring import CachedSynthesis, JdScoringService
 from app.services.report_synthesis import (
     build_category_summaries,
     build_competency_breakdown,
@@ -38,8 +43,6 @@ from app.services.report_synthesis import (
 )
 from app.services.scoring import _extract_answer
 from app.services.technical_eval import TechnicalEvalService
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -170,6 +173,7 @@ def _custom_questions(
 @router.get("/{candidate_id}/report-data", response_model=MindQReportResponse)
 async def get_candidate_report_data(
     candidate_id: UUID,
+    background_tasks: BackgroundTasks,
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -177,17 +181,19 @@ async def get_candidate_report_data(
 
     Psychometric modules contribute module-level scores only; item responses,
     trait facets, and answer keys are omitted. No fit score or hiring
-    recommendation is produced.
+    recommendation is produced. Never waits on Gemini: a missing narrative is
+    queued in the background and reported as ``synthesis_status="generating"``.
 
     Args:
         candidate_id: ``candidates.id`` (not ``candidate_progress.id``).
+        background_tasks: Queue for narrative regeneration.
         hr: Authenticated HR or ops user.
         db: Async database session.
 
     Returns:
         The MindQ Report payload.
     """
-    enforce_user_rate_limit(report_limiter, hr.user_id, "report_data")
+    enforce_user_rate_limit(report_view_limiter, hr.user_id, "report_data")
     candidate = (
         await db.execute(select(Candidate).where(Candidate.id == candidate_id))
     ).scalar_one_or_none()
@@ -197,7 +203,7 @@ async def get_candidate_report_data(
     if not is_ops_role(hr.role) and candidate.corporate_id != hr.corporate_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    return await build_technical_report_data(db, candidate)
+    return await build_technical_report_data(db, candidate, background_tasks)
 
 
 async def _load_responses(db: AsyncSession, candidate_id: UUID) -> list[CandidateResponse]:
@@ -309,18 +315,52 @@ def _progress_with_facet_scores(
     return coerced
 
 
+def _resolve_synthesis_status(
+    candidate_id: UUID,
+    cached: CachedSynthesis,
+    *,
+    missing_open_evals: bool,
+    background_tasks: BackgroundTasks,
+) -> SynthesisStatus:
+    """Map the cache state to an API status, queueing a refresh when one is due.
+
+    Args:
+        candidate_id: Candidate being reported on.
+        cached: Read-only cache lookup result.
+        missing_open_evals: Whether technical open-ended items still lack a grade.
+        background_tasks: Request-scoped task queue.
+
+    Returns:
+        ``ok``/``skipped`` from the cache, ``generating`` while a job is running
+        or was just queued, otherwise ``failed``.
+    """
+    wants_refresh = cached.needs_refresh or missing_open_evals
+    if cached.state in ("ok", "skipped"):
+        if missing_open_evals and claim_report_refresh(candidate_id):
+            background_tasks.add_task(refresh_report_synthesis, candidate_id)
+        return cached.state
+    if is_ai_job_inflight(candidate_id):
+        return "generating"
+    if wants_refresh and claim_report_refresh(candidate_id):
+        background_tasks.add_task(refresh_report_synthesis, candidate_id)
+        return "generating"
+    return "failed"
+
+
 async def build_technical_report_data(
-    db: AsyncSession, candidate: Candidate
+    db: AsyncSession, candidate: Candidate, background_tasks: BackgroundTasks
 ) -> MindQReportResponse:
     """Assemble the MindQ Report for an already-authorized candidate.
 
-    Callers MUST verify tenant access before calling. Missing open-ended
-    technical grades and the report synthesis are backfilled lazily; the
-    synthesis is a cache hit unless the prompt, role brief, or scores changed.
+    Callers MUST verify tenant access before calling. Only reads the database:
+    missing open-ended technical grades and a missing, stale, or failed
+    synthesis are regenerated by ``refresh_report_synthesis`` on
+    ``background_tasks``, and the response reports ``generating`` meanwhile.
 
     Args:
         db: Async database session.
         candidate: Candidate row the caller is allowed to read.
+        background_tasks: Request-scoped queue for narrative regeneration.
 
     Returns:
         The MindQ Report payload.
@@ -350,20 +390,9 @@ async def build_technical_report_data(
 
     response_rows = await _load_responses(db, candidate.id)
     responses_by_assessment = _group_responses(response_rows)
-    if TechnicalEvalService.has_missing_open_evals(assessments, responses_by_assessment):
-        try:
-            await TechnicalEvalService.evaluate_candidate(
-                db,
-                candidate=candidate,
-                assessments=assessments,
-                progress_rows=progress_rows,
-            )
-            response_rows = await _load_responses(db, candidate.id)
-            responses_by_assessment = _group_responses(response_rows)
-        except Exception:
-            logger.exception(
-                "report_data_technical_eval_backfill_failed candidate_id=%s", candidate.id
-            )
+    missing_open_evals = TechnicalEvalService.has_missing_open_evals(
+        assessments, responses_by_assessment
+    )
 
     catalog = await load_catalog_categories(db, assessments)
     progress_for_report = _progress_with_facet_scores(assessments, progress_rows)
@@ -376,26 +405,20 @@ async def build_technical_report_data(
     scores_released = bool(outcomes) and all(o.scores_released for o in outcomes)
 
     synthesis: ReportNarrative | None = None
-    synthesis_status = "pending"
+    synthesis_status: SynthesisStatus = "pending"
     if scores_released:
-        try:
-            synthesis, status = await JdScoringService.get_or_evaluate(
-                db,
-                candidate=candidate,
-                package=package,
-                assessments=assessments,
-                progresses=progress_rows,
-                responses=response_rows,
-                outcomes=outcomes,
-            )
-            synthesis_status = "ok" if synthesis is not None else status
-        except Exception:
-            logger.exception("report_data_synthesis_failed candidate_id=%s", candidate.id)
-            synthesis_status = "failed"
-        if synthesis_status not in ("ok", "failed", "skipped"):
-            synthesis_status = "pending"
-    else:
-        synthesis_status = "pending"
+        cached = await JdScoringService.read_cached(
+            db, candidate=candidate, package=package, outcomes=outcomes
+        )
+        synthesis = cached.narrative
+        synthesis_status = _resolve_synthesis_status(
+            candidate.id,
+            cached,
+            missing_open_evals=missing_open_evals,
+            background_tasks=background_tasks,
+        )
+    elif missing_open_evals and claim_report_refresh(candidate.id):
+        background_tasks.add_task(refresh_report_synthesis, candidate.id)
 
     released = bool(synthesis and scores_released)
     summaries = performance_summaries(candidate.full_name, outcomes, synthesis)
@@ -420,7 +443,7 @@ async def build_technical_report_data(
         company_name=corporate.name if corporate else "",
         company_logo_url=_safe_logo_url(getattr(corporate, "logo_url", None) if corporate else None),
         completed_at=max(completed_times) if completed_times and scores_released else None,
-        synthesis_status=synthesis_status,  # type: ignore[arg-type]
+        synthesis_status=synthesis_status,
         candidate_full_name=candidate.full_name,
         candidate_email=candidate.email,
         target_role=(package.target_role or package.title or "") if package else "",

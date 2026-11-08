@@ -144,6 +144,12 @@ login_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
 public_limiter = RateLimiter(max_requests=60, window_seconds=60)
 # Endpoints that can trigger paid Gemini calls or PDF rendering (denial-of-wallet).
 report_limiter = RateLimiter(max_requests=20, window_seconds=10 * 60)
+# Bulk ZIP export packages many PDFs in one request; keep the budget tight so
+# a single HR user cannot queue unbounded WeasyPrint work.
+reports_zip_limiter = RateLimiter(max_requests=5, window_seconds=10 * 60)
+# Report JSON views are database-only (Gemini runs in background tasks with
+# its own cooldown), so they get a budget that covers narrative polling.
+report_view_limiter = RateLimiter(max_requests=120, window_seconds=10 * 60)
 # Outbound email triggers (nudges, invites): stop HR accounts being used as a spam relay.
 email_limiter = RateLimiter(max_requests=30, window_seconds=60 * 60)
 # Admin password step. Each accepted attempt can send mail, so this is separate

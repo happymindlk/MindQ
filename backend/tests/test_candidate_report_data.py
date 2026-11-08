@@ -15,6 +15,8 @@ from app.api.v1.candidate_reports import router
 from app.auth import HRUserContext, get_current_hr_user
 from app.database import get_db
 from app.schemas.jd_evaluation import ReportNarrative
+from app.services import background
+from app.services.jd_scoring import CachedSynthesis
 
 DONE = datetime(2026, 10, 1, 9, 0, tzinfo=timezone.utc)
 
@@ -52,28 +54,45 @@ def app(corp_id):
 
 @pytest.fixture
 def synthesis_stub(monkeypatch):
-    """Replace catalog lookup, technical backfill, and Gemini with controllable stubs."""
-    state: dict = {"result": (None, "skipped"), "calls": []}
+    """Stub the cache read and catalog; fail loudly if the route touches Gemini."""
+    state: dict = {
+        "result": CachedSynthesis(None, "skipped", needs_refresh=False),
+        "calls": [],
+        "refreshed": [],
+        "missing_evals": False,
+    }
 
-    async def _get_or_evaluate(_db, **kwargs):
+    async def _read_cached(_db, **kwargs):
         state["calls"].append(kwargs)
-        result = state["result"]
-        if isinstance(result, Exception):
-            raise result
-        return result
+        return state["result"]
+
+    async def _forbidden(*_a, **_k):
+        raise AssertionError("report view must not call Gemini inline")
+
+    async def _refresh(candidate_id):
+        state["refreshed"].append(candidate_id)
 
     async def _catalog(_db, _assessments):
         return state.get("catalog", {})
 
     monkeypatch.setattr(
-        candidate_reports.JdScoringService, "get_or_evaluate", staticmethod(_get_or_evaluate)
+        candidate_reports.JdScoringService, "read_cached", staticmethod(_read_cached)
     )
+    monkeypatch.setattr(
+        candidate_reports.JdScoringService, "get_or_evaluate", staticmethod(_forbidden)
+    )
+    monkeypatch.setattr(
+        candidate_reports.TechnicalEvalService, "evaluate_candidate", staticmethod(_forbidden)
+    )
+    monkeypatch.setattr(candidate_reports, "refresh_report_synthesis", _refresh)
     monkeypatch.setattr(candidate_reports, "load_catalog_categories", _catalog)
     monkeypatch.setattr(
         candidate_reports.TechnicalEvalService,
         "has_missing_open_evals",
-        staticmethod(lambda *_a, **_k: False),
+        staticmethod(lambda *_a, **_k: state["missing_evals"]),
     )
+    monkeypatch.setattr(background, "_ai_jobs_inflight", {})
+    monkeypatch.setattr(background, "_last_view_refresh", {})
     return state
 
 
@@ -260,7 +279,7 @@ SYNTHESIS = ReportNarrative.model_validate(
 def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synthesis_stub):
     results, big_five_gm = _full_fixture(candidate_id, corp_id)
     synthesis_stub["catalog"] = {big_five_gm: "personality"}
-    synthesis_stub["result"] = (SYNTHESIS, "generated")
+    synthesis_stub["result"] = CachedSynthesis(SYNTHESIS, "ok", needs_refresh=False)
     res = _client(app, results).get(f"/api/v1/candidates/{candidate_id}/report-data")
     assert res.status_code == 200
     body = res.json()
@@ -311,15 +330,17 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
 
     passed = synthesis_stub["calls"][0]["outcomes"]
     assert [o.key for o in passed] == ["A1", "A2", "A3", "A4"]
+    assert synthesis_stub["refreshed"] == []
 
 
 def test_report_data_falls_back_when_synthesis_fails(app, corp_id, candidate_id, synthesis_stub):
     results, _gm = _full_fixture(candidate_id, corp_id)
-    synthesis_stub["result"] = RuntimeError("503 UNAVAILABLE")
+    synthesis_stub["result"] = CachedSynthesis(None, "failed", needs_refresh=False)
     res = _client(app, results).get(f"/api/v1/candidates/{candidate_id}/report-data")
     assert res.status_code == 200
     body = res.json()
     assert body["synthesis_status"] == "failed"
+    assert synthesis_stub["refreshed"] == []
     assert body["executive_summary"] == ""
     assert body["strengths"] == []
     assert body["areas_to_explore"] == []
@@ -334,9 +355,62 @@ def test_report_data_falls_back_when_synthesis_fails(app, corp_id, candidate_id,
 
 def test_report_data_skipped_synthesis_status(app, corp_id, candidate_id, synthesis_stub):
     results, _gm = _full_fixture(candidate_id, corp_id)
-    synthesis_stub["result"] = (None, "skipped")
+    synthesis_stub["result"] = CachedSynthesis(None, "skipped", needs_refresh=False)
     body = _client(app, results).get(f"/api/v1/candidates/{candidate_id}/report-data").json()
     assert body["synthesis_status"] == "skipped"
+
+
+@pytest.mark.parametrize("state", ["missing", "stale"])
+def test_report_data_queues_refresh_instead_of_awaiting_gemini(
+    app, corp_id, candidate_id, synthesis_stub, state
+):
+    results, _gm = _full_fixture(candidate_id, corp_id)
+    synthesis_stub["result"] = CachedSynthesis(None, state, needs_refresh=True)
+    res = _client(app, results).get(f"/api/v1/candidates/{candidate_id}/report-data")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["synthesis_status"] == "generating"
+    assert body["executive_summary"] == ""
+    # Scores render immediately while the narrative is generated.
+    assert [b["score"] for b in body["competency_breakdown"]][1:] == [80.0, 90.0, 55.0]
+    assert synthesis_stub["refreshed"] == [candidate_id]
+
+
+def test_report_data_does_not_requeue_while_job_inflight(
+    app, corp_id, candidate_id, synthesis_stub
+):
+    results, _gm = _full_fixture(candidate_id, corp_id)
+    synthesis_stub["result"] = CachedSynthesis(None, "missing", needs_refresh=True)
+    background._ai_jobs_inflight[candidate_id] = 1
+    body = _client(app, results).get(f"/api/v1/candidates/{candidate_id}/report-data").json()
+    assert body["synthesis_status"] == "generating"
+    assert synthesis_stub["refreshed"] == []
+
+
+def test_report_data_polling_within_cooldown_reports_failed(
+    app, corp_id, candidate_id, synthesis_stub
+):
+    """A refresh that ran and still left no narrative must stop the poll loop."""
+    synthesis_stub["result"] = CachedSynthesis(None, "stale", needs_refresh=True)
+    first, _gm = _full_fixture(candidate_id, corp_id)
+    second, _gm = _full_fixture(candidate_id, corp_id)
+    first_body = _client(app, first).get(f"/api/v1/candidates/{candidate_id}/report-data").json()
+    second_body = _client(app, second).get(f"/api/v1/candidates/{candidate_id}/report-data").json()
+    assert first_body["synthesis_status"] == "generating"
+    assert second_body["synthesis_status"] == "failed"
+    assert synthesis_stub["refreshed"] == [candidate_id]
+
+
+def test_report_data_queues_technical_backfill_without_hiding_cached_narrative(
+    app, corp_id, candidate_id, synthesis_stub
+):
+    results, _gm = _full_fixture(candidate_id, corp_id)
+    synthesis_stub["result"] = CachedSynthesis(SYNTHESIS, "ok", needs_refresh=False)
+    synthesis_stub["missing_evals"] = True
+    body = _client(app, results).get(f"/api/v1/candidates/{candidate_id}/report-data").json()
+    assert body["synthesis_status"] == "ok"
+    assert body["executive_summary"] == "Strong SQL fundamentals with calm temperament."
+    assert synthesis_stub["refreshed"] == [candidate_id]
 
 
 def test_report_data_filters_localhost_logo(app, corp_id, candidate_id, synthesis_stub):

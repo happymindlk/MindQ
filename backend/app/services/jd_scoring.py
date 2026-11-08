@@ -1,7 +1,9 @@
 """MindQ Report synthesis (Gemini): narrative sections for the v5 report.
 
-Triggered after the last test is submitted (background) and again on report
-view/download (cache hit when possible). Answer keys are stripped from evidence.
+Generated only in background tasks: after the last test is submitted, and when
+a report view finds the cache missing, stale, or failed past its cooldown.
+Report views read the cache via ``read_cached`` and never wait on Gemini.
+Answer keys are stripped from evidence.
 The cache key covers the prompt version, the role brief, and the completed
 scores, so a prompt change or a re-graded assessment regenerates the synthesis.
 
@@ -17,8 +19,9 @@ import json
 import logging
 import re
 from collections.abc import Callable, Iterable
-from datetime import datetime, timezone
-from typing import Any
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -65,6 +68,29 @@ EVAL_STATUS_OK = "ok"
 EVAL_STATUS_FAILED = "failed"
 BANNED_LANGUAGE_ERROR = "banned_language_held_for_review"
 _ERROR_MAX_CHARS = 1000
+# Report polling re-reads the cache every few seconds; a failed synthesis is
+# only re-queued after this cooldown so a persistent provider outage cannot
+# turn each poll into a paid Gemini call.
+FAILED_RETRY_COOLDOWN = timedelta(minutes=5)
+
+CacheState = Literal["ok", "skipped", "missing", "stale", "failed"]
+
+
+@dataclass(frozen=True)
+class CachedSynthesis:
+    """Result of a read-only synthesis cache lookup.
+
+    Attributes:
+        narrative: Stored synthesis when ``state == "ok"``.
+        state: ``ok`` (usable), ``skipped`` (no role brief or outcomes),
+            ``missing`` (never generated), ``stale`` (scores, role, or prompt
+            changed), or ``failed`` (last attempt failed for these inputs).
+        needs_refresh: True when a background regeneration should be queued.
+    """
+
+    narrative: ReportNarrative | None
+    state: CacheState
+    needs_refresh: bool
 
 # Longest phrases first so "mood swings" / "cold-hearted" match before singles.
 _BANNED_PHRASES: tuple[str, ...] = (
@@ -628,6 +654,60 @@ def score_against_jd(
 
 
 class JdScoringService:
+    @staticmethod
+    async def read_cached(
+        session: AsyncSession,
+        *,
+        candidate: Candidate,
+        package: Package | None,
+        outcomes: list[ModuleOutcome],
+        now: datetime | None = None,
+    ) -> CachedSynthesis:
+        """Look up the stored synthesis without ever calling Gemini.
+
+        Report views use this so page loads stay database-only; generation
+        happens in ``app.services.background.refresh_report_synthesis``.
+
+        Args:
+            session: Async SQLAlchemy session.
+            candidate: Candidate being reported on.
+            package: Candidate's package (role / JD source).
+            outcomes: Module outcomes the report is rendering.
+            now: Clock override (tests).
+
+        Returns:
+            The cache state and whether a background refresh should be queued.
+        """
+        jd = resolve_job_description(package)
+        if not jd or not outcomes:
+            return CachedSynthesis(None, "skipped", needs_refresh=False)
+
+        digest = synthesis_cache_key(jd, outcomes)
+        row = (
+            await session.execute(
+                select(CandidateEvaluation).where(
+                    CandidateEvaluation.candidate_id == candidate.id
+                )
+            )
+        ).scalars().first()
+        if row is None:
+            return CachedSynthesis(None, "missing", needs_refresh=True)
+        if row.jd_hash != digest:
+            return CachedSynthesis(None, "stale", needs_refresh=True)
+        if evaluation_is_ok(row):
+            try:
+                return CachedSynthesis(
+                    ReportNarrative.model_validate(row.payload), "ok", needs_refresh=False
+                )
+            except ValidationError:
+                logger.warning("jd_scoring_cache_invalid candidate_id=%s", candidate.id)
+                return CachedSynthesis(None, "stale", needs_refresh=True)
+
+        generated_at = getattr(row, "generated_at", None)
+        current = now or datetime.now(timezone.utc)
+        cooled_down = generated_at is None or current - generated_at >= FAILED_RETRY_COOLDOWN
+        return CachedSynthesis(None, "failed", needs_refresh=cooled_down)
+
     @staticmethod
     async def get_or_evaluate(
         session: AsyncSession,

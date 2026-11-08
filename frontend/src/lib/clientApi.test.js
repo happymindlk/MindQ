@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { clientApi } from './clientApi';
-import { clearClientSession, readClientSession } from '../pages/client/client-session';
+import { clientApi, ClientAuthError } from './clientApi';
+import {
+  clearClientSession,
+  readClientSession,
+  writeClientSession,
+} from '../pages/client/client-session';
 
 function jsonResponse(body, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => body };
@@ -78,5 +82,103 @@ describe('clientApi.verifyOtp', () => {
       'Invalid or expired verification code',
     );
     expect(readClientSession()).toBeNull();
+  });
+});
+
+describe('clientApi.downloadReport', () => {
+  function pdfResponse(headers, { ok = true, status = 200 } = {}) {
+    return {
+      ok,
+      status,
+      headers: new Headers(headers),
+      blob: async () => new Blob(['%PDF'], { type: 'application/pdf' }),
+      json: async () => ({ detail: 'Candidate not found' }),
+    };
+  }
+
+  let anchor;
+
+  beforeEach(() => {
+    writeClientSession({ access_token: 'client-jwt', expires_in: 3600, corporate: { id: 'c1' } });
+    window.URL.createObjectURL = vi.fn(() => 'blob:report');
+    window.URL.revokeObjectURL = vi.fn();
+    anchor = null;
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag) => {
+      const el = createElement(tag);
+      if (tag === 'a') {
+        anchor = el;
+        vi.spyOn(el, 'click').mockImplementation(() => {});
+      }
+      return el;
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('downloads the server PDF with the client JWT and returns cache metadata', async () => {
+    fetch.mockResolvedValue(
+      pdfResponse({
+        'content-type': 'application/pdf',
+        'content-disposition':
+          'attachment; filename="MindQ Report - Pat Lee.pdf"; filename*=UTF-8\'\'MindQ%20Report%20-%20Pat%20Lee.pdf',
+        'x-report-type': 'PDF',
+        'x-report-synthesis-status': 'ok',
+        'x-report-cache': 'HIT',
+      }),
+    );
+
+    await expect(clientApi.downloadReport('cand 1')).resolves.toEqual({
+      isHtml: false,
+      synthesisStatus: 'ok',
+      cacheState: 'HIT',
+    });
+
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/client\/candidates\/cand%201\/report$/);
+    expect(init.headers.Authorization).toBe('Bearer client-jwt');
+    expect(anchor.download).toBe('MindQ Report - Pat Lee.pdf');
+    expect(anchor.href).toBe('blob:report');
+    expect(anchor.click).toHaveBeenCalledOnce();
+  });
+
+  it('reports a generating narrative and HTML fallback', async () => {
+    fetch.mockResolvedValue(
+      pdfResponse({
+        'content-type': 'text/html',
+        'x-report-type': 'HTML',
+        'x-report-synthesis-status': 'generating',
+        'x-report-cache': 'BYPASS',
+      }),
+    );
+    const result = await clientApi.downloadReport('cand-1');
+    expect(result).toEqual({ isHtml: true, synthesisStatus: 'generating', cacheState: 'BYPASS' });
+    expect(anchor.download).toBe('MindQ Report - cand-1.html');
+  });
+
+  it('clears an expired session on 401 without downloading', async () => {
+    const expired = vi.fn();
+    window.addEventListener('client-session-expired', expired);
+    fetch.mockResolvedValue(pdfResponse({}, { ok: false, status: 401 }));
+
+    await expect(clientApi.downloadReport('cand-1')).rejects.toBeInstanceOf(ClientAuthError);
+    expect(readClientSession()).toBeNull();
+    expect(expired).toHaveBeenCalledOnce();
+    expect(anchor).toBeNull();
+    window.removeEventListener('client-session-expired', expired);
+  });
+
+  it('surfaces a 404 for another tenant\'s candidate', async () => {
+    fetch.mockResolvedValue(pdfResponse({}, { ok: false, status: 404 }));
+    await expect(clientApi.downloadReport('cand-1')).rejects.toThrow('Candidate not found');
+    expect(anchor).toBeNull();
+  });
+
+  it('refuses to call the API without a session', async () => {
+    clearClientSession();
+    await expect(clientApi.downloadReport('cand-1')).rejects.toBeInstanceOf(ClientAuthError);
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

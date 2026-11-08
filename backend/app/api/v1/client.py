@@ -6,10 +6,12 @@ token's ``corporate_id``. Ops (Supabase) tokens are rejected here by design.
 """
 from __future__ import annotations
 
+import io
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,8 +45,17 @@ from app.security import (
     login_limiter,
     public_limiter,
     report_limiter,
+    report_view_limiter,
+    reports_zip_limiter,
 )
 from app.services.client_package import ClientPackageService
+from app.services.report_pdf import render_report, report_filename, serve_report_pdf
+from app.services.report_zip import (
+    ZipReportEntry,
+    pack_reports_zip,
+    unique_zip_filename,
+    zip_content_disposition,
+)
 
 logger = logging.getLogger("app.client")
 
@@ -187,6 +198,7 @@ async def client_scorecard(
 @router.get("/candidates/{candidate_id}/report-data", response_model=MindQReportResponse)
 async def client_report_data(
     candidate_id: UUID,
+    background_tasks: BackgroundTasks,
     client: ClientUserContext = Depends(get_current_client_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -197,13 +209,158 @@ async def client_report_data(
 
     Args:
         candidate_id: Candidate belonging to the caller's tenant.
+        background_tasks: Queue for narrative regeneration.
         client: Verified client JWT identity.
         db: Async database session.
 
     Returns:
         Report data with module-level psychometric scores only (no item data).
     """
-    enforce_user_rate_limit(report_limiter, client.user_id, "client_report_data")
+    enforce_user_rate_limit(report_view_limiter, client.user_id, "client_report_data")
+    candidate = await _tenant_candidate(db, client, candidate_id)
+    return await build_technical_report_data(db, candidate, background_tasks)
+
+
+@router.get("/candidates/{candidate_id}/report")
+async def client_report_pdf(
+    candidate_id: UUID,
+    background_tasks: BackgroundTasks,
+    client: ClientUserContext = Depends(get_current_client_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """Download the MindQ Report PDF, rendered and cached exactly as for admins.
+
+    Args:
+        candidate_id: Candidate belonging to the caller's tenant.
+        background_tasks: Queue for narrative regeneration and the cache upload.
+        client: Verified client JWT identity.
+        db: Async database session.
+
+    Returns:
+        PDF (or HTML fallback) attachment with ``X-Report-Cache``.
+    """
+    enforce_user_rate_limit(report_limiter, client.user_id, "client_report_pdf")
+    candidate = await _tenant_candidate(db, client, candidate_id)
+    report = await build_technical_report_data(db, candidate, background_tasks)
+    return await serve_report_pdf(
+        report,
+        corporate_id=candidate.corporate_id,
+        candidate_id=candidate.id,
+        background_tasks=background_tasks,
+        portal="client",
+    )
+
+
+@router.get("/packages/{package_id}/reports-zip")
+async def client_package_reports_zip(
+    package_id: UUID,
+    background_tasks: BackgroundTasks,
+    client: ClientUserContext = Depends(get_current_client_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """Download every completed MindQ Report in a package as one ZIP.
+
+    Uses the shared WeasyPrint + storage cache path for each candidate so the
+    ZIP bytes match single-report downloads. One request counts against the
+    bulk ZIP limiter — not once per PDF — so HR can export a round without
+    exhausting the single-report budget.
+
+    Args:
+        package_id: Published package belonging to the caller's tenant.
+        background_tasks: Queue for narrative regeneration and cache uploads.
+        client: Verified client JWT identity.
+        db: Async database session.
+
+    Returns:
+        ``application/zip`` attachment with ``X-Report-Zip-Count``.
+    """
+    enforce_user_rate_limit(reports_zip_limiter, client.user_id, "client_reports_zip")
+    try:
+        package, candidates = await ClientPackageService.get_package_completed_candidates(
+            db, package_id, client.corporate_id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProgrammingError as exc:
+        logger.exception("Client package reports ZIP lookup failed: %s", str(exc))
+        raise HTTPException(status_code=503, detail=schema_drift_detail(exc)) from exc
+
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No completed reports to download")
+
+    used_names: set[str] = set()
+    entries: list[ZipReportEntry] = []
+    failures: list[str] = []
+    for candidate in candidates:
+        try:
+            report = await build_technical_report_data(db, candidate, background_tasks)
+            rendered = await render_report(
+                report,
+                corporate_id=candidate.corporate_id,
+                candidate_id=candidate.id,
+                background_tasks=background_tasks,
+                portal="client",
+            )
+            ext = "pdf" if rendered.is_pdf else "html"
+            name = unique_zip_filename(
+                report_filename(report.candidate_full_name or candidate.full_name, ext),
+                used_names,
+            )
+            entries.append(ZipReportEntry(filename=name, content=rendered.content))
+        except Exception:
+            label = candidate.full_name or str(candidate.id)
+            failures.append(label)
+            logger.exception(
+                "client_reports_zip_entry_failed package_id=%s candidate_id=%s",
+                package_id,
+                candidate.id,
+            )
+
+    if not entries:
+        raise HTTPException(status_code=502, detail="No reports could be generated")
+
+    zip_bytes = pack_reports_zip(entries)
+    logger.info(
+        "client_reports_zip_served package_id=%s succeeded=%s failed=%s",
+        package_id,
+        len(entries),
+        len(failures),
+    )
+    return StreamingResponse(
+        io.BytesIO(zip_bytes),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": zip_content_disposition(package.title),
+            "Access-Control-Expose-Headers": (
+                "Content-Disposition, X-Report-Zip-Count, X-Report-Zip-Failed"
+            ),
+            "X-Report-Zip-Count": str(len(entries)),
+            "X-Report-Zip-Failed": str(len(failures)),
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+async def _tenant_candidate(
+    db: AsyncSession, client: ClientUserContext, candidate_id: UUID
+) -> Candidate:
+    """Load a candidate only if it belongs to the caller's tenant.
+
+    The tenant filter is part of the query, so another tenant's candidate is
+    indistinguishable from a missing one: both return 404, never 403, and
+    callers cannot probe which candidate ids exist elsewhere.
+
+    Args:
+        db: Async database session.
+        client: Verified client JWT identity (tenant-locked).
+        candidate_id: Requested candidate.
+
+    Returns:
+        The candidate row.
+
+    Raises:
+        HTTPException: 404 when the candidate is missing or in another tenant.
+    """
     candidate = (
         await db.execute(
             select(Candidate).where(
@@ -214,7 +371,7 @@ async def client_report_data(
     ).scalar_one_or_none()
     if candidate is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
-    return await build_technical_report_data(db, candidate)
+    return candidate
 
 
 @router.post(

@@ -261,6 +261,102 @@ def upload_report(
         return None
 
 
+_CACHE_KEY_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_MISSING_OBJECT_CODES = frozenset({"NoSuchKey", "404", "NotFound"})
+
+
+def _cached_report_prefix(corporate_id: UUID, candidate_id: UUID) -> str:
+    return f"{corporate_id}/{candidate_id}/"
+
+
+def _cached_report_key(corporate_id: UUID, candidate_id: UUID, cache_key: str) -> str:
+    if not _CACHE_KEY_PATTERN.fullmatch(cache_key):
+        raise ValueError("cache_key must be a lowercase SHA-256 hex digest")
+    return f"{_cached_report_prefix(corporate_id, candidate_id)}{cache_key}.pdf"
+
+
+def fetch_cached_report(corporate_id: UUID, candidate_id: UUID, cache_key: str) -> bytes | None:
+    """Read a previously rendered PDF from the private reports bucket.
+
+    Callers MUST have verified the requester may read ``candidate_id`` in
+    ``corporate_id`` before calling.
+
+    Args:
+        corporate_id: Tenant id used as the object prefix.
+        candidate_id: Candidate id used as the second path segment.
+        cache_key: ``ReportCacheKey.key`` for the report being requested.
+
+    Returns:
+        PDF bytes on a hit; None on a miss, when the bucket is unconfigured,
+        or when storage fails (callers then render fresh).
+    """
+    if not _reports_bucket_safe():
+        return None
+    key = _cached_report_key(corporate_id, candidate_id, cache_key)
+    try:
+        obj = _s3_client().get_object(Bucket=settings.R2_REPORTS_BUCKET_NAME.strip(), Key=key)
+        return obj["Body"].read()
+    except ClientError as exc:
+        code = str((exc.response or {}).get("Error", {}).get("Code") or "")
+        if code not in _MISSING_OBJECT_CODES:
+            logger.warning("Cached report read failed for %s: %s", key, exc)
+        return None
+    except (BotoCoreError, Exception) as exc:  # noqa: BLE001 - cache is best-effort
+        logger.warning("Cached report read failed for %s: %s", key, exc)
+        return None
+
+
+def store_cached_report(
+    corporate_id: UUID, candidate_id: UUID, cache_key: str, content: bytes
+) -> str | None:
+    """Store a rendered PDF and prune older versions for the same candidate.
+
+    Old versions can never be served (their keys no longer match), so pruning
+    only reclaims space; a failed prune is logged and ignored.
+
+    Args:
+        corporate_id: Tenant id used as the object prefix.
+        candidate_id: Candidate id used as the second path segment.
+        cache_key: ``ReportCacheKey.key`` the PDF was rendered from.
+        content: PDF bytes.
+
+    Returns:
+        Object key on success, or None when the bucket is unconfigured or the
+        upload fails.
+    """
+    if not _reports_bucket_safe():
+        return None
+    bucket = settings.R2_REPORTS_BUCKET_NAME.strip()
+    key = _cached_report_key(corporate_id, candidate_id, cache_key)
+    try:
+        client = _s3_client()
+        client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=content,
+            ContentType="application/pdf",
+            ContentDisposition=f'attachment; filename="report-{candidate_id}.pdf"',
+        )
+    except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - cache is best-effort
+        logger.warning("Cached report upload failed for %s: %s", key, exc)
+        return None
+
+    try:
+        listing = client.list_objects_v2(
+            Bucket=bucket, Prefix=_cached_report_prefix(corporate_id, candidate_id)
+        )
+        stale = [
+            {"Key": item["Key"]}
+            for item in listing.get("Contents", [])
+            if item.get("Key") and item["Key"] != key
+        ]
+        if stale:
+            client.delete_objects(Bucket=bucket, Delete={"Objects": stale, "Quiet": True})
+    except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - pruning is best-effort
+        logger.warning("Cached report prune failed for %s: %s", key, exc)
+    return key
+
+
 def _logo_upload_failure_detail(exc: BaseException) -> str:
     """Map an upstream storage failure to a safe, actionable client-facing detail.
 

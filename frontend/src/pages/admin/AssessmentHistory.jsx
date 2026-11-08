@@ -19,7 +19,6 @@ import Button from '../../components/ui/Button';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { adminApi, maskEmail } from '../../lib/adminApi';
 import { cachedQuery } from '../../lib/query-cache';
-import { downloadMindQReport } from '../../features/mindq-report/render-report-pdf';
 import { formatDate } from '../../lib/format-date';
 import DeadlineLabel from '../../features/package-schedule/deadline-label';
 import ExtendDeadlineModal from '../../features/package-schedule/extend-deadline-modal';
@@ -250,7 +249,7 @@ export default function AssessmentHistory() {
     setDownloadingId(candidateId);
     setError(null);
     try {
-      await downloadMindQReport(() => adminApi.getReportData(candidateId));
+      await adminApi.downloadReport(candidateId);
     } catch (err) {
       setError(err.message || 'Failed to download report');
     } finally {
