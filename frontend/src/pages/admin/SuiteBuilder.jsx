@@ -8,6 +8,7 @@ import Modal from '../../components/ui/Modal';
 import { useToast } from '../../components/ui/useToast';
 import { adminApi } from '../../lib/adminApi';
 import { friendlyErrorMessage } from '../../lib/friendly-error';
+import { cachedQuery } from '../../lib/query-cache';
 import {
   ComposerDndProvider,
   ComposerLibraryPane,
@@ -39,6 +40,10 @@ import {
   suiteDraftHasContent,
   writeSuiteDraft,
 } from '../../features/suite-builder/suite-draft-cache';
+import { CORPORATES_QUERY_KEY } from './corporates/use-corporates';
+
+/** Distinct from `admin:library-modules` — Suite Builder hits `/packages/modules`. */
+const PACKAGE_MODULES_QUERY_KEY = 'admin:package-modules';
 
 function moduleMinutes(mod) {
   const seconds = Number(mod.duration_seconds) || Number(mod.time_limit_minutes) * 60 || 0;
@@ -377,9 +382,10 @@ export default function SuiteBuilder() {
     let cancelled = false;
     (async () => {
       // allSettled: a failed company list must not also discard the module catalog.
+      // cachedQuery shares Layout hover prefetch for corporates and StrictMode remounts.
       const [modResult, corpResult] = await Promise.allSettled([
-        adminApi.listGlobalModules(),
-        adminApi.listCorporates(),
+        cachedQuery(PACKAGE_MODULES_QUERY_KEY, () => adminApi.listGlobalModules()),
+        cachedQuery(CORPORATES_QUERY_KEY, () => adminApi.listCorporates()),
       ]);
       if (cancelled) return;
       if (modResult.status === 'fulfilled') {
@@ -779,7 +785,11 @@ export default function SuiteBuilder() {
           prev.map((row, i) => (i === index ? { ...row, syncedToMaster: true } : row)),
         );
         toast({ title: 'Saved to Standard Library', variant: 'success' });
-        const refreshed = await adminApi.listGlobalModules();
+        const refreshed = await cachedQuery(
+          PACKAGE_MODULES_QUERY_KEY,
+          () => adminApi.listGlobalModules(),
+          { force: true },
+        );
         setModules(refreshed || []);
       } catch (err) {
         toast({

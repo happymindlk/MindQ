@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './api-error';
-import { BAD_RESPONSE_MESSAGE, NETWORK_ERROR_MESSAGE, apiFetch, requestJson } from './api-request';
+import {
+  BAD_RESPONSE_MESSAGE,
+  NETWORK_ERROR_MESSAGE,
+  apiFetch,
+  requestJson,
+  resetApiFetchInflight,
+} from './api-request';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -103,5 +109,54 @@ describe('requestJson', () => {
   it('returns null for 204 No Content', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
     await expect(requestJson('/api/x', { method: 'DELETE' }, 'fallback')).resolves.toBeNull();
+  });
+});
+
+describe('apiFetch inflight coalesce', () => {
+  afterEach(() => {
+    resetApiFetchInflight();
+    vi.unstubAllGlobals();
+  });
+
+  it('shares one network call across parallel identical GETs', async () => {
+    let resolveFetch: (value: Response) => void = () => undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const a = apiFetch('/api/v1/candidate/dashboard', { headers: { Authorization: 'Bearer t' } }, 'fallback');
+    const b = apiFetch('/api/v1/candidate/dashboard', { headers: { Authorization: 'Bearer t' } }, 'fallback');
+    await Promise.resolve();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveFetch(jsonResponse({ ok: true }));
+    const [ra, rb] = await Promise.all([a, b]);
+    await expect(ra.json()).resolves.toEqual({ ok: true });
+    await expect(rb.json()).resolves.toEqual({ ok: true });
+  });
+
+  it('does not coalesce POSTs', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    await Promise.all([
+      apiFetch('/api/x', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }, 'f'),
+      apiFetch('/api/x', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }, 'f'),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not coalesce when an AbortSignal is present', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    await Promise.all([
+      apiFetch('/api/x', { signal: controller.signal }, 'f'),
+      apiFetch('/api/x', { signal: controller.signal }, 'f'),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

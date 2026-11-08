@@ -1,12 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, Mail, Palette, Phone, Save, Upload } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import PageHeader from '../../components/ui/PageHeader';
+import { useCachedQuery } from '../../hooks/use-cached-query';
 import { adminApi } from '../../lib/adminApi';
 import { cacheBustUrl } from '../../lib/cache-bust-url';
-import { invalidateQuery } from '../../lib/query-cache';
+import { invalidateQuery, setQuery } from '../../lib/query-cache';
 import { CORPORATES_QUERY_KEY } from './corporates/use-corporates';
+
+/** HR branding row from Supabase (`adminApi.getCorporate`). */
+const HR_CORPORATE_QUERY_KEY = 'admin:hr-corporate';
 
 const DEFAULT_BRAND = '#7C3AED';
 const PREVIEW_CANVAS = '#0A0A0A';
@@ -264,6 +268,12 @@ export default function Corporates() {
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
+  const corporateFetcher = useCallback(() => adminApi.getCorporate(), []);
+  const {
+    data: corporateData,
+    error: loadError,
+  } = useCachedQuery(HR_CORPORATE_QUERY_KEY, corporateFetcher);
+
   const parsedColor = parseHexColor(primaryColor);
   const brandColor = parsedColor || lastValidColorRef.current;
   const colorInvalid = Boolean(primaryColor.trim()) && !parsedColor;
@@ -275,19 +285,19 @@ export default function Corporates() {
   }, [parsedColor]);
 
   useEffect(() => {
-    adminApi
-      .getCorporate()
-      .then((data) => {
-        setCorporate(data);
-        setLogoUrl(data?.logo_url || '');
-        const nextColor = parseHexColor(data?.primary_color) || DEFAULT_BRAND;
-        lastValidColorRef.current = nextColor;
-        setPrimaryColor(data?.primary_color || DEFAULT_BRAND);
-        setContactEmail(data?.contact_email || '');
-        setContactPhone(data?.contact_phone || '');
-      })
-      .catch((err) => setError(err.message));
-  }, []);
+    if (!corporateData) return;
+    setCorporate(corporateData);
+    setLogoUrl(corporateData?.logo_url || '');
+    const nextColor = parseHexColor(corporateData?.primary_color) || DEFAULT_BRAND;
+    lastValidColorRef.current = nextColor;
+    setPrimaryColor(corporateData?.primary_color || DEFAULT_BRAND);
+    setContactEmail(corporateData?.contact_email || '');
+    setContactPhone(corporateData?.contact_phone || '');
+  }, [corporateData]);
+
+  useEffect(() => {
+    if (loadError) setError(loadError);
+  }, [loadError]);
 
   const handleLogoUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -299,7 +309,11 @@ export default function Corporates() {
       // so the preview refreshes even if a CDN still has the previous object.
       const publicUrl = await adminApi.uploadCorporateLogo(corporate.id, file);
       setLogoUrl(publicUrl);
-      setCorporate((prev) => (prev ? { ...prev, logo_url: publicUrl } : prev));
+      setCorporate((prev) => {
+        const next = prev ? { ...prev, logo_url: publicUrl } : prev;
+        if (next) setQuery(HR_CORPORATE_QUERY_KEY, next);
+        return next;
+      });
       invalidateQuery(CORPORATES_QUERY_KEY);
     } catch (err) {
       setError(err.message || 'Logo upload failed');
@@ -327,6 +341,8 @@ export default function Corporates() {
         contact_phone: contactPhone || null,
       });
       setCorporate(updated);
+      setQuery(HR_CORPORATE_QUERY_KEY, updated);
+      invalidateQuery(CORPORATES_QUERY_KEY);
       setSaved(true);
     } catch (err) {
       setError(err.message);

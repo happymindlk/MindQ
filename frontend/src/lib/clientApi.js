@@ -3,7 +3,9 @@ import {
   readClientSession,
   writeClientSession,
 } from '../pages/client/client-session';
+import { ApiError } from './api-error';
 import { API_ORIGIN as API_BASE } from './api-origin';
+import { apiFetch, requestJson } from './api-request';
 import { saveAttachmentResponse, saveReportResponse } from './download-response';
 import { reportsZipFilename } from '../features/mindq-report/report-filename';
 
@@ -26,9 +28,27 @@ async function readError(res, fallback) {
 }
 
 /**
+ * Map ApiError 401 onto ClientAuthError (clear session + notify route guard).
+ *
+ * @param {unknown} err
+ * @returns {never}
+ */
+function rethrowClientAuth(err) {
+  if (err instanceof ApiError && err.status === 401) {
+    clearClientSession();
+    window.dispatchEvent(new Event('client-session-expired'));
+    throw new ClientAuthError();
+  }
+  throw err;
+}
+
+/**
  * Authenticated request against the client API using the client JWT only.
  * A 401 means the token expired or was revoked: drop it so the route guard
  * sends the user back to /client/login.
+ *
+ * JSON Content-Type is omitted on body-less GETs so browsers do not force an
+ * unnecessary CORS preflight. AbortSignal skips inflight coalesce (zip downloads).
  *
  * @param {string} path Path starting with `/api`.
  * @param {string} fallback Message used when the error body carries nothing readable.
@@ -38,24 +58,38 @@ async function readError(res, fallback) {
 async function clientRequest(path, fallback, { signal } = {}) {
   const session = readClientSession();
   if (!session) throw new ClientAuthError();
-  const res = await fetch(`${API_BASE}${path}`, {
-    signal,
-    headers: {
-      Authorization: `Bearer ${session.token}`,
-      'Content-Type': 'application/json',
-    },
-  });
-  if (res.status === 401) {
-    clearClientSession();
-    window.dispatchEvent(new Event('client-session-expired'));
-    throw new ClientAuthError();
+  try {
+    return await apiFetch(
+      `${API_BASE}${path}`,
+      {
+        signal,
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+        },
+      },
+      fallback,
+    );
+  } catch (err) {
+    rethrowClientAuth(err);
   }
-  if (!res.ok) throw new Error(await readError(res, fallback));
-  return res;
 }
 
 async function clientFetch(path, fallback) {
-  return (await clientRequest(path, fallback)).json();
+  const session = readClientSession();
+  if (!session) throw new ClientAuthError();
+  try {
+    return await requestJson(
+      `${API_BASE}${path}`,
+      {
+        headers: {
+          Authorization: `Bearer ${session.token}`,
+        },
+      },
+      fallback,
+    );
+  } catch (err) {
+    rethrowClientAuth(err);
+  }
 }
 
 /**
