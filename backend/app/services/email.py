@@ -226,6 +226,18 @@ _CODE_BOX_STYLE = (
 )
 
 
+_EMAIL_COMPANY_FOOTER = (
+    "MindQ (Pvt) Ltd<br>"
+    "Level 35, West Tower,<br>"
+    "World Trade Center,<br>"
+    "Colombo 01,<br>"
+    "Sri Lanka.<br>"
+    "For support inquiries: "
+    '<a href="mailto:support@mindqtalent.com" style="color:#6B7280;text-decoration:underline;">'
+    "support@mindqtalent.com</a>"
+)
+
+
 def _light_email_shell(body_html: str, *, origin: str | None = None) -> str:
     """Wrap ``body_html`` in the shared light-theme MindQ email shell.
 
@@ -235,7 +247,8 @@ def _light_email_shell(body_html: str, *, origin: str | None = None) -> str:
             ``frontend_origin()``.
 
     Returns:
-        Full HTML document with a light-gray wrapper, white card, and logo.
+        Full HTML document with a light-gray wrapper, white card, logo, and
+        company footer.
     """
     base = (origin or frontend_origin()).rstrip("/")
     logo_url = html.escape(f"{base}/branding/logo-light.png")
@@ -246,6 +259,9 @@ def _light_email_shell(body_html: str, *, origin: str | None = None) -> str:
       <img src="{logo_url}" alt="MindQ" style="height:32px;margin-bottom:24px;" />
       {body_html}
     </div>
+    <p style="margin:24px 0 0;text-align:center;font-size:11px;line-height:1.55;color:#9CA3AF;">
+      {_EMAIL_COMPANY_FOOTER}
+    </p>
   </div>
 </body></html>"""
 
@@ -433,23 +449,26 @@ def render_candidate_invite_html(
     corporate_name: str | None = None,
     origin: str | None = None,
     close_time: datetime | None = None,
+    candidate_first_name: str | None = None,
 ) -> str:
     """HTML for the candidate assessment invite / magic-link email.
 
     Args:
-        candidate_name: Candidate display name.
-        package_title: Assessment package title.
-        access_code: Portal access code.
+        candidate_name: Candidate display name (legacy; unused in body copy).
+        package_title: Assessment package title mapped to ``{package_name}``.
+        access_code: Portal access code (``HM-XXXXXX-C`` PIN, not a UUID).
         corporate_name: Hiring company shown in the body.
         origin: Optional frontend origin for the assessment link.
         close_time: Package assessment window end (UTC), if enforced.
+        candidate_first_name: Greeting name; defaults to ``Candidate``.
 
     Returns:
         Full HTML email document string.
     """
-    name = html.escape(candidate_name or "there")
-    title = html.escape(format_package_label(package_title))
-    company = html.escape((corporate_name or "").strip() or "Your hiring team")
+    del candidate_name  # Body uses first_name only; keep arg for call-site compat.
+    first_name = html.escape((candidate_first_name or "").strip() or "Candidate")
+    package_name = html.escape((package_title or "").strip() or "Assessment")
+    company = html.escape((corporate_name or "").strip() or "Your hiring organization")
     code = html.escape(access_code)
     link = html.escape(_assessment_invite_link(access_code, origin=origin))
     deadline_timestamp = html.escape(format_deadline_timestamp(close_time))
@@ -459,11 +478,14 @@ def render_candidate_invite_html(
         f"</p>"
     )
     body = f"""
-      <h1 style="{_HEADING_STYLE}">You're invited to complete an assessment</h1>
+      <h1 style="{_HEADING_STYLE}">You're invited to complete few assessments</h1>
       <p style="{_BODY_STYLE}margin:0 0 20px;">
-        <strong style="color:#1F2937;">{company}</strong> has invited
-        <strong style="color:#1F2937;">{name}</strong> to complete the
-        <strong style="color:#1F2937;">{title}</strong>.
+        Dear {first_name},
+      </p>
+      <p style="{_BODY_STYLE}margin:0 0 20px;">
+        Your hiring organization <strong style="color:#1F2937;">{company}</strong>
+        has requested you to complete few assessments for the role of
+        <strong style="color:#1F2937;">{package_name}</strong>.
       </p>
       {deadline_line}
       <p style="{_BODY_STYLE}margin:0 0 8px;">Your access code:</p>

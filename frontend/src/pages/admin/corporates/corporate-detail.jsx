@@ -11,6 +11,7 @@ import { friendlyErrorMessage } from '../../../lib/friendly-error';
 import CorporateLogo from './corporate-logo';
 import CorporatePackageCard from './corporate-package-card';
 import SharePackageModal from './share-package-modal';
+import ShareWithCandidatesModal from './share-with-candidates-modal';
 import ExtendDeadlineModal from '../../../features/package-schedule/extend-deadline-modal';
 import { useCorporates } from './use-corporates';
 import { useCorporatePackages } from './use-corporate-packages';
@@ -86,6 +87,8 @@ export default function CorporateDetail() {
   } = useCorporatePackages(corporateId);
   const [sharePkg, setSharePkg] = useState(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [candidateSharePkg, setCandidateSharePkg] = useState(null);
+  const [candidateShareOpen, setCandidateShareOpen] = useState(false);
   const [deadlinePkg, setDeadlinePkg] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -109,6 +112,11 @@ export default function CorporateDetail() {
     setShareOpen(true);
   }, []);
   const closeShare = useCallback(() => setShareOpen(false), []);
+  const openCandidateShare = useCallback((pkg) => {
+    setCandidateSharePkg(pkg);
+    setCandidateShareOpen(true);
+  }, []);
+  const closeCandidateShare = useCallback(() => setCandidateShareOpen(false), []);
 
   const confirmDelete = useCallback(async () => {
     if (!deleting) return;
@@ -212,6 +220,7 @@ export default function CorporateDetail() {
             pkg={pkg}
             corporateId={corporate.id}
             onShare={openShare}
+            onShareWithCandidates={openCandidateShare}
             onExtendDeadline={setDeadlinePkg}
             onDelete={setDeleting}
           />
@@ -258,6 +267,13 @@ export default function CorporateDetail() {
         pkg={sharePkg}
         corporate={corporate}
         onClose={closeShare}
+      />
+
+      <ShareWithCandidatesModal
+        isOpen={candidateShareOpen}
+        pkg={candidateSharePkg}
+        onClose={closeCandidateShare}
+        onInvited={reloadPackages}
       />
 
       <ExtendDeadlineModal

@@ -383,6 +383,23 @@ export const adminApi = {
     });
   },
 
+  /**
+   * Bulk-invite candidates to a published package. Each new email gets a unique PIN.
+   *
+   * @param {string} packageId
+   * @param {string[]} emails
+   */
+  async bulkInviteCandidates(packageId, emails) {
+    return authedJson(
+      `/api/v1/packages/${packageId}/candidates/bulk`,
+      'Failed to send candidate invites',
+      {
+        method: 'POST',
+        body: { emails },
+      },
+    );
+  },
+
   async listCorporates() {
     const rows = await authedJson('/api/v1/packages/corporates', 'Failed to load companies');
     return expectArray(rows, 'packages/corporates');

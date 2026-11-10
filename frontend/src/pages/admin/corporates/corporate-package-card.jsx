@@ -30,10 +30,11 @@ function Metric({ label, value }) {
  * @param {import('./use-corporate-packages').CorporatePackage} props.pkg
  * @param {string} props.corporateId
  * @param {(pkg: import('./use-corporate-packages').CorporatePackage) => void} props.onShare
+ * @param {(pkg: import('./use-corporate-packages').CorporatePackage) => void} [props.onShareWithCandidates]
  * @param {(pkg: import('./use-corporate-packages').CorporatePackage) => void} props.onExtendDeadline
  * @param {(pkg: import('./use-corporate-packages').CorporatePackage) => void} [props.onDelete]
  */
-function CorporatePackageCard({ pkg, corporateId, onShare, onExtendDeadline, onDelete }) {
+function CorporatePackageCard({ pkg, corporateId, onShare, onShareWithCandidates, onExtendDeadline, onDelete }) {
   const badge = STATUS_BADGE[pkg.status] ?? STATUS_BADGE.draft;
 
   return (
@@ -73,7 +74,13 @@ function CorporatePackageCard({ pkg, corporateId, onShare, onExtendDeadline, onD
         {pkg.status === 'published' && (
           <Button variant="accent" size="sm" onClick={() => onShare(pkg)}>
             <Send className="w-3.5 h-3.5" aria-hidden="true" />
-            Share Assessment
+            Share with HR
+          </Button>
+        )}
+        {pkg.status === 'published' && onShareWithCandidates && (
+          <Button variant="secondary" size="sm" onClick={() => onShareWithCandidates(pkg)}>
+            <Users className="w-3.5 h-3.5" aria-hidden="true" />
+            Share with Candidates
           </Button>
         )}
         {pkg.status === 'published' && (

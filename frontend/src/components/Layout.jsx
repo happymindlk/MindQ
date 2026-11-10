@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/useAuth';
 import BrandLogo from './BrandLogo';
+import Footer from './Footer';
 import ToastProvider from './ui/Toast';
 import ThemeToggle from './ThemeToggle';
 import UserMenu from './user-menu';
@@ -200,6 +201,7 @@ export default function Layout() {
             <RouteErrorBoundary>
               <KeepAliveOutlet patterns={ADMIN_KEEP_PATTERNS} />
             </RouteErrorBoundary>
+            <Footer />
           </main>
         </div>
       </div>

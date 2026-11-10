@@ -34,17 +34,19 @@ async def _dispatch_candidate_invite(
     corporate_name: str | None,
     origin: str,
     close_time: datetime | None = None,
+    candidate_first_name: str | None = None,
 ) -> None:
     """BackgroundTasks worker for one candidate invite; never raises silently.
 
     Args:
         candidate_email: Raw candidate address (sanitized before dispatch).
         candidate_name: Candidate display name for the email body.
-        access_code: Candidate/package access code.
+        access_code: Candidate PIN (``HM-XXXXXX-C``).
         package_title: Assessment package title.
         corporate_name: Hiring company shown in the email, if known.
         origin: Absolute frontend origin for the assessment link.
         close_time: Package assessment window end (UTC), if enforced.
+        candidate_first_name: Greeting name; defaults to ``Candidate`` in SES helper.
     """
     clean_email = clean_recipient_email(candidate_email)
     link = _assessment_invite_link(access_code, origin=origin)
@@ -63,6 +65,7 @@ async def _dispatch_candidate_invite(
             corporate_name,
             origin=origin,
             close_time=close_time,
+            candidate_first_name=candidate_first_name,
         )
     except Exception:  # noqa: BLE001 - background task: log, never propagate
         logger.exception(
@@ -154,6 +157,7 @@ async def invite_candidate(
         corporate_name=corporate.name if corporate else None,
         origin=origin,
         close_time=close_time,
+        candidate_first_name=getattr(candidate, "first_name", None),
     )
 
     return CandidateInviteResponse(

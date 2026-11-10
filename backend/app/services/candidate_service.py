@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Iterable
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 from datetime import datetime, timezone
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +18,7 @@ from app.schemas.candidate import CandidateAuthOtpVerifyRequest
 from decimal import Decimal
 
 from app.schemas.response import ResponseSave
+from app.services.package_generator import _mint_access_code
 from app.services.package_window import (
     ensure_module_launchable,
     ensure_package_open,
@@ -36,6 +37,40 @@ from app.exceptions import (
 )
 
 logger = logging.getLogger(__name__)
+
+_ACCESS_CODE_MINT_ATTEMPTS = 12
+
+
+async def _mint_unique_candidate_access_code(session: AsyncSession) -> str:
+    """Mint an ``HM-XXXXXX-C`` PIN unused by candidates or packages.
+
+    Args:
+        session: Async SQLAlchemy session.
+
+    Returns:
+        A unique access code string.
+
+    Raises:
+        RuntimeError: When a unique code cannot be minted after retries.
+    """
+    for _ in range(_ACCESS_CODE_MINT_ATTEMPTS):
+        code = _mint_access_code()
+        candidate_hit = (
+            await session.execute(
+                select(Candidate.id).where(Candidate.access_code == code).limit(1)
+            )
+        ).scalar_one_or_none()
+        if candidate_hit is not None:
+            continue
+        package_hit = (
+            await session.execute(
+                select(Package.id).where(Package.access_code == code).limit(1)
+            )
+        ).scalar_one_or_none()
+        if package_hit is not None:
+            continue
+        return code
+    raise RuntimeError("Could not mint a unique candidate access code")
 
 
 def _agent_debug_log(
@@ -409,7 +444,7 @@ class CandidateService:
             package_id=package.id,
             full_name=display,
             email=email_norm,
-            access_code=str(uuid4()),
+            access_code=await _mint_unique_candidate_access_code(session),
         )
         session.add(candidate)
         try:
