@@ -41,6 +41,10 @@ async def read_report_snapshot(
     ).scalar_one_or_none()
     if row is None:
         return None
+    # Guard against non-CandidateReport rows (e.g. mocked execute side-effects)
+    # so View Report falls through to live assembly instead of AttributeError.
+    if not hasattr(row, "payload") or not hasattr(row, "synthesis_status"):
+        return None
     # Incomplete snapshots must not short-circuit live assembly — HR still needs
     # scores while the narrative is regenerating.
     if row.synthesis_status == "generating":

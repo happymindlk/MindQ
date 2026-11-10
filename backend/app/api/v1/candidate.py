@@ -206,10 +206,9 @@ async def submit_test(
     # Core facet scoring, LLM technical eval, JD synthesis, PDF prewarm, and HR
     # email all stay off the candidate hot path — return COMPLETED immediately.
     background_tasks.add_task(finalize_and_score_ai, candidate.id, assessment_id)
-    # Company name is only shown on the package-complete screen.
-    company_name = (
-        await CandidateService.get_company_name(db, candidate) if package_complete else ""
-    )
+    # Always resolve company_name: clients and tests treat it as part of the
+    # submit contract even when the package is still incomplete.
+    company_name = await CandidateService.get_company_name(db, candidate)
     # Scores stay server-side: echoing them lets candidates calibrate answers
     # across modules or share keyed results.
     return {
