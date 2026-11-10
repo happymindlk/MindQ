@@ -1,17 +1,25 @@
-export const REPORT_WIDTH_PX = 800;
+/** Printable content width (A4 210mm minus 15mm side margins). */
+export const REPORT_WIDTH_MM = 180;
+/** ~96dpi px equivalent of 180mm — kept for raster PDF measurement. */
+export const REPORT_WIDTH_PX = Math.round((REPORT_WIDTH_MM / 25.4) * 96);
 
 const PRINT_FOOTER_HEIGHT_MM = 24;
+
+const REPORT_FONT_STACK =
+  '"MindQ Report Sans", "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+const REPORT_DISPLAY_STACK =
+  '"MindQ Report Display", "Poppins", "MindQ Report Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 export const REPORT_CSS = `
 .mindq-report {
   box-sizing: border-box;
-  width: ${REPORT_WIDTH_PX}px;
-  max-width: ${REPORT_WIDTH_PX}px;
+  width: ${REPORT_WIDTH_MM}mm;
+  max-width: ${REPORT_WIDTH_MM}mm;
   margin: 0 auto;
-  padding: 32px 32px 24px;
+  padding: 32px 0 24px;
   background: #ffffff;
   color: #111827;
-  font-family: "MindQ Report Sans", "Montserrat", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: ${REPORT_FONT_STACK};
   font-size: 13px;
   line-height: 1.5;
   text-align: left;
@@ -39,11 +47,11 @@ export const REPORT_CSS = `
 .mq-eyebrow {
   margin-bottom: 4px; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
   color: #7048E2; font-weight: 700;
-  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
+  font-family: ${REPORT_DISPLAY_STACK};
 }
 .mq-title {
   margin-bottom: 16px !important; font-size: 26px; font-weight: 700; color: #111827; line-height: 1.2;
-  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
+  font-family: ${REPORT_DISPLAY_STACK};
 }
 .mq-meta-grid { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 8px 24px; margin: 0; }
 .mq-meta-grid dt {
@@ -60,7 +68,7 @@ export const REPORT_CSS = `
 .mq-card h2, .mq-sr-col h2, .mq-section-title {
   margin-bottom: 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
   color: #111827; font-weight: 700; border-bottom: 1px solid #d1d5db; padding-bottom: 8px;
-  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
+  font-family: ${REPORT_DISPLAY_STACK};
 }
 .mq-section-title { margin-bottom: 16px; }
 
@@ -76,11 +84,11 @@ export const REPORT_CSS = `
 }
 .mq-dash-label {
   margin-bottom: 8px; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280;
-  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
+  font-family: ${REPORT_DISPLAY_STACK};
 }
 .mq-dash-value {
   font-size: 28px; font-weight: 700; color: #111827; font-variant-numeric: tabular-nums;
-  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
+  font-family: ${REPORT_DISPLAY_STACK};
 }
 
 .mq-summary { white-space: pre-wrap; color: #1f2937; }
@@ -106,12 +114,12 @@ export const REPORT_CSS = `
 }
 .mq-group-head h3 {
   font-size: 15px; font-weight: 700; color: #111827;
-  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
+  font-family: ${REPORT_DISPLAY_STACK};
 }
 .mq-avg {
   display: inline-flex; align-items: baseline; gap: 8px; font-size: 18px; font-weight: 700;
   color: #7048E2; font-variant-numeric: tabular-nums;
-  font-family: "MindQ Report Display", "Poppins", "MindQ Report Sans", "Montserrat", "Segoe UI", sans-serif;
+  font-family: ${REPORT_DISPLAY_STACK};
 }
 .mq-avg-label {
   font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #6b7280; font-weight: 600;

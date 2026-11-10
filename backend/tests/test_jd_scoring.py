@@ -507,11 +507,16 @@ def test_report_html_renders_synthesis_without_fit_or_recommendation():
     assert "AI " not in html
     assert "auto-generated MindQ report" in html
     assert "This document cannot be reproduced, edited, or redistributed" in html
-    assert 'class="entity">MindQ (Pvt.) Ltd.</span>' in html
+    assert 'class="entity mq-entity">MindQ (Pvt.) Ltd.</span>' in html
     assert "Mind Queue" not in html
     assert "not an indication of whether the candidate is a good fit" in html
     assert "This is merely an analysis of an assessment." in html
     assert "Strong quantitative pillar overall." in html
+    assert 'font-family: "Poppins"' in html
+    assert "max-width: 180mm" in html
+    assert "mq-bar-fill" in html
+    assert "mq-score-item" in html
+    assert 'size: A4 portrait' in html
 
 
 def test_report_html_omits_pillar_average_cards():
@@ -538,7 +543,7 @@ def test_report_html_skipped_synthesis():
         )
     )
     assert "needs a target role" in html
-    assert "No scored assessments" in html
+    assert "Competency scores are not available yet." in html
 
 
 def test_build_evidence_includes_benchmark_rubric():

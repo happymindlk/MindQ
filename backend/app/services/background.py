@@ -86,11 +86,10 @@ def claim_report_refresh(candidate_id: UUID, *, now: float | None = None) -> boo
 async def finalize_and_score_ai(
     candidate_id: UUID, assessment_id: UUID
 ) -> None:
-    """Backfill core scores if needed, then run Gemini technical + JD pipelines.
+    """Apply core scores, then run Gemini technical + JD pipelines.
 
-    Core facet scoring normally lands in the submit transaction. This task is
-    the safety net plus the LLM / HR side-effects that must not block the
-    candidate HTTP response.
+    Core facet scoring is deferred from the submit HTTP path so candidates
+    get a fast 200. This task persists scores then runs LLM / HR side-effects.
 
     Args:
         candidate_id: Candidate who just submitted.
@@ -114,6 +113,7 @@ async def finalize_and_score_ai(
 
     await score_ai_for_candidate(candidate_id, assessment_id)
     await notify_hr_if_package_complete(candidate_id)
+    await prewarm_report_pdf(candidate_id)
 
 
 async def notify_hr_if_package_complete(candidate_id: UUID) -> None:
@@ -257,6 +257,51 @@ async def refresh_report_synthesis(candidate_id: UUID) -> None:
                 await CandidateService.evaluate_jd_if_package_complete(session, candidate)
             except Exception:
                 logger.exception("report_synthesis_refresh_failed candidate_id=%s", candidate_id)
+    await prewarm_report_pdf(candidate_id)
+
+
+async def prewarm_report_pdf(candidate_id: UUID) -> None:
+    """Compile and cache the MindQ Report PDF once the package is complete.
+
+    Runs after scoring / synthesis so HR and candidate downloads hit storage
+    instead of waiting on WeasyPrint. No-ops when the package is incomplete or
+    the narrative is still generating (that payload would churn the cache key).
+
+    Args:
+        candidate_id: Candidate whose package may just have finished.
+    """
+    from app.api.v1.candidate_reports import build_technical_report_data
+    from app.services.report_pdf import render_and_store_report
+
+    class _NoopBackgroundTasks:
+        """Drop view-side synthesis queues; this warmer never starts new LLM work."""
+
+        def add_task(self, *_args, **_kwargs) -> None:
+            return None
+
+    try:
+        async with SessionLocal() as session:
+            candidate = await CandidateService.get_candidate(session, candidate_id)
+            if not candidate:
+                return
+            if not await CandidateService.is_package_complete(session, candidate):
+                return
+            report = await build_technical_report_data(
+                session, candidate, _NoopBackgroundTasks()
+            )
+            if report.synthesis_status == "generating":
+                logger.info(
+                    "report_pdf_prewarm_skipped_generating candidate_id=%s", candidate_id
+                )
+                return
+            await render_and_store_report(
+                report,
+                corporate_id=candidate.corporate_id,
+                candidate_id=candidate.id,
+                portal="admin",
+            )
+    except Exception:
+        logger.exception("report_pdf_prewarm_failed candidate_id=%s", candidate_id)
 
 
 async def score_jd_for_candidate(candidate_id: UUID) -> None:

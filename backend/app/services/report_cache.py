@@ -22,7 +22,7 @@ from app.schemas.mindq_report import MindQReportResponse
 
 # Bump to invalidate every cached PDF when rendering changes outside the template
 # (WeasyPrint upgrade, fonts, ReportService context).
-RENDER_VERSION = "1"
+RENDER_VERSION = "2"
 
 _TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "report.html"
 

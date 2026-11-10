@@ -1,8 +1,6 @@
-import montserrat400 from '@fontsource/montserrat/files/montserrat-latin-400-normal.woff2?url';
-import montserrat400Italic from '@fontsource/montserrat/files/montserrat-latin-400-italic.woff2?url';
-import montserrat500 from '@fontsource/montserrat/files/montserrat-latin-500-normal.woff2?url';
-import montserrat600 from '@fontsource/montserrat/files/montserrat-latin-600-normal.woff2?url';
-import montserrat700 from '@fontsource/montserrat/files/montserrat-latin-700-normal.woff2?url';
+import poppins300 from '@fontsource/poppins/files/poppins-latin-300-normal.woff2?url';
+import poppins400 from '@fontsource/poppins/files/poppins-latin-400-normal.woff2?url';
+import poppins500 from '@fontsource/poppins/files/poppins-latin-500-normal.woff2?url';
 import poppins600 from '@fontsource/poppins/files/poppins-latin-600-normal.woff2?url';
 import poppins700 from '@fontsource/poppins/files/poppins-latin-700-normal.woff2?url';
 
@@ -10,8 +8,9 @@ import poppins700 from '@fontsource/poppins/files/poppins-latin-700-normal.woff2
  * Report-private family names. The SVG rasterizer used for PDF export cannot
  * reach the app's Google Fonts stylesheet, so it silently fell back to a
  * narrower system font and the measured layout no longer matched the image.
- * Binding the report to self-hosted files under unique names lets the same
- * font binaries drive both measurement and rasterization.
+ * Binding the report to self-hosted Poppins under unique names lets the same
+ * font binaries drive both measurement and rasterization — matching the
+ * WeasyPrint template which also uses Poppins exclusively.
  */
 export const REPORT_FONT_SANS = 'MindQ Report Sans';
 export const REPORT_FONT_DISPLAY = 'MindQ Report Display';
@@ -22,11 +21,14 @@ export const REPORT_FONT_DISPLAY = 'MindQ Report Display';
 
 /** @type {ReportFontFace[]} */
 export const REPORT_FONT_FACES = [
-  { family: REPORT_FONT_SANS, weight: 400, style: 'normal', url: montserrat400 },
-  { family: REPORT_FONT_SANS, weight: 400, style: 'italic', url: montserrat400Italic },
-  { family: REPORT_FONT_SANS, weight: 500, style: 'normal', url: montserrat500 },
-  { family: REPORT_FONT_SANS, weight: 600, style: 'normal', url: montserrat600 },
-  { family: REPORT_FONT_SANS, weight: 700, style: 'normal', url: montserrat700 },
+  { family: REPORT_FONT_SANS, weight: 300, style: 'normal', url: poppins300 },
+  { family: REPORT_FONT_SANS, weight: 400, style: 'normal', url: poppins400 },
+  { family: REPORT_FONT_SANS, weight: 500, style: 'normal', url: poppins500 },
+  { family: REPORT_FONT_SANS, weight: 600, style: 'normal', url: poppins600 },
+  { family: REPORT_FONT_SANS, weight: 700, style: 'normal', url: poppins700 },
+  { family: REPORT_FONT_DISPLAY, weight: 300, style: 'normal', url: poppins300 },
+  { family: REPORT_FONT_DISPLAY, weight: 400, style: 'normal', url: poppins400 },
+  { family: REPORT_FONT_DISPLAY, weight: 500, style: 'normal', url: poppins500 },
   { family: REPORT_FONT_DISPLAY, weight: 600, style: 'normal', url: poppins600 },
   { family: REPORT_FONT_DISPLAY, weight: 700, style: 'normal', url: poppins700 },
 ];

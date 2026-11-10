@@ -347,7 +347,7 @@ export default function MindQReport({ data, logoSrc, narrativeLoading = false })
   const [firstGroup, ...restGroups] = vm.groups;
 
   return (
-    <div className="mindq-report">
+    <div className="mindq-report font-['Poppins']">
       <style data-report-fonts>{REPORT_FONT_FACE_CSS}</style>
       <style>{REPORT_CSS}</style>
 

@@ -27,6 +27,7 @@ PACKAGE = SimpleNamespace(description="Analyse sales data.", target_role="Analys
 def _isolated_job_state(monkeypatch):
     monkeypatch.setattr(background, "_ai_jobs_inflight", {})
     monkeypatch.setattr(background, "_last_view_refresh", {})
+    monkeypatch.setattr(background, "prewarm_report_pdf", AsyncMock())
 
 
 def _outcomes() -> list[ModuleOutcome]:

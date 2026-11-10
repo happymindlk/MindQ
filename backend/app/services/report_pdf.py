@@ -155,6 +155,66 @@ async def render_report(
     return rendered
 
 
+async def render_and_store_report(
+    report: MindQReportResponse,
+    *,
+    corporate_id: UUID,
+    candidate_id: UUID,
+    portal: Portal = "admin",
+) -> RenderedReport:
+    """Render (or fetch) a report PDF and persist cache hits synchronously.
+
+    Used by background warmers that have no request-scoped ``BackgroundTasks``.
+    Skips caching while ``synthesis_status == "generating"``.
+
+    Args:
+        report: Fully assembled report for an already-authorized candidate.
+        corporate_id: Candidate's tenant (storage prefix).
+        candidate_id: Candidate id (storage path segment).
+        portal: Calling portal, for telemetry only.
+
+    Returns:
+        Bytes, format, and cache outcome.
+    """
+    cache_key = report_cache_key(report)
+    cacheable = report.synthesis_status != "generating"
+
+    cached = (
+        await run_in_threadpool(
+            storage_service.fetch_cached_report, corporate_id, candidate_id, cache_key.key
+        )
+        if cacheable
+        else None
+    )
+    if cached is not None:
+        rendered = RenderedReport(content=cached, is_pdf=True, cache_state="HIT")
+    else:
+        content, is_pdf = await run_in_threadpool(
+            ReportService.generate_report_bytes,
+            report=report.model_dump(mode="json"),
+        )
+        rendered = RenderedReport(
+            content=content, is_pdf=is_pdf, cache_state="MISS" if cacheable else "BYPASS"
+        )
+        if is_pdf and cacheable:
+            await run_in_threadpool(
+                storage_service.store_cached_report,
+                corporate_id,
+                candidate_id,
+                cache_key.key,
+                content,
+            )
+    logger.info(
+        "report_pdf_warmed portal=%s candidate_id=%s cache=%s narrative_hash=%s scores_hash=%s",
+        portal,
+        candidate_id,
+        rendered.cache_state,
+        cache_key.narrative_hash[:12],
+        cache_key.scores_hash[:12],
+    )
+    return rendered
+
+
 async def serve_report_pdf(
     report: MindQReportResponse,
     *,
