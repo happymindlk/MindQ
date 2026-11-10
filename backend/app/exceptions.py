@@ -100,6 +100,16 @@ class AssessmentTimeExpiredError(Exception):
         super().__init__(self.detail)
 
 
+class AssessmentNotStartedError(Exception):
+    """Write attempted before the candidate explicitly started this module."""
+
+    code = "NOT_STARTED"
+    detail = "This assessment has not been started yet."
+
+    def __init__(self) -> None:
+        super().__init__(self.detail)
+
+
 class PackageNotOpenError(Exception):
     """Candidate activity attempted before the package's open_time."""
 

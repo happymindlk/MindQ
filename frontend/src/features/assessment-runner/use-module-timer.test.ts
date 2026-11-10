@@ -40,19 +40,22 @@ describe('useModuleTimer', () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it('resumes from the server started_at and fires onExpire exactly once', () => {
+  const clock = () => Date.now();
+
+  it('resumes from the server remaining_seconds and fires onExpire exactly once', () => {
     const onExpire = vi.fn();
     const { result } = renderHook(() =>
-      useModuleTimer({
-        durationSeconds: 180,
-        startedAt: '2026-10-05T11:58:00Z',
-        onExpire,
-      }),
+      useModuleTimer({ remainingSeconds: 60, onExpire, now: clock }),
     );
     expect(result.current.remainingSeconds).toBe(60);
 
     act(() => {
-      vi.advanceTimersByTime(61_000);
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(result.current.remainingSeconds).toBe(59);
+
+    act(() => {
+      vi.advanceTimersByTime(60_000);
     });
     expect(result.current.expired).toBe(true);
     expect(result.current.remainingSeconds).toBe(0);
@@ -62,10 +65,63 @@ describe('useModuleTimer', () => {
     expect(onExpire).toHaveBeenCalledTimes(1);
   });
 
+  it('starts a fresh 3-minute module at exactly 3:00', () => {
+    const { result } = renderHook(() => useModuleTimer({ remainingSeconds: 180, now: clock }));
+    expect(formatClock(result.current.remainingSeconds ?? -1)).toBe('3:00');
+  });
+
+  it('ignores device wall-clock jumps such as a GMT+5:30 offset', () => {
+    const onExpire = vi.fn();
+    const { result } = renderHook(() => useModuleTimer({ remainingSeconds: 180, onExpire }));
+    act(() => {
+      vi.setSystemTime(new Date('2026-10-05T17:30:00Z'));
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(result.current.remainingSeconds).toBeGreaterThanOrEqual(179);
+    expect(onExpire).not.toHaveBeenCalled();
+  });
+
+  it('fires onExpire immediately when the server reports zero remaining', () => {
+    const onExpire = vi.fn();
+    const { result } = renderHook(() =>
+      useModuleTimer({ remainingSeconds: 0, onExpire, now: clock }),
+    );
+    expect(result.current.expired).toBe(true);
+    expect(onExpire).toHaveBeenCalledTimes(1);
+  });
+
+  it('delays onExpire through the write-grace window while display stays at 0:00', () => {
+    const onExpire = vi.fn();
+    const onDisplayExpire = vi.fn();
+    const { result } = renderHook(() =>
+      useModuleTimer({
+        remainingSeconds: 0,
+        expireRemainingSeconds: 15,
+        onExpire,
+        onDisplayExpire,
+        now: clock,
+      }),
+    );
+    expect(result.current.remainingSeconds).toBe(0);
+    expect(result.current.expired).toBe(true);
+    expect(onDisplayExpire).toHaveBeenCalledTimes(1);
+    expect(onExpire).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(14_000);
+    });
+    expect(onExpire).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(onExpire).toHaveBeenCalledTimes(1);
+  });
+
   it('hard-cuts flexible timers at 00:00 and fires onExpire (no overtime)', () => {
     const onExpire = vi.fn();
     const { result } = renderHook(() =>
-      useModuleTimer({ durationSeconds: 10, startedAt: null, onExpire }),
+      useModuleTimer({ remainingSeconds: 10, onExpire, now: clock }),
     );
     act(() => {
       vi.advanceTimersByTime(15_000);
@@ -76,9 +132,7 @@ describe('useModuleTimer', () => {
   });
 
   it('returns null remaining when untimed', () => {
-    const { result } = renderHook(() =>
-      useModuleTimer({ durationSeconds: null, startedAt: null }),
-    );
+    const { result } = renderHook(() => useModuleTimer({ remainingSeconds: null }));
     expect(result.current.remainingSeconds).toBeNull();
     expect(result.current.expired).toBe(false);
   });

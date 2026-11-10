@@ -30,6 +30,41 @@ export function resolveTopDisclaimer(test: RunnerTest | Record<string, unknown>)
 }
 
 /**
+ * Seed for the module display countdown. The server's integer
+ * `remaining_seconds` is authoritative; the full duration is used only when
+ * the payload carries none (preview runs, which start at mount).
+ *
+ * @param test - Candidate or preview runner payload.
+ * @returns Seconds left, or null when the module is untimed.
+ */
+export function resolveRemainingSeconds(
+  test: Pick<RunnerTest, 'duration_seconds' | 'remaining_seconds'>,
+): number | null {
+  if (!test.duration_seconds) return null;
+  const server = test.remaining_seconds;
+  if (typeof server === 'number' && Number.isFinite(server)) return Math.max(0, Math.floor(server));
+  return test.duration_seconds;
+}
+
+/**
+ * Seed for auto-submit / write-lock expiry (duration + server grace).
+ *
+ * Falls back to the display remaining when the server omits the field
+ * (preview / older payloads).
+ *
+ * @param test - Candidate or preview runner payload.
+ * @returns Seconds until write lock, or null when untimed.
+ */
+export function resolveWriteRemainingSeconds(
+  test: Pick<RunnerTest, 'duration_seconds' | 'remaining_seconds' | 'write_remaining_seconds'>,
+): number | null {
+  if (!test.duration_seconds) return null;
+  const write = test.write_remaining_seconds;
+  if (typeof write === 'number' && Number.isFinite(write)) return Math.max(0, Math.floor(write));
+  return resolveRemainingSeconds(test);
+}
+
+/**
  * Whether the current answer lets the candidate advance.
  *
  * @param question - Runner question.

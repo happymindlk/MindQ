@@ -32,6 +32,7 @@ from app.services.scoring import ScoreResult, _extract_answer, score_assessment_
 from app.exceptions import (
     AssessmentAlreadySubmittedError,
     AssessmentNotFoundError,
+    AssessmentNotStartedError,
     AssessmentTimeExpiredError,
     UnknownQuestionError,
 )
@@ -71,35 +72,6 @@ async def _mint_unique_candidate_access_code(session: AsyncSession) -> str:
             continue
         return code
     raise RuntimeError("Could not mint a unique candidate access code")
-
-
-def _agent_debug_log(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any],
-) -> None:
-    # #region agent log
-    try:
-        import json
-        from pathlib import Path
-
-        payload = {
-            "sessionId": "5f236f",
-            "runId": "pre-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
-        }
-        path = Path(r"d:\happy-mind-psychometrics\.cursor\debug-5f236f.log")
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, default=str) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
 
 COMPLETED_STATUS = "COMPLETED"
 IN_PROGRESS_STATUS = "IN_PROGRESS"
@@ -178,7 +150,7 @@ def derive_profile_payload(
     return profile.model_dump(mode="json") if profile else None
 
 
-def _assessment_duration(assessment: Assessment) -> int | None:
+def assessment_duration_seconds(assessment: Assessment) -> int | None:
     """Resolve module duration, falling back to catalog defaults for legacy rows.
 
     Args:
@@ -217,7 +189,7 @@ def is_strict_expired(
     """
     deadline = strict_deadline(
         getattr(progress, "started_at", None) if progress else None,
-        _assessment_duration(assessment),
+        assessment_duration_seconds(assessment),
     )
     return deadline is not None and now > deadline
 
@@ -591,8 +563,8 @@ class CandidateService:
                         "description": a.description,
                         "status": status,
                         "launchable": launchable,
-                        "duration_seconds": _assessment_duration(a),
-                        "time_limit_seconds": _assessment_duration(a),
+                        "duration_seconds": assessment_duration_seconds(a),
+                        "time_limit_seconds": assessment_duration_seconds(a),
                     }
                 )
 
@@ -696,6 +668,73 @@ class CandidateService:
         return assessment
 
     @staticmethod
+    async def load_runner_context(
+        session: AsyncSession,
+        candidate: Candidate,
+        assessment_id: UUID,
+        *,
+        for_update: bool = False,
+        include_answers: bool = False,
+    ) -> tuple[Assessment, CandidateProgress | None, dict[str, Any]]:
+        """Load assessment, progress, and package window in one joined query.
+
+        Args:
+            session: Async database session.
+            candidate: Authenticated candidate.
+            assessment_id: Module being opened, started, or hydrated.
+            for_update: Lock the progress row until the caller commits.
+            include_answers: When True, also load saved answers for hydration.
+
+        Returns:
+            ``(assessment, progress, answers)``; progress is None if never opened;
+            answers is empty when ``include_answers`` is False.
+
+        Raises:
+            AssessmentNotFoundError: Module is not in the candidate's package.
+            AssessmentAlreadySubmittedError: Module is already completed.
+            PackageNotOpenError: Package has not opened yet.
+            PackageClosedError: Deadline passed and the module was never started.
+        """
+        stmt = (
+            select(
+                Assessment,
+                CandidateProgress,
+                Package.open_time,
+                Package.close_time,
+            )
+            .join(Package, Package.id == Assessment.package_id)
+            .outerjoin(
+                CandidateProgress,
+                (CandidateProgress.candidate_id == candidate.id)
+                & (CandidateProgress.assessment_id == Assessment.id),
+            )
+            .where(
+                Assessment.id == assessment_id,
+                Assessment.package_id == candidate.package_id,
+            )
+        )
+        if for_update:
+            # Serialises concurrent submit/autosave/start for one attempt.
+            stmt = stmt.with_for_update(of=CandidateProgress)
+        row = (await session.execute(stmt)).first()
+        if row is None:
+            raise AssessmentNotFoundError()
+        assessment, progress, open_time, close_time = row
+        ensure_not_submitted(progress)
+        ensure_module_launchable(
+            open_time,
+            close_time,
+            progress.started_at if progress is not None else None,
+            _utcnow(),
+        )
+        answers: dict[str, Any] = {}
+        if include_answers:
+            answers = await CandidateService.get_saved_answers(
+                session, candidate.id, assessment_id
+            )
+        return assessment, progress, answers
+
+    @staticmethod
     async def require_writable_assessment(
         session: AsyncSession,
         candidate: Candidate,
@@ -720,27 +759,9 @@ class CandidateService:
             PackageNotOpenError: Package has not opened yet.
             PackageClosedError: Deadline passed and the module was never started.
         """
-        assessment = await CandidateService.require_assessment_in_package(
-            session, candidate, assessment_id
+        assessment, progress, _ = await CandidateService.load_runner_context(
+            session, candidate, assessment_id, for_update=for_update
         )
-        progress = await CandidateService._get_progress(
-            session, candidate.id, assessment_id, for_update=for_update
-        )
-        ensure_not_submitted(progress)
-        window = (
-            await session.execute(
-                select(Package.open_time, Package.close_time).where(
-                    Package.id == candidate.package_id
-                )
-            )
-        ).first()
-        if window is not None:
-            ensure_module_launchable(
-                window.open_time,
-                window.close_time,
-                progress.started_at if progress is not None else None,
-                _utcnow(),
-            )
         return assessment, progress
 
     @staticmethod
@@ -808,22 +829,6 @@ class CandidateService:
             Progress row with ``started_at`` set.
         """
         if progress is not None and progress.started_at is not None:
-            # #region agent log
-            _agent_debug_log(
-                "C",
-                "candidate_service.py:ensure_started:resume",
-                "ensure_started no-op resume",
-                {
-                    "candidate_id": str(candidate.id),
-                    "assessment_id": str(assessment.id),
-                    "status": progress.status,
-                    "started_at": progress.started_at.isoformat()
-                    if progress.started_at
-                    else None,
-                    "started_at_tzinfo": str(getattr(progress.started_at, "tzinfo", None)),
-                },
-            )
-            # #endregion
             return progress
         if progress is None:
             progress = CandidateProgress(
@@ -846,37 +851,6 @@ class CandidateService:
             if existing is None:
                 raise
             return existing
-        # #region agent log
-        sibling_rows = (
-            await session.execute(
-                select(
-                    CandidateProgress.assessment_id,
-                    CandidateProgress.status,
-                    CandidateProgress.started_at,
-                ).where(CandidateProgress.candidate_id == candidate.id)
-            )
-        ).all()
-        _agent_debug_log(
-            "C",
-            "candidate_service.py:ensure_started:commit",
-            "ensure_started committed; sibling progress snapshot",
-            {
-                "candidate_id": str(candidate.id),
-                "started_assessment_id": str(assessment.id),
-                "started_at": progress.started_at.isoformat() if progress.started_at else None,
-                "started_at_tzinfo": str(getattr(progress.started_at, "tzinfo", None)),
-                "duration_seconds": _assessment_duration(assessment),
-                "siblings": [
-                    {
-                        "assessment_id": str(row.assessment_id),
-                        "status": row.status,
-                        "started_at": row.started_at.isoformat() if row.started_at else None,
-                    }
-                    for row in sibling_rows
-                ],
-            },
-        )
-        # #endregion
         return progress
 
     @staticmethod
@@ -884,46 +858,12 @@ class CandidateService:
         assessment, progress = await CandidateService.require_writable_assessment(
             session, candidate, save_data.assessment_id, for_update=True
         )
+        # Only POST /start may begin the clock; a save must never start a module implicitly.
+        if progress is None or progress.started_at is None:
+            raise AssessmentNotStartedError()
         if is_strict_expired(assessment, progress, _utcnow()):
             raise AssessmentTimeExpiredError()
         ensure_known_question(assessment, save_data.question_id)
-
-        if not progress:
-            # #region agent log
-            _agent_debug_log(
-                "B",
-                "candidate_service.py:autosave:create",
-                "autosave creating IN_PROGRESS progress (eager start)",
-                {
-                    "candidate_id": str(candidate.id),
-                    "assessment_id": str(assessment.id),
-                    "question_id": str(save_data.question_id),
-                },
-            )
-            # #endregion
-            progress = CandidateProgress(
-                corporate_id=candidate.corporate_id,
-                candidate_id=candidate.id,
-                assessment_id=assessment.id,
-                status="IN_PROGRESS",
-                started_at=_utcnow(),
-            )
-            session.add(progress)
-        elif progress.status == "NOT_STARTED":
-            # #region agent log
-            _agent_debug_log(
-                "B",
-                "candidate_service.py:autosave:promote",
-                "autosave promoting NOT_STARTED to IN_PROGRESS",
-                {
-                    "candidate_id": str(candidate.id),
-                    "assessment_id": str(assessment.id),
-                    "question_id": str(save_data.question_id),
-                },
-            )
-            # #endregion
-            progress.status = "IN_PROGRESS"
-            progress.started_at = _utcnow()
 
         response = (
             await session.execute(
@@ -995,11 +935,12 @@ class CandidateService:
         pending_responses: list[ResponseSave] | None = None,
         client_duration_seconds: float | None = None,
     ):
-        """Persist answers, compute core scores, and mark COMPLETED in one commit.
+        """Persist answers and mark COMPLETED; core scoring runs in background.
 
         Timed modules past their deadline still finalize, but late pending
-        answers are discarded so only work saved in time counts. LLM technical
-        eval, JD synthesis, and HR email stay on BackgroundTasks.
+        answers are discarded so only work saved in time counts. Core facet
+        scoring, LLM technical eval, JD synthesis, and HR email stay on
+        BackgroundTasks via ``finalize_and_score_ai``.
 
         Args:
             session: Async database session.
@@ -1041,22 +982,8 @@ class CandidateService:
         progress.client_duration_seconds = _elapsed_decimal(client_duration_seconds)
         if server_seconds is not None:
             progress.server_duration_seconds = _elapsed_decimal(server_seconds)
-            duration = _assessment_duration(assessment)
+            duration = assessment_duration_seconds(assessment)
             progress.overtime = bool(duration and server_seconds > duration)
-
-        # Score from the same flushed response set before commit so the HTTP
-        # round-trip still stays in the 1–2s band for typical modules.
-        responses = (
-            await session.execute(
-                select(CandidateResponse).where(
-                    CandidateResponse.candidate_id == candidate.id,
-                    CandidateResponse.assessment_id == assessment.id,
-                )
-            )
-        ).scalars().all()
-        CandidateService._apply_core_scores(
-            progress, assessment, list(responses), server_seconds
-        )
 
         try:
             await session.commit()
@@ -1161,8 +1088,7 @@ class CandidateService:
         if progress is None or progress.status != COMPLETED_STATUS:
             return None
 
-        # Idempotent: submit already wrote core scores; background retries refill
-        # only when a prior submit was interrupted before scoring landed.
+        # Idempotent: skip when a prior finalize already wrote this version.
         if progress.scoring_version == SCORING_VERSION and progress.score_details is not None:
             return progress
 

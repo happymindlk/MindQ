@@ -14,10 +14,15 @@ import {
   isAnswered,
   isAttemptLocked,
   isTimeExpired,
+  resolveRemainingSeconds,
   resolveTopDisclaimer,
+  resolveWriteRemainingSeconds,
 } from './runner-logic';
 import { formatClock, timerTone, useModuleTimer } from './use-module-timer';
 import { useQuestionTelemetry } from './use-question-telemetry';
+
+/** Leading-edge guard against rapid Next / confirm double-clicks. */
+const NAV_DEBOUNCE_MS = 300;
 
 function blockClipboard(event: ClipboardEvent | MouseEvent) {
   event.preventDefault();
@@ -83,6 +88,16 @@ export function AssessmentRunner({
   const dirtyRef = useRef<Set<string>>(new Set());
   const inFlightSaveRef = useRef<Set<string>>(new Set());
   const submittedRef = useRef(false);
+  const lastAdvanceAtRef = useRef(0);
+  const lastOpenConfirmAtRef = useRef(0);
+  const lastConfirmSubmitAtRef = useRef(0);
+
+  const allowAction = useCallback((stampRef: { current: number }) => {
+    const now = performance.now();
+    if (now - stampRef.current < NAV_DEBOUNCE_MS) return false;
+    stampRef.current = now;
+    return true;
+  }, []);
 
   const submit = useCallback(
     async (reason: 'manual' | 'expired') => {
@@ -126,11 +141,17 @@ export function AssessmentRunner({
     void submit('expired');
   }, [submit]);
 
+  const onDisplayExpire = useCallback(() => {
+    setTimeUp(true);
+  }, []);
+
   const timer = useModuleTimer({
-    durationSeconds: test.duration_seconds,
-    startedAt: test.started_at,
+    remainingSeconds: resolveRemainingSeconds(test),
+    expireRemainingSeconds: resolveWriteRemainingSeconds(test),
     onExpire,
-    enabled: !timeUp,
+    onDisplayExpire,
+    // Stay enabled through the grace window after display hits 0:00.
+    enabled: !submittedRef.current,
   });
 
   const saveQuestion = useCallback(
@@ -227,13 +248,25 @@ export function AssessmentRunner({
     setIndex(Math.max(0, Math.min(questions.length - 1, nextIndex)));
   };
 
+  const handlePrev = () => {
+    go(index - 1);
+  };
+
   const handleNext = () => {
     if (index === questions.length - 1) {
+      // Separate stamp so advance → open-confirm is never blocked.
+      if (!allowAction(lastOpenConfirmAtRef)) return;
       flushDirtyInBackground();
       setConfirmOpen(true);
       return;
     }
+    if (!allowAction(lastAdvanceAtRef)) return;
     go(index + 1);
+  };
+
+  const handleConfirmSubmit = () => {
+    if (!allowAction(lastConfirmSubmitAtRef)) return;
+    void submit('manual');
   };
 
   const answeredCount = useMemo(
@@ -394,7 +427,7 @@ export function AssessmentRunner({
           <div className="flex items-center justify-between">
             <button
               type="button"
-              onClick={() => go(index - 1)}
+              onClick={handlePrev}
               disabled={index === 0 || timeUp || submitting}
               className="inline-flex h-10 items-center gap-1 rounded-md px-3 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-surface-raised hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -478,7 +511,7 @@ export function AssessmentRunner({
               </button>
               <button
                 type="button"
-                onClick={() => void submit('manual')}
+                onClick={handleConfirmSubmit}
                 disabled={submitting}
                 aria-busy={submitting || undefined}
                 className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-fg hover:bg-primary-hover disabled:opacity-50"

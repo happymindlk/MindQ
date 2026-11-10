@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -81,6 +81,74 @@ def strict_deadline(
     return started_at + timedelta(seconds=int(duration_seconds) + grace_seconds)
 
 
+def remaining_seconds(
+    started_at: datetime | None,
+    duration_seconds: int | None,
+    now: datetime,
+) -> int | None:
+    """Server-authoritative display countdown for one module attempt.
+
+    The client seeds its visible clock from this integer instead of diffing
+    ``started_at`` against its own wall clock, so client clock drift or
+    timezone handling can never shorten or extend the displayed limit.
+    Does not include the write-grace window — see ``write_remaining_seconds``.
+
+    Args:
+        started_at: When this module's attempt started; None if not started.
+        duration_seconds: Effective module duration; None/0 when untimed.
+        now: Current UTC instant.
+
+    Returns:
+        Whole seconds left (clamped at 0), the full duration when not started,
+        or None when the module is untimed.
+    """
+    if not duration_seconds:
+        return None
+    if started_at is None:
+        return int(duration_seconds)
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    elapsed = (now - started_at).total_seconds()
+    return max(0, int(duration_seconds - elapsed))
+
+
+def write_remaining_seconds(
+    started_at: datetime | None,
+    duration_seconds: int | None,
+    now: datetime,
+    *,
+    grace_seconds: int = STRICT_GRACE_SECONDS,
+) -> int | None:
+    """Seconds left until the server write lock (duration + grace).
+
+    The client seeds auto-submit / expire from this value so resume during the
+    post-duration grace window does not instant-submit while autosave still
+    succeeds.
+
+    Args:
+        started_at: When this module's attempt started; None if not started.
+        duration_seconds: Effective module duration; None/0 when untimed.
+        now: Current UTC instant.
+        grace_seconds: Same allowance as ``strict_deadline``.
+
+    Returns:
+        Whole seconds until write lock (clamped at 0), the full
+        duration+grace when not started, or None when untimed.
+    """
+    if not duration_seconds:
+        return None
+    if started_at is None:
+        return int(duration_seconds) + int(grace_seconds)
+    deadline = strict_deadline(
+        started_at, duration_seconds, grace_seconds=grace_seconds
+    )
+    if deadline is None:
+        return None
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return max(0, int((deadline - now).total_seconds()))
+
+
 def build_runner_payload(
     *,
     assessment_id: UUID,
@@ -99,6 +167,7 @@ def build_runner_payload(
     top_disclaimer_text: str | None = None,
     show_confidentiality_notice: bool = False,
     confidentiality_notice_text: str | None = None,
+    now: datetime | None = None,
 ) -> CandidateTestResponse:
     """Assemble the sanitized test payload served to the candidate runner.
 
@@ -120,6 +189,7 @@ def build_runner_payload(
         top_disclaimer_text: Module top disclaimer wording.
         show_confidentiality_notice: Whether the confidentiality notice renders.
         confidentiality_notice_text: Confidentiality notice wording.
+        now: Current UTC instant for countdown fields; defaults to now.
 
     Returns:
         Typed payload; ``CandidateQuestion`` drops every non-allowlisted key.
@@ -128,6 +198,7 @@ def build_runner_payload(
     if shuffle:
         safe = shuffle_questions(safe, seed)
     duration = effective_duration_seconds(duration_seconds, time_limit_minutes)
+    clock_now = now or datetime.now(timezone.utc)
     return CandidateTestResponse.model_validate(
         {
             "id": assessment_id,
@@ -144,6 +215,10 @@ def build_runner_payload(
             "confidentiality_notice_text": confidentiality_notice_text
             or DEFAULT_CONFIDENTIALITY_NOTICE_TEXT,
             "started_at": started_at,
+            "remaining_seconds": remaining_seconds(started_at, duration, clock_now),
+            "write_remaining_seconds": write_remaining_seconds(
+                started_at, duration, clock_now
+            ),
             "questions": safe,
             "answers": answers or {},
         }
