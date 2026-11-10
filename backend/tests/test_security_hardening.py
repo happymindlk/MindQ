@@ -391,7 +391,9 @@ def test_report_fetcher_allows_template_assets_and_logo_cdn(monkeypatch):
         report_service, "settings", SimpleNamespace(r2_public_base="https://cdn.example.com", SUPABASE_URL="")
     )
     template_file = Path(report_service.TEMPLATE_DIR, "report.html").resolve().as_uri()
+    font_file = Path(report_service.FONTS_DIR, "Poppins-Regular.ttf").resolve().as_uri()
     report_service.assert_report_url_allowed(template_file)
+    report_service.assert_report_url_allowed(font_file)
     report_service.assert_report_url_allowed("https://cdn.example.com/logos/acme/logo.png")
     report_service.assert_report_url_allowed("data:image/png;base64,iVBORw0KGgo=")
 

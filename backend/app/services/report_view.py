@@ -65,6 +65,27 @@ def bar_width(score: float | None) -> float:
     return max(0.0, min(100.0, float(score)))
 
 
+def facet_position_pct(facet: dict[str, Any]) -> float | None:
+    """Resolve a 0–100 bar value for one subscale row.
+
+    Prefers ``position_pct``. When missing, maps a Likert ``mean`` on the
+    default 1–5 scale so Mini-IPIP / HEXACO facets still render progress bars.
+
+    Args:
+        facet: Subscale dict from the report payload.
+
+    Returns:
+        Percent for the bar fill, or None when neither field is usable.
+    """
+    pct = as_number(facet.get("position_pct"))
+    if pct is not None:
+        return pct
+    mean = as_number(facet.get("mean"))
+    if mean is None:
+        return None
+    return bar_width((mean - 1.0) / 4.0 * 100.0)
+
+
 def _normalize_name(value: str) -> str:
     lowered = value.lower()
     lowered = _FILLER_WORDS.sub("", lowered)
@@ -122,11 +143,12 @@ def _to_breakdown_rows(raw: Any) -> list[dict[str, Any]]:
             name = str(sub.get("name") or "").strip()
             if not name:
                 continue
+            position_pct = facet_position_pct(sub)
             parsed_subscales.append(
                 {
                     "name": name,
                     "mean": as_number(sub.get("mean")),
-                    "position_pct": as_number(sub.get("position_pct")),
+                    "position_pct": position_pct,
                     "band": (
                         str(sub.get("band_label") or sub.get("band") or "").strip() or None
                     ),
@@ -183,7 +205,13 @@ def _to_breakdown_rows(raw: Any) -> list[dict[str, Any]]:
                         "score": score,
                     }
                 ),
-                "summary": str(item.get("performance_summary") or "").strip(),
+                # When facet bars are present, drop the prose trait-list summary
+                # ("Extraversion Average; …") so the PDF shows progress bars only.
+                "summary": (
+                    ""
+                    if subscales
+                    else str(item.get("performance_summary") or "").strip()
+                ),
                 "subscales": [
                     {
                         **facet,

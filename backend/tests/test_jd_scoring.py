@@ -517,6 +517,9 @@ def test_report_html_renders_synthesis_without_fit_or_recommendation():
     assert "mq-bar-fill" in html
     assert "mq-score-item" in html
     assert 'size: A4 portrait' in html
+    assert "file:///" in html and "Poppins-Regular.ttf" in html
+    assert "support@mindqtalent.com" in html
+    assert "World Trade Center, Colombo 01" in html
 
 
 def test_report_html_omits_pillar_average_cards():
@@ -526,6 +529,53 @@ def test_report_html_omits_pillar_average_cards():
     assert "N/A" not in html
     assert "Personality" not in html
     assert "62.5%" not in html
+
+
+def test_report_html_hides_company_name_when_logo_present(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "app.services.report_service.settings",
+        SimpleNamespace(r2_public_base="https://cdn.example.com", SUPABASE_URL=""),
+    )
+    html = ReportService.render_report_html(
+        _report(
+            company_name="Happy Mind",
+            company_logo_url="https://cdn.example.com/logos/happy-mind.png",
+        )
+    )
+    assert 'class="mq-client-name"' not in html
+    assert "Happy Mind" not in html
+    assert "https://cdn.example.com/logos/happy-mind.png" in html
+
+
+def test_report_html_renders_mini_ipip_subscale_bars():
+    html = ReportService.render_report_html(
+        _report(
+            competency_breakdown=[
+                {
+                    "category": "Personality",
+                    "assessment_name": "Mini-IPIP",
+                    "score": 70,
+                    "performance_summary": "Pat completed Mini-IPIP (Extraversion Average).",
+                    "subscales": [
+                        {
+                            "name": "Extraversion",
+                            "position_pct": 60,
+                            "band_label": "Average",
+                        },
+                        {"name": "Agreeableness", "mean": 5.0, "band_label": "High"},
+                    ],
+                }
+            ],
+            category_summaries=[],
+        )
+    )
+    assert "Extraversion" in html
+    assert "mq-bar-fill" in html
+    assert "60%" in html
+    assert "100%" in html
+    assert "Pat completed Mini-IPIP" not in html
 
 
 def test_report_html_skipped_synthesis():
