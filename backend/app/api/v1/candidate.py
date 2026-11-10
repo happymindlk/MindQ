@@ -118,6 +118,33 @@ async def start_test(
     db: AsyncSession = Depends(get_db),
 ):
     """Mark the module ``IN_PROGRESS`` and start the countdown after explicit consent."""
+    # #region agent log
+    try:
+        import json as _agent_json
+        import time as _agent_time
+
+        with open(
+            r"d:\happy-mind-psychometrics\.cursor\debug-e80153.log",
+            "a",
+            encoding="utf-8",
+        ) as _agent_f:
+            _agent_f.write(
+                _agent_json.dumps(
+                    {
+                        "sessionId": "e80153",
+                        "runId": "post-fix",
+                        "hypothesisId": "H1",
+                        "location": "candidate.py:start_test:entry",
+                        "message": "POST /start entered",
+                        "data": {"assessment_id": str(assessment_id)},
+                        "timestamp": int(_agent_time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     try:
         assessment, progress = await CandidateService.require_writable_assessment(
             db, candidate, assessment_id, for_update=True
@@ -130,6 +157,38 @@ async def start_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
+
+    # #region agent log
+    try:
+        import json as _agent_json
+        import time as _agent_time
+
+        with open(
+            r"d:\happy-mind-psychometrics\.cursor\debug-e80153.log",
+            "a",
+            encoding="utf-8",
+        ) as _agent_f:
+            _agent_f.write(
+                _agent_json.dumps(
+                    {
+                        "sessionId": "e80153",
+                        "runId": "post-fix",
+                        "hypothesisId": "H1",
+                        "location": "candidate.py:start_test:success",
+                        "message": "POST /start succeeded",
+                        "data": {
+                            "assessment_id": str(assessment_id),
+                            "status": getattr(progress, "status", None),
+                            "has_started_at": getattr(progress, "started_at", None) is not None,
+                        },
+                        "timestamp": int(_agent_time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
 
     now = datetime.now(timezone.utc)
     duration = assessment_duration_seconds(assessment)

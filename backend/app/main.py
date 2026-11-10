@@ -305,6 +305,41 @@ async def database_error_handler(request: Request, exc: SQLAlchemyError):
         if schema_drift
         else "Database temporarily unavailable. Please retry."
     )
+    # #region agent log
+    try:
+        import json as _agent_json
+        import time as _agent_time
+
+        with open(
+            r"d:\happy-mind-psychometrics\.cursor\debug-e80153.log",
+            "a",
+            encoding="utf-8",
+        ) as _agent_f:
+            _agent_f.write(
+                _agent_json.dumps(
+                    {
+                        "sessionId": "e80153",
+                        "runId": "post-fix",
+                        "hypothesisId": "H1",
+                        "location": "main.py:database_error_handler",
+                        "message": "mapped SQLAlchemy error to 503",
+                        "data": {
+                            "error_class": error_class,
+                            "path": request.url.path,
+                            "method": request.method,
+                            "exc_type": type(exc).__name__,
+                            "exc_text": str(exc)[:400],
+                            "driver_text": str(orig)[:400] if orig else None,
+                            "pg_sqlstate": getattr(orig, "sqlstate", None),
+                        },
+                        "timestamp": int(_agent_time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
     # The type names and raw driver text go in the message itself, not only
     # `extra`: the DEBUG text formatter ignores `extra`, so schema mismatches
     # must be diagnosable from a plain uvicorn.log line. Statement parameters

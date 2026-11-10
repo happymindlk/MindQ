@@ -713,13 +713,83 @@ class CandidateService:
                 Assessment.package_id == candidate.package_id,
             )
         )
-        if for_update:
-            # Serialises concurrent submit/autosave/start for one attempt.
-            stmt = stmt.with_for_update(of=CandidateProgress)
+        # Never attach FOR UPDATE to this OUTER JOIN. Postgres rejects locking
+        # the nullable side (`FOR UPDATE cannot be applied to the nullable side
+        # of an outer join`, SQLSTATE 0A000), which surfaced as a generic 503
+        # on POST /start for first-time attempts (no progress row yet).
         row = (await session.execute(stmt)).first()
         if row is None:
             raise AssessmentNotFoundError()
         assessment, progress, open_time, close_time = row
+        # #region agent log
+        try:
+            import json as _agent_json
+            import time as _agent_time
+
+            with open(
+                r"d:\happy-mind-psychometrics\.cursor\debug-e80153.log",
+                "a",
+                encoding="utf-8",
+            ) as _agent_f:
+                _agent_f.write(
+                    _agent_json.dumps(
+                        {
+                            "sessionId": "e80153",
+                            "runId": "post-fix",
+                            "hypothesisId": "H1",
+                            "location": "candidate_service.py:load_runner_context",
+                            "message": "runner context loaded without join FOR UPDATE",
+                            "data": {
+                                "for_update": for_update,
+                                "has_progress": progress is not None,
+                                "assessment_id": str(assessment_id),
+                            },
+                            "timestamp": int(_agent_time.time() * 1000),
+                        }
+                    )
+                    + "\n"
+                )
+        except Exception:
+            pass
+        # #endregion
+        if for_update and progress is not None:
+            # Lock the progress row in a separate query so concurrent
+            # start/autosave/submit still serialize when a row exists.
+            # Missing-row races on first start are handled by the unique
+            # constraint + IntegrityError path in ensure_started.
+            progress = await CandidateService._get_progress(
+                session, candidate.id, assessment_id, for_update=True
+            )
+            # #region agent log
+            try:
+                import json as _agent_json
+                import time as _agent_time
+
+                with open(
+                    r"d:\happy-mind-psychometrics\.cursor\debug-e80153.log",
+                    "a",
+                    encoding="utf-8",
+                ) as _agent_f:
+                    _agent_f.write(
+                        _agent_json.dumps(
+                            {
+                                "sessionId": "e80153",
+                                "runId": "post-fix",
+                                "hypothesisId": "H1",
+                                "location": "candidate_service.py:load_runner_context:lock",
+                                "message": "progress locked via separate FOR UPDATE",
+                                "data": {
+                                    "locked": progress is not None,
+                                    "status": getattr(progress, "status", None),
+                                },
+                                "timestamp": int(_agent_time.time() * 1000),
+                            }
+                        )
+                        + "\n"
+                    )
+            except Exception:
+                pass
+            # #endregion
         ensure_not_submitted(progress)
         ensure_module_launchable(
             open_time,
