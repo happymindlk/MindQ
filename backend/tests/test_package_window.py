@@ -326,6 +326,82 @@ async def test_require_writable_allows_in_progress_module_after_deadline():
     assert result == (assessment, progress)
 
 
+@pytest.mark.asyncio
+async def test_load_runner_context_locks_progress_without_outer_join_for_update():
+    """Postgres rejects FOR UPDATE on the nullable side of an OUTER JOIN.
+
+    First-time /start (no progress row) used to 503 with that error when the
+    joined query carried ``with_for_update(of=CandidateProgress)``. Locking must
+    happen in a separate progress SELECT only when a row already exists.
+    """
+    from sqlalchemy.dialects import postgresql
+
+    candidate = SimpleNamespace(id=uuid4(), package_id=uuid4())
+    assessment_id = uuid4()
+    assessment = SimpleNamespace(id=assessment_id, package_id=candidate.package_id)
+    progress = SimpleNamespace(
+        id=uuid4(),
+        status="NOT_STARTED",
+        started_at=None,
+        candidate_id=candidate.id,
+        assessment_id=assessment_id,
+    )
+    locked = SimpleNamespace(
+        id=progress.id,
+        status="NOT_STARTED",
+        started_at=None,
+        candidate_id=candidate.id,
+        assessment_id=assessment_id,
+    )
+
+    join_result = MagicMock()
+    join_result.first.return_value = (assessment, progress, None, None)
+    lock_result = MagicMock()
+    lock_result.scalars.return_value.first.return_value = locked
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[join_result, lock_result])
+
+    loaded = await CandidateService.load_runner_context(
+        session, candidate, assessment_id, for_update=True
+    )
+    assert loaded[0] is assessment
+    assert loaded[1] is locked
+
+    first_stmt = session.execute.await_args_list[0].args[0]
+    compiled = str(
+        first_stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": False})
+    ).lower()
+    assert "left outer join" in compiled or "left join" in compiled
+    assert "for update" not in compiled
+
+    second_stmt = session.execute.await_args_list[1].args[0]
+    compiled_lock = str(
+        second_stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": False})
+    ).lower()
+    assert "for update" in compiled_lock
+    assert "left outer join" not in compiled_lock and "left join" not in compiled_lock
+
+
+@pytest.mark.asyncio
+async def test_load_runner_context_skips_lock_when_progress_missing():
+    candidate = SimpleNamespace(id=uuid4(), package_id=uuid4())
+    assessment_id = uuid4()
+    assessment = SimpleNamespace(id=assessment_id, package_id=candidate.package_id)
+
+    join_result = MagicMock()
+    join_result.first.return_value = (assessment, None, None, None)
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=join_result)
+
+    loaded = await CandidateService.load_runner_context(
+        session, candidate, assessment_id, for_update=True
+    )
+    assert loaded[0] is assessment
+    assert loaded[1] is None
+    assert session.execute.await_count == 1
+
+
 # --- candidate dashboard ---------------------------------------------------------
 
 
