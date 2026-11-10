@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 from app.database import run_db_op_with_retry
 from app.models.candidate import Candidate
 from app.models.corporate import Corporate
@@ -675,6 +676,7 @@ class CandidateService:
         *,
         for_update: bool = False,
         include_answers: bool = False,
+        include_questions: bool = True,
     ) -> tuple[Assessment, CandidateProgress | None, dict[str, Any]]:
         """Load assessment, progress, and package window in one joined query.
 
@@ -684,6 +686,8 @@ class CandidateService:
             assessment_id: Module being opened, started, or hydrated.
             for_update: Lock the progress row until the caller commits.
             include_answers: When True, also load saved answers for hydration.
+            include_questions: When False, defer the questions JSONB blob so
+                lightweight paths (``POST /start``) avoid shipping the bank.
 
         Returns:
             ``(assessment, progress, answers)``; progress is None if never opened;
@@ -713,6 +717,10 @@ class CandidateService:
                 Assessment.package_id == candidate.package_id,
             )
         )
+        # Questions are already a pre-bundled JSONB column — defer them when the
+        # caller only needs timer metadata so Supavisor does not ship the bank.
+        if not include_questions:
+            stmt = stmt.options(defer(Assessment.questions))
         # Never attach FOR UPDATE to this OUTER JOIN. Postgres rejects locking
         # the nullable side (`FOR UPDATE cannot be applied to the nullable side
         # of an outer join`, SQLSTATE 0A000), which surfaced as a generic 503
@@ -721,37 +729,6 @@ class CandidateService:
         if row is None:
             raise AssessmentNotFoundError()
         assessment, progress, open_time, close_time = row
-        # #region agent log
-        try:
-            import json as _agent_json
-            import time as _agent_time
-
-            with open(
-                r"d:\happy-mind-psychometrics\.cursor\debug-e80153.log",
-                "a",
-                encoding="utf-8",
-            ) as _agent_f:
-                _agent_f.write(
-                    _agent_json.dumps(
-                        {
-                            "sessionId": "e80153",
-                            "runId": "post-fix",
-                            "hypothesisId": "H1",
-                            "location": "candidate_service.py:load_runner_context",
-                            "message": "runner context loaded without join FOR UPDATE",
-                            "data": {
-                                "for_update": for_update,
-                                "has_progress": progress is not None,
-                                "assessment_id": str(assessment_id),
-                            },
-                            "timestamp": int(_agent_time.time() * 1000),
-                        }
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion
         if for_update and progress is not None:
             # Lock the progress row in a separate query so concurrent
             # start/autosave/submit still serialize when a row exists.
@@ -760,36 +737,6 @@ class CandidateService:
             progress = await CandidateService._get_progress(
                 session, candidate.id, assessment_id, for_update=True
             )
-            # #region agent log
-            try:
-                import json as _agent_json
-                import time as _agent_time
-
-                with open(
-                    r"d:\happy-mind-psychometrics\.cursor\debug-e80153.log",
-                    "a",
-                    encoding="utf-8",
-                ) as _agent_f:
-                    _agent_f.write(
-                        _agent_json.dumps(
-                            {
-                                "sessionId": "e80153",
-                                "runId": "post-fix",
-                                "hypothesisId": "H1",
-                                "location": "candidate_service.py:load_runner_context:lock",
-                                "message": "progress locked via separate FOR UPDATE",
-                                "data": {
-                                    "locked": progress is not None,
-                                    "status": getattr(progress, "status", None),
-                                },
-                                "timestamp": int(_agent_time.time() * 1000),
-                            }
-                        )
-                        + "\n"
-                    )
-            except Exception:
-                pass
-            # #endregion
         ensure_not_submitted(progress)
         ensure_module_launchable(
             open_time,
@@ -811,6 +758,7 @@ class CandidateService:
         assessment_id: UUID,
         *,
         for_update: bool = False,
+        include_questions: bool = True,
     ) -> tuple[Assessment, CandidateProgress | None]:
         """Assessment must belong to the package, be unsubmitted, and be inside the window.
 
@@ -819,6 +767,8 @@ class CandidateService:
             candidate: Authenticated candidate.
             assessment_id: Module being opened, autosaved, or submitted.
             for_update: Lock the progress row until the caller commits.
+            include_questions: When False, skip loading the questions JSONB
+                (safe for ``POST /start``, which only arms the timer).
 
         Returns:
             ``(assessment, progress)``; progress is None if never opened.
@@ -830,7 +780,11 @@ class CandidateService:
             PackageClosedError: Deadline passed and the module was never started.
         """
         assessment, progress, _ = await CandidateService.load_runner_context(
-            session, candidate, assessment_id, for_update=for_update
+            session,
+            candidate,
+            assessment_id,
+            for_update=for_update,
+            include_questions=include_questions,
         )
         return assessment, progress
 

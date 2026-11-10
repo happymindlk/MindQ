@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, MouseEvent, ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, WifiOff } from 'lucide-react';
+import { AlarmClock, Check, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, WifiOff } from 'lucide-react';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import { MarkdownText } from '../assessment-builder/components/markdown-preview';
 import type { AnswerValue, ResponseSavePayload, ResponseSubmitPayload } from '../assessment-builder/types/telemetry';
@@ -88,9 +88,12 @@ export function AssessmentRunner({
   const dirtyRef = useRef<Set<string>>(new Set());
   const inFlightSaveRef = useRef<Set<string>>(new Set());
   const submittedRef = useRef(false);
+  const timerStopRef = useRef<(() => void) | null>(null);
   const lastAdvanceAtRef = useRef(0);
   const lastOpenConfirmAtRef = useRef(0);
   const lastConfirmSubmitAtRef = useRef(0);
+  const stepperRef = useRef<HTMLDivElement>(null);
+  const activeStepRef = useRef<HTMLButtonElement>(null);
 
   const allowAction = useCallback((stampRef: { current: number }) => {
     const now = performance.now();
@@ -101,8 +104,12 @@ export function AssessmentRunner({
 
   const submit = useCallback(
     async (reason: 'manual' | 'expired') => {
+      // Idempotency lock: reject concurrent autoSubmit while a submit is in flight.
       if (submittedRef.current) return;
       submittedRef.current = true;
+      // Freeze the countdown immediately (before the network round-trip) so a
+      // near-zero tick cannot race the in-flight manual submit.
+      timerStopRef.current?.();
       setSubmitting(true);
       setSubmitError(null);
       try {
@@ -150,9 +157,10 @@ export function AssessmentRunner({
     expireRemainingSeconds: resolveWriteRemainingSeconds(test),
     onExpire,
     onDisplayExpire,
-    // Stay enabled through the grace window after display hits 0:00.
-    enabled: !submittedRef.current,
+    // State-driven enable so React tears down the interval as soon as submit starts.
+    enabled: !submitting,
   });
+  timerStopRef.current = timer.stop;
 
   const saveQuestion = useCallback(
     async (questionId: string) => {
@@ -274,6 +282,13 @@ export function AssessmentRunner({
     [answers, questions],
   );
 
+  useEffect(() => {
+    const el = activeStepRef.current;
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }, [index]);
+
   if (!current) return null;
 
   const value = answers[current.id];
@@ -283,6 +298,7 @@ export function AssessmentRunner({
   const tone = remaining !== null && test.duration_seconds ? timerTone(remaining, test.duration_seconds) : 'safe';
   const warning = tone === 'urgent' && remaining !== null && remaining > 0;
   const mediaSrc = resolveAssessmentMediaUrl(current.media_url);
+  const questionLabel = `Question ${index + 1} of ${questions.length}`;
 
   return (
     <div className="relative mx-auto w-full max-w-2xl space-y-4 py-6">
@@ -310,7 +326,7 @@ export function AssessmentRunner({
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-3">
+      <div className="sticky top-0 z-30 -mx-1 flex items-center justify-between gap-3 rounded-lg border border-border/80 bg-canvas/95 px-2 py-2.5 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-canvas/80 sm:mx-0 sm:px-3">
         <button
           type="button"
           onClick={() => {
@@ -329,15 +345,15 @@ export function AssessmentRunner({
               aria-live={warning ? 'assertive' : 'off'}
               aria-label="Time remaining"
               data-tone={tone}
-              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-mono text-sm tabular-nums transition-colors duration-300 ${
+              className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 font-mono text-xl font-bold tracking-wider tabular-nums shadow-sm transition-colors duration-300 sm:text-2xl ${
                 tone === 'urgent'
-                  ? 'border-danger/50 bg-danger/15 font-semibold text-danger'
+                  ? 'animate-pulse border-danger/50 bg-danger/15 text-danger'
                   : tone === 'caution'
-                    ? 'border-warning/40 bg-warning/10 font-medium text-warning'
-                    : 'border-success/40 bg-success/10 font-medium text-success'
+                    ? 'border-warning/40 bg-warning/10 text-warning'
+                    : 'border-success/40 bg-surface-raised text-success'
               }`}
             >
-              <AlarmClock className="h-3.5 w-3.5" aria-hidden />
+              <AlarmClock className="h-5 w-5 shrink-0 sm:h-6 sm:w-6" aria-hidden />
               {formatClock(remaining)}
               <span className="sr-only"> hard cutoff</span>
             </span>
@@ -364,16 +380,61 @@ export function AssessmentRunner({
       </div>
 
       <div>
-        <div className="mb-1.5 flex justify-between text-xs text-muted">
-          <span className="tabular-nums">
-            Question {index + 1} of {questions.length}
+        <div className="mb-2 flex items-end justify-between gap-3">
+          <span className="text-sm font-medium tabular-nums text-muted">
+            Progress
           </span>
-          <span className="font-display font-bold tabular-nums">{progressPct}%</span>
+          <span className="pb-0.5 text-sm font-display font-bold tabular-nums text-muted">{progressPct}%</span>
         </div>
-        <div className="h-1.5 w-full overflow-hidden rounded-full border border-border bg-surface-raised">
+        <div className="h-2 w-full overflow-hidden rounded-full border border-border bg-surface-raised">
           <div className="h-full bg-primary transition-[width] duration-200 ease-out" style={{ width: `${progressPct}%` }} />
         </div>
       </div>
+
+      <nav aria-label="Question navigation" className="rounded-lg border border-border bg-surface px-2.5 py-2.5 sm:px-3">
+        <div
+          ref={stepperRef}
+          className="flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:thin]"
+        >
+          {questions.map((q, i) => {
+            const answered = hasContent(answers[q.id]);
+            const active = i === index;
+            let stateClass =
+              'border-border/60 bg-transparent text-muted/70 opacity-70 hover:opacity-100 hover:border-border hover:text-muted';
+            if (active) {
+              stateClass =
+                'border-[#7048E2] bg-[#7048E2] text-white ring-2 ring-[#7048E2]/60 ring-offset-2 ring-offset-canvas shadow-[0_0_12px_rgba(112,72,226,0.45)]';
+            } else if (answered) {
+              stateClass =
+                'border-primary/40 bg-primary/20 text-foreground hover:bg-primary/30';
+            }
+            return (
+              <button
+                key={q.id}
+                ref={active ? activeStepRef : undefined}
+                type="button"
+                onClick={() => {
+                  if (timeUp || submitting || i === index) return;
+                  if (!allowAction(lastAdvanceAtRef)) return;
+                  go(i);
+                }}
+                disabled={timeUp || submitting}
+                aria-current={active ? 'step' : undefined}
+                aria-label={`Question ${i + 1}${answered ? ', answered' : ', unanswered'}${active ? ', current' : ''}`}
+                className={`relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs font-semibold tabular-nums transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50 ${stateClass}`}
+              >
+                <span>{i + 1}</span>
+                {answered && !active && (
+                  <Check
+                    className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-surface text-primary"
+                    aria-hidden
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
 
       <section
         className="flex min-h-[320px] flex-col rounded-lg border border-border bg-surface p-4 select-none sm:p-5"
@@ -407,6 +468,9 @@ export function AssessmentRunner({
               {current.disclaimer_text}
             </p>
           )}
+          <h2 className="mb-2 text-lg font-semibold tabular-nums text-[#7048E2] dark:text-violet-300 sm:text-xl">
+            {questionLabel}
+          </h2>
           <div id={`q-${current.id}`} className="text-lg font-medium leading-relaxed text-slate-900 dark:text-slate-100">
             <MarkdownText source={current.text} />
           </div>

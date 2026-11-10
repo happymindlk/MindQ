@@ -44,10 +44,13 @@ async def test_prewarm_skips_incomplete_package(monkeypatch):
     )
     build = AsyncMock()
     monkeypatch.setattr(
-        "app.api.v1.candidate_reports.build_technical_report_data", build
+        "app.api.v1.candidate_reports.assemble_technical_report_data", build
     )
     store = AsyncMock()
     monkeypatch.setattr("app.services.report_pdf.render_and_store_report", store)
+    monkeypatch.setattr(
+        "app.services.report_snapshot.upsert_report_snapshot", AsyncMock()
+    )
 
     await background.prewarm_report_pdf(candidate_id)
 
@@ -73,15 +76,18 @@ async def test_prewarm_skips_generating_synthesis(monkeypatch):
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "app.api.v1.candidate_reports.build_technical_report_data",
+        "app.api.v1.candidate_reports.assemble_technical_report_data",
         AsyncMock(return_value=_report(candidate_id, synthesis_status="generating")),
     )
     store = AsyncMock()
     monkeypatch.setattr("app.services.report_pdf.render_and_store_report", store)
+    snapshot = AsyncMock()
+    monkeypatch.setattr("app.services.report_snapshot.upsert_report_snapshot", snapshot)
 
     await background.prewarm_report_pdf(candidate_id)
 
     store.assert_not_awaited()
+    snapshot.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -103,14 +109,17 @@ async def test_prewarm_renders_and_stores_when_ready(monkeypatch):
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "app.api.v1.candidate_reports.build_technical_report_data",
+        "app.api.v1.candidate_reports.assemble_technical_report_data",
         AsyncMock(return_value=report),
     )
+    snapshot = AsyncMock()
+    monkeypatch.setattr("app.services.report_snapshot.upsert_report_snapshot", snapshot)
     store = AsyncMock()
     monkeypatch.setattr("app.services.report_pdf.render_and_store_report", store)
 
     await background.prewarm_report_pdf(candidate_id)
 
+    snapshot.assert_awaited_once()
     store.assert_awaited_once()
     assert store.await_args.kwargs["corporate_id"] == corporate_id
     assert store.await_args.kwargs["candidate_id"] == candidate_id
