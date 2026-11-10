@@ -117,37 +117,19 @@ async def start_test(
     candidate: Candidate = Depends(get_current_candidate),
     db: AsyncSession = Depends(get_db),
 ):
-    """Mark the module ``IN_PROGRESS`` and start the countdown after explicit consent."""
-    # #region agent log
-    try:
-        import json as _agent_json
-        import time as _agent_time
+    """Mark the module ``IN_PROGRESS`` and start the countdown after explicit consent.
 
-        with open(
-            r"d:\happy-mind-psychometrics\.cursor\debug-e80153.log",
-            "a",
-            encoding="utf-8",
-        ) as _agent_f:
-            _agent_f.write(
-                _agent_json.dumps(
-                    {
-                        "sessionId": "e80153",
-                        "runId": "post-fix",
-                        "hypothesisId": "H1",
-                        "location": "candidate.py:start_test:entry",
-                        "message": "POST /start entered",
-                        "data": {"assessment_id": str(assessment_id)},
-                        "timestamp": int(_agent_time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
+    Lightweight path: set ``started_at`` / deadline metadata only. Questions were
+    already delivered by ``GET /test`` from the pre-bundled JSONB column — do not
+    re-fetch or re-parse the bank here.
+    """
     try:
         assessment, progress = await CandidateService.require_writable_assessment(
-            db, candidate, assessment_id, for_update=True
+            db,
+            candidate,
+            assessment_id,
+            for_update=True,
+            include_questions=False,
         )
         progress = await CandidateService.ensure_started(db, candidate, assessment, progress)
     except (
@@ -157,38 +139,6 @@ async def start_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
-
-    # #region agent log
-    try:
-        import json as _agent_json
-        import time as _agent_time
-
-        with open(
-            r"d:\happy-mind-psychometrics\.cursor\debug-e80153.log",
-            "a",
-            encoding="utf-8",
-        ) as _agent_f:
-            _agent_f.write(
-                _agent_json.dumps(
-                    {
-                        "sessionId": "e80153",
-                        "runId": "post-fix",
-                        "hypothesisId": "H1",
-                        "location": "candidate.py:start_test:success",
-                        "message": "POST /start succeeded",
-                        "data": {
-                            "assessment_id": str(assessment_id),
-                            "status": getattr(progress, "status", None),
-                            "has_started_at": getattr(progress, "started_at", None) is not None,
-                        },
-                        "timestamp": int(_agent_time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
 
     now = datetime.now(timezone.utc)
     duration = assessment_duration_seconds(assessment)
@@ -253,9 +203,11 @@ async def submit_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
-    # Core facet scoring, LLM technical eval, JD synthesis, and HR email all
-    # stay off the candidate hot path.
+    # Core facet scoring, LLM technical eval, JD synthesis, PDF prewarm, and HR
+    # email all stay off the candidate hot path — return COMPLETED immediately.
     background_tasks.add_task(finalize_and_score_ai, candidate.id, assessment_id)
+    # Always resolve company_name: clients and tests treat it as part of the
+    # submit contract even when the package is still incomplete.
     company_name = await CandidateService.get_company_name(db, candidate)
     # Scores stay server-side: echoing them lets candidates calibrate answers
     # across modules or share keyed results.

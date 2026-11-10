@@ -6,7 +6,7 @@ token's ``corporate_id``. Ops (Supabase) tokens are rejected here by design.
 """
 from __future__ import annotations
 
-import io
+import asyncio
 import logging
 from uuid import UUID
 
@@ -25,7 +25,7 @@ from app.auth import (
     is_ops_role,
     issue_client_token,
 )
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.exceptions import schema_drift_detail
 from app.models.candidate import Candidate
 from app.models.corporate import Corporate
@@ -51,8 +51,9 @@ from app.security import (
 from app.services.client_package import ClientPackageService
 from app.services.report_pdf import render_report, report_filename, serve_report_pdf
 from app.services.report_zip import (
+    ZIP_RENDER_CONCURRENCY,
     ZipReportEntry,
-    pack_reports_zip,
+    iter_reports_zip,
     unique_zip_filename,
     zip_content_disposition,
 )
@@ -288,38 +289,52 @@ async def client_package_reports_zip(
     if not candidates:
         raise HTTPException(status_code=404, detail="No completed reports to download")
 
+    # Bound WeasyPrint concurrency; each worker uses its own DB session so
+    # AsyncSession is never shared across concurrent tasks.
+    sem = asyncio.Semaphore(ZIP_RENDER_CONCURRENCY)
     used_names: set[str] = set()
-    entries: list[ZipReportEntry] = []
-    failures: list[str] = []
-    for candidate in candidates:
-        try:
-            report = await build_technical_report_data(db, candidate, background_tasks)
-            rendered = await render_report(
-                report,
-                corporate_id=candidate.corporate_id,
-                candidate_id=candidate.id,
-                background_tasks=background_tasks,
-                portal="client",
-            )
-            ext = "pdf" if rendered.is_pdf else "html"
-            name = unique_zip_filename(
-                report_filename(report.candidate_full_name or candidate.full_name, ext),
-                used_names,
-            )
-            entries.append(ZipReportEntry(filename=name, content=rendered.content))
-        except Exception:
-            label = candidate.full_name or str(candidate.id)
-            failures.append(label)
-            logger.exception(
-                "client_reports_zip_entry_failed package_id=%s candidate_id=%s",
-                package_id,
-                candidate.id,
-            )
+    name_lock = asyncio.Lock()
+
+    async def _render_entry(candidate: Candidate) -> ZipReportEntry | None:
+        async with sem:
+            try:
+                async with SessionLocal() as session:
+                    report = await build_technical_report_data(
+                        session, candidate, background_tasks
+                    )
+                    rendered = await render_report(
+                        report,
+                        corporate_id=candidate.corporate_id,
+                        candidate_id=candidate.id,
+                        background_tasks=background_tasks,
+                        portal="client",
+                    )
+                ext = "pdf" if rendered.is_pdf else "html"
+                desired = report_filename(
+                    report.candidate_full_name or candidate.full_name, ext
+                )
+                async with name_lock:
+                    name = unique_zip_filename(desired, used_names)
+                return ZipReportEntry(filename=name, content=rendered.content)
+            except Exception:
+                logger.exception(
+                    "client_reports_zip_entry_failed package_id=%s candidate_id=%s",
+                    package_id,
+                    candidate.id,
+                )
+                return None
+
+    results = await asyncio.gather(*[_render_entry(c) for c in candidates])
+    entries = [entry for entry in results if entry is not None]
+    failures = [
+        (c.full_name or str(c.id))
+        for c, entry in zip(candidates, results, strict=True)
+        if entry is None
+    ]
 
     if not entries:
         raise HTTPException(status_code=502, detail="No reports could be generated")
 
-    zip_bytes = pack_reports_zip(entries)
     logger.info(
         "client_reports_zip_served package_id=%s succeeded=%s failed=%s",
         package_id,
@@ -327,7 +342,7 @@ async def client_package_reports_zip(
         len(failures),
     )
     return StreamingResponse(
-        io.BytesIO(zip_bytes),
+        iter_reports_zip(entries),
         media_type="application/zip",
         headers={
             "Content-Disposition": zip_content_disposition(package.title),

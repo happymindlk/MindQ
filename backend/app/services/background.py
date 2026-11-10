@@ -270,8 +270,10 @@ async def prewarm_report_pdf(candidate_id: UUID) -> None:
     Args:
         candidate_id: Candidate whose package may just have finished.
     """
-    from app.api.v1.candidate_reports import build_technical_report_data
+    from app.api.v1.candidate_reports import assemble_technical_report_data
+    from app.services.report_cache import report_cache_key
     from app.services.report_pdf import render_and_store_report
+    from app.services.report_snapshot import upsert_report_snapshot
 
     class _NoopBackgroundTasks:
         """Drop view-side synthesis queues; this warmer never starts new LLM work."""
@@ -286,7 +288,9 @@ async def prewarm_report_pdf(candidate_id: UUID) -> None:
                 return
             if not await CandidateService.is_package_complete(session, candidate):
                 return
-            report = await build_technical_report_data(
+            # Always assemble fresh here so the snapshot and PDF reflect the
+            # latest scores / narrative (bypass read_report_snapshot).
+            report = await assemble_technical_report_data(
                 session, candidate, _NoopBackgroundTasks()
             )
             if report.synthesis_status == "generating":
@@ -294,11 +298,17 @@ async def prewarm_report_pdf(candidate_id: UUID) -> None:
                     "report_pdf_prewarm_skipped_generating candidate_id=%s", candidate_id
                 )
                 return
+            await upsert_report_snapshot(session, candidate, report)
             await render_and_store_report(
                 report,
                 corporate_id=candidate.corporate_id,
                 candidate_id=candidate.id,
                 portal="admin",
+            )
+            logger.info(
+                "report_pdf_prewarm_ok candidate_id=%s cache_key=%s",
+                candidate_id,
+                report_cache_key(report).key[:12],
             )
     except Exception:
         logger.exception("report_pdf_prewarm_failed candidate_id=%s", candidate_id)

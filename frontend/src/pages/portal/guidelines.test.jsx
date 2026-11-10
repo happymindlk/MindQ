@@ -6,11 +6,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Guidelines from './Guidelines';
 
 const navigate = vi.fn();
+const { getDashboard } = vi.hoisted(() => ({
+  getDashboard: vi.fn(async () => ({ tests: [] })),
+}));
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal();
   return { ...actual, useNavigate: () => navigate };
 });
+
+vi.mock('../../api/client', () => ({
+  api: { candidate: { getDashboard } },
+}));
 
 function renderGuidelines() {
   return render(
@@ -22,6 +29,7 @@ function renderGuidelines() {
 
 beforeEach(() => {
   navigate.mockReset();
+  getDashboard.mockClear();
   window.sessionStorage.clear();
   window.localStorage.clear();
   window.localStorage.setItem('candidateId', 'candidate-1');

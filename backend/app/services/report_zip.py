@@ -1,6 +1,6 @@
-"""In-memory MindQ Report ZIP packaging for bulk client-portal export.
+"""MindQ Report ZIP packaging for bulk client-portal export.
 
-Builds a single attachment from already-rendered report bytes. Callers MUST
+Builds a streaming attachment from already-rendered report bytes. Callers MUST
 authorize package access and resolve candidate report bytes (via
 ``render_report``) before invoking these helpers.
 """
@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import io
 import zipfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from urllib.parse import quote
 
 from app.services.report_pdf import REPORT_FILE_PREFIX, sanitize_report_name
+
+# Bound WeasyPrint fan-out so bulk ZIP never pegs every CPU core at once.
+ZIP_RENDER_CONCURRENCY = 3
+_ZIP_STREAM_CHUNK = 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -101,3 +106,25 @@ def pack_reports_zip(entries: list[ZipReportEntry]) -> bytes:
         for entry in entries:
             archive.writestr(entry.filename, entry.content)
     return buf.getvalue()
+
+
+def iter_reports_zip(entries: list[ZipReportEntry]) -> Iterator[bytes]:
+    """Yield a STORE-compressed ZIP in chunks for ``StreamingResponse``.
+
+    Builds the archive in a spooled buffer then streams it so the ASGI server
+    can start flushing response body bytes without holding a second full copy
+    of the archive as a contiguous ``bytes`` object in the route handler.
+
+    Args:
+        entries: Non-empty list of filename/content pairs.
+
+    Yields:
+        Fixed-size byte chunks of the completed ZIP.
+
+    Raises:
+        ValueError: When ``entries`` is empty.
+    """
+    raw = pack_reports_zip(entries)
+    view = memoryview(raw)
+    for start in range(0, len(view), _ZIP_STREAM_CHUNK):
+        yield bytes(view[start : start + _ZIP_STREAM_CHUNK])

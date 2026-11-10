@@ -192,7 +192,9 @@ async def test_start_only_starts_the_requested_module(candidate_client, monkeypa
     target_id = uuid4()
     started_ids: list = []
 
-    async def require_writable(session, candidate, aid, for_update=False):
+    async def require_writable(
+        session, candidate, aid, for_update=False, include_questions=True
+    ):
         return _assessment(aid), None
 
     async def ensure_started(session, candidate, assessment, progress):

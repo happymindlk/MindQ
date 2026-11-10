@@ -509,6 +509,37 @@ describe('AssessmentRunner media URLs', () => {
   });
 });
 
+describe('AssessmentRunner submit freeze', () => {
+  it('keeps a single in-flight submit and shows the submitting overlay', async () => {
+    let resolveSubmit: (() => void) | undefined;
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSubmit = resolve;
+          }),
+      ),
+    };
+    const user = userEvent.setup();
+    renderRunner(test(), transport, 'live', { initialAnswers: { q1: 3 } });
+
+    await user.click(screen.getByRole('button', { name: /Submit test/i }));
+    await user.click(screen.getByRole('button', { name: /Confirm submit/i }));
+    expect(transport.submit).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status', { name: /Submitting your responses/i })).toBeInTheDocument();
+    // Confirm button is disabled + relabeled while the idempotency lock holds.
+    expect(screen.getByRole('button', { name: /Submitting your responses/i })).toBeDisabled();
+
+    resolveSubmit?.();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('status', { name: /Submitting your responses/i }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+});
+
 describe('AssessmentRunner optimistic navigation', () => {
   it('advances to the next question without waiting for a pending autosave', async () => {
     let resolveSave: (() => void) | undefined;

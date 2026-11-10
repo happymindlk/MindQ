@@ -91,6 +91,11 @@ def synthesis_stub(monkeypatch):
         "has_missing_open_evals",
         staticmethod(lambda *_a, **_k: state["missing_evals"]),
     )
+    # Snapshot lookup is a separate execute; keep unit fixtures on the live path.
+    async def _no_snapshot(_db, _candidate_id):
+        return None
+
+    monkeypatch.setattr(candidate_reports, "read_report_snapshot", _no_snapshot)
     monkeypatch.setattr(background, "_ai_jobs_inflight", {})
     monkeypatch.setattr(background, "_last_view_refresh", {})
     return state

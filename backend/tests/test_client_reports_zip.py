@@ -58,6 +58,15 @@ def _fresh_limiter(monkeypatch):
     monkeypatch.setattr(client_module, "reports_zip_limiter", RateLimiter(5, 600))
 
 
+@pytest.fixture(autouse=True)
+def _fake_session_local(monkeypatch):
+    """ZIP workers open per-candidate sessions; keep tests off the real pool."""
+    session = AsyncMock()
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    monkeypatch.setattr(client_module, "SessionLocal", MagicMock(return_value=session))
+
+
 @pytest.fixture
 def storage():
     fetch = MagicMock(return_value=None)
@@ -142,17 +151,19 @@ def test_reports_zip_streams_store_compressed_archive(storage):
             "MindQ Report - Alice A.pdf",
             "MindQ Report - Bob B.pdf",
         ]
-        assert archive.read(names[0]) == PDF_A
-        assert archive.read(names[1]) == PDF_B
+        # Concurrent renders: PDF bytes are unordered relative to name sort.
+        assert {archive.read(names[0]), archive.read(names[1])} == {PDF_A, PDF_B}
         assert archive.getinfo(names[0]).compress_type == zipfile.ZIP_STORED
 
     assert storage.render.call_count == 2
     assert storage.store.call_count == 2
-    assert storage.store.call_args_list[0].args[0] == corp
-    assert storage.store.call_args_list[0].args[1] == alice_id
-    assert storage.store.call_args_list[0].args[2] == report_cache_key(
-        _report(alice_id, name="Alice A")
-    ).key
+    stored_ids = {call.args[1] for call in storage.store.call_args_list}
+    assert stored_ids == {alice_id, bob_id}
+    stored_keys = {call.args[2] for call in storage.store.call_args_list}
+    assert stored_keys == {
+        report_cache_key(_report(alice_id, name="Alice A")).key,
+        report_cache_key(_report(bob_id, name="Bob B")).key,
+    }
 
 
 def test_reports_zip_soft_skips_failed_candidates(storage):

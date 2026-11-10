@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface ModuleTimerState {
   /** Display seconds left, clamped at 0. Null when untimed. */
   remainingSeconds: number | null;
   expired: boolean;
+  /**
+   * Synchronously clear the interval and disarm auto-submit.
+   * Call at the start of a manual submit so a near-zero tick cannot race.
+   */
+  stop: () => void;
 }
 
 interface ModuleTimerOptions {
@@ -73,6 +78,8 @@ export function useModuleTimer({
   onDisplayExpireRef.current = onDisplayExpire;
   const expireFiredRef = useRef(false);
   const displayFiredRef = useRef(false);
+  const pausedRef = useRef(false);
+  const intervalRef = useRef<number | null>(null);
 
   const [displayDeadline] = useState<number | null>(() =>
     seedDeadline(remainingSeconds, nowRef.current()),
@@ -87,9 +94,29 @@ export function useModuleTimer({
     return raw === null ? null : Math.max(0, raw);
   });
 
+  const clearTicker = useCallback(() => {
+    if (intervalRef.current !== null) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  const stop = useCallback(() => {
+    // Pause only — do not mark expired so a failed submit can resume the clock.
+    pausedRef.current = true;
+    clearTicker();
+  }, [clearTicker]);
+
   useEffect(() => {
-    if ((displayDeadline === null && expireDeadline === null) || !enabled) return undefined;
+    if ((displayDeadline === null && expireDeadline === null) || !enabled) {
+      clearTicker();
+      return undefined;
+    }
+    // Re-arm after a failed submit flips `enabled` back on.
+    pausedRef.current = false;
     const tick = () => {
+      // Manual submit may freeze the clock mid-tick before React re-renders.
+      if (pausedRef.current) return;
       const nowMs = nowRef.current();
       const displayRaw = computeRemaining(displayDeadline, nowMs);
       if (displayRaw === null) {
@@ -108,13 +135,14 @@ export function useModuleTimer({
       }
     };
     tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [displayDeadline, enabled, expireDeadline]);
+    intervalRef.current = window.setInterval(tick, 1000);
+    return () => clearTicker();
+  }, [clearTicker, displayDeadline, enabled, expireDeadline]);
 
   return {
     remainingSeconds: remaining,
     expired: remaining !== null && remaining <= 0,
+    stop,
   };
 }
 

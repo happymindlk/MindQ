@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlarmClock, ArrowRight, ShieldCheck, Target, TimerOff } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import PageHeader from '../../components/ui/PageHeader';
+import { api } from '../../api/client';
+import { CANDIDATE_DASHBOARD_KEY } from '../../features/candidate-dashboard/module-status';
+import { cachedQuery } from '../../lib/query-cache';
 
 const GUIDELINES = [
   {
@@ -76,10 +79,24 @@ export default function Guidelines() {
   const navigate = useNavigate();
   const [agreed, setAgreed] = useState(readAgreement);
 
+  // Warm the dashboard cache while the candidate reads guidelines so
+  // "I understand, continue" can paint the dashboard without a cold spinner.
+  useEffect(() => {
+    void cachedQuery(CANDIDATE_DASHBOARD_KEY, () => api.candidate.getDashboard()).catch(() => {
+      // Dashboard remount will surface the error; do not block guidelines.
+    });
+  }, []);
+
   const onAgreementChange = (event) => {
     const next = event.target.checked;
     setAgreed(next);
     persistAgreement(next);
+  };
+
+  const onContinue = () => {
+    // Optimistic navigation: acknowledgment is session-local; dashboard data
+    // is already warming (or cached) via the mount prefetch above.
+    navigate('/portal/dashboard');
   };
 
   return (
@@ -154,7 +171,7 @@ export default function Guidelines() {
         </p>
       </div>
 
-      <Button onClick={() => navigate('/portal/dashboard')} disabled={!agreed}>
+      <Button onClick={onContinue} disabled={!agreed}>
         I understand, continue
         <ArrowRight className="w-4 h-4" aria-hidden="true" />
       </Button>

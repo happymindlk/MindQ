@@ -136,6 +136,29 @@ describe('useModuleTimer', () => {
     expect(result.current.remainingSeconds).toBeNull();
     expect(result.current.expired).toBe(false);
   });
+
+  it('stop() clears the interval and blocks onExpire until re-enabled', () => {
+    const onExpire = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useModuleTimer({ remainingSeconds: 5, onExpire, enabled, now: clock }),
+      { initialProps: { enabled: true } },
+    );
+
+    act(() => {
+      result.current.stop();
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(onExpire).not.toHaveBeenCalled();
+
+    // Failed submit re-arms via enabled flip; deadline is already past so expire fires once.
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(onExpire).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('formatClock', () => {

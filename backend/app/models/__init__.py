@@ -9,6 +9,7 @@ from .candidate import Candidate
 from .candidate_progress import CandidateProgress
 from .candidate_response import CandidateResponse
 from .candidate_evaluation import CandidateEvaluation
+from .candidate_report import CandidateReport
 from .support_ticket import SupportTicket
 from .global_module import GlobalModule
 from .package_module import PackageModule
@@ -27,6 +28,7 @@ __all__ = [
     "CandidateProgress",
     "CandidateResponse",
     "CandidateEvaluation",
+    "CandidateReport",
     "SupportTicket",
     "GlobalModule",
     "PackageModule",
