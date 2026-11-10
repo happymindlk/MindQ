@@ -357,6 +357,41 @@ def store_cached_report(
     return key
 
 
+def purge_cached_reports(corporate_id: UUID, candidate_id: UUID) -> int:
+    """Delete all cached report PDFs for a candidate under their storage prefix.
+
+    Best-effort: missing bucket config or storage errors are logged and treated
+    as zero deletions so callers (e.g. assessment reset) can still succeed.
+
+    Args:
+        corporate_id: Tenant id used as the object prefix.
+        candidate_id: Candidate id used as the second path segment.
+
+    Returns:
+        Number of object keys requested for deletion (0 when nothing to purge
+        or storage is unavailable).
+    """
+    if not _reports_bucket_safe():
+        return 0
+    bucket = settings.R2_REPORTS_BUCKET_NAME.strip()
+    prefix = _cached_report_prefix(corporate_id, candidate_id)
+    try:
+        client = _s3_client()
+        listing = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        keys = [
+            {"Key": item["Key"]}
+            for item in listing.get("Contents", [])
+            if item.get("Key")
+        ]
+        if not keys:
+            return 0
+        client.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
+        return len(keys)
+    except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - purge is best-effort
+        logger.warning("Cached report purge failed for %s: %s", prefix, exc)
+        return 0
+
+
 def _logo_upload_failure_detail(exc: BaseException) -> str:
     """Map an upstream storage failure to a safe, actionable client-facing detail.
 

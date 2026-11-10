@@ -31,6 +31,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('adminApi.resetCandidateAssessment', () => {
+  it('POSTs to the admin reset endpoint with the bearer token', async () => {
+    const payload = { success: true, message: 'Candidate assessment successfully reset' };
+    fetch.mockResolvedValue(jsonResponse(payload));
+
+    const candidateId = '11111111-1111-1111-1111-111111111111';
+    await expect(adminApi.resetCandidateAssessment(candidateId)).resolves.toEqual(payload);
+
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toMatch(new RegExp(`/api/v1/admin/candidates/${candidateId}/reset$`));
+    expect(init.method).toBe('POST');
+    expect(init.headers.Authorization).toBe('Bearer ops-token');
+  });
+});
+
 describe('adminApi.extractJdFromPdf', () => {
   it('posts the file as multipart FormData without a JSON content type', async () => {
     const payload = { text: 'Senior Analyst JD', page_count: 2, char_count: 17, truncated: false };

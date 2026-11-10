@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from typing import Any
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import run_db_op_with_retry
@@ -11,6 +11,7 @@ from app.models.candidate import Candidate
 from app.models.corporate import Corporate
 from app.models.package import Package
 from app.models.assessment import Assessment
+from app.models.candidate_evaluation import CandidateEvaluation
 from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.schemas.candidate import CandidateAuthOtpVerifyRequest
@@ -436,6 +437,50 @@ class CandidateService:
             return result.scalars().first()
 
         return await run_db_op_with_retry(_load, session=session)
+
+    @staticmethod
+    async def reset_assessment(session: AsyncSession, candidate: Candidate) -> Candidate:
+        """Wipe responses, progress, and evaluations so the candidate can retake.
+
+        Clears module answers, attempt timers/scores, cached JD narrative, and
+        ``logged_in_at``. Invite identity (email, access_code, package) is kept.
+
+        Args:
+            session: Open async SQLAlchemy session.
+            candidate: Existing ``candidates`` row already loaded by the caller.
+
+        Returns:
+            The same candidate instance after ``logged_in_at`` is cleared and
+            the transaction is committed.
+        """
+        candidate_id = candidate.id
+        await session.execute(
+            delete(CandidateResponse).where(CandidateResponse.candidate_id == candidate_id)
+        )
+        await session.execute(
+            update(CandidateProgress)
+            .where(CandidateProgress.candidate_id == candidate_id)
+            .values(
+                status=NOT_STARTED_STATUS,
+                started_at=None,
+                completed_at=None,
+                score=None,
+                client_duration_seconds=None,
+                server_duration_seconds=None,
+                overtime=False,
+                facet_scores=None,
+                derived_profile=None,
+                score_details=None,
+                scoring_version=None,
+            )
+        )
+        await session.execute(
+            delete(CandidateEvaluation).where(CandidateEvaluation.candidate_id == candidate_id)
+        )
+        candidate.logged_in_at = None
+        await session.commit()
+        await session.refresh(candidate)
+        return candidate
 
     @staticmethod
     async def get_company_name(session: AsyncSession, candidate: Candidate) -> str:

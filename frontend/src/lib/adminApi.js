@@ -429,6 +429,15 @@ export const adminApi = {
     });
   },
 
+  /** Wipe responses/progress/evaluations so the candidate can retake. */
+  async resetCandidateAssessment(candidateId) {
+    return authedJson(
+      `/api/v1/admin/candidates/${candidateId}/reset`,
+      'Failed to reset assessment',
+      { method: 'POST' },
+    );
+  },
+
   /**
    * Provision an HR user for a company via Supabase Auth Admin invite.
    * @param {string} companyId

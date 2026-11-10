@@ -7,6 +7,7 @@ import {
   Download,
   Package,
   Pencil,
+  RotateCcw,
   Search,
   Users,
 } from 'lucide-react';
@@ -16,7 +17,9 @@ import PageHeader from '../../components/ui/PageHeader';
 import InviteCandidateForm from '../../components/InviteCandidateForm';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
+import Modal from '../../components/ui/Modal';
 import { SkeletonRows } from '../../components/ui/Skeleton';
+import { useToast } from '../../components/ui/useToast';
 import { adminApi, maskEmail } from '../../lib/adminApi';
 import { cachedQuery } from '../../lib/query-cache';
 import { formatDate } from '../../lib/format-date';
@@ -114,6 +117,7 @@ function HrInviteInline({ companyId, invitedEmail, onInvited }) {
 export default function AssessmentHistory() {
   const { companyId, packageId } = useParams();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [companies, setCompanies] = useState([]);
   const [packagesByCompany, setPackagesByCompany] = useState({});
   const [candidatesByPackage, setCandidatesByPackage] = useState({});
@@ -127,6 +131,8 @@ export default function AssessmentHistory() {
   const [hrEmails, setHrEmails] = useState({});
   const [downloadingId, setDownloadingId] = useState(null);
   const [deadlineTarget, setDeadlineTarget] = useState(null);
+  const [resetTarget, setResetTarget] = useState(null);
+  const [isResetting, setIsResetting] = useState(false);
 
   const onDeadlineSaved = useCallback((updated) => {
     setPackagesByCompany((prev) => {
@@ -256,6 +262,29 @@ export default function AssessmentHistory() {
       setDownloadingId(null);
     }
   };
+
+  const confirmResetAssessment = useCallback(async () => {
+    if (!resetTarget) return;
+    setIsResetting(true);
+    try {
+      await adminApi.resetCandidateAssessment(resetTarget.id);
+      toast({
+        variant: 'success',
+        title: 'Assessment reset successfully. The candidate can now retake the test.',
+      });
+      const pkgId = resetTarget.package_id;
+      setResetTarget(null);
+      if (pkgId) await loadCandidates(pkgId);
+    } catch (err) {
+      toast({
+        variant: 'error',
+        title: 'Reset failed',
+        description: err.message || 'Failed to reset assessment',
+      });
+    } finally {
+      setIsResetting(false);
+    }
+  }, [resetTarget, toast, loadCandidates]);
 
   return (
     <div className="space-y-4">
@@ -490,7 +519,7 @@ export default function AssessmentHistory() {
                                           <span className="text-xs text-slate-500 dark:text-slate-400 self-center">
                                             {formatDate(cand.completed_at)}
                                           </span>
-                                          <span className="self-center flex justify-end">
+                                          <span className="self-center flex justify-end gap-0.5">
                                             {completed && (
                                               <button
                                                 type="button"
@@ -501,6 +530,23 @@ export default function AssessmentHistory() {
                                                 className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40"
                                               >
                                                 <Download className="w-3.5 h-3.5" />
+                                              </button>
+                                            )}
+                                            {status !== 'pending' && (
+                                              <button
+                                                type="button"
+                                                title="Reset Assessment"
+                                                aria-label={`Reset assessment for ${cand.full_name}`}
+                                                onClick={() =>
+                                                  setResetTarget({
+                                                    id: cand.id,
+                                                    full_name: cand.full_name,
+                                                    package_id: pkg.id,
+                                                  })
+                                                }
+                                                className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 disabled:opacity-40"
+                                              >
+                                                <RotateCcw className="w-3.5 h-3.5" />
                                               </button>
                                             )}
                                           </span>
@@ -532,6 +578,42 @@ export default function AssessmentHistory() {
         pkg={deadlineTarget}
         onSaved={onDeadlineSaved}
       />
+
+      <Modal
+        isOpen={resetTarget !== null}
+        onClose={() => !isResetting && setResetTarget(null)}
+        title="Reset Assessment?"
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setResetTarget(null)}
+              disabled={isResetting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              isLoading={isResetting}
+              onClick={confirmResetAssessment}
+            >
+              Confirm Reset
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          This will permanently clear all recorded answers, timers, and evaluations for{' '}
+          <span className="font-semibold text-foreground">
+            {resetTarget?.full_name || 'this candidate'}
+          </span>
+          , allowing them to restart from the beginning. This action cannot be undone.
+        </p>
+      </Modal>
     </div>
   );
 }
