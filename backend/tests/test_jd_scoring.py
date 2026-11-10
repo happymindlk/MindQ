@@ -518,8 +518,9 @@ def test_report_html_renders_synthesis_without_fit_or_recommendation():
     assert "mq-score-item" in html
     assert 'size: A4 portrait' in html
     assert "file:///" in html and "Poppins-Regular.ttf" in html
-    assert "support@mindqtalent.com" in html
-    assert "World Trade Center, Colombo 01" in html
+    # Company address / support footer is email-only (not on reports).
+    assert "support@mindqtalent.com" not in html
+    assert "World Trade Center, Colombo 01" not in html
 
 
 def test_report_html_omits_pillar_average_cards():

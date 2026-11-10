@@ -1,7 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import BrandLogo from './BrandLogo';
-import Footer from './Footer';
 import SupportModal from './SupportModal';
 import ToastProvider from './ui/Toast';
 import RouteErrorBoundary from './route-error-boundary';
@@ -44,7 +43,6 @@ export default function PortalLayout() {
           </div>
         </main>
 
-        <Footer />
         <SupportModal />
       </div>
     </ToastProvider>
