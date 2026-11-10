@@ -15,7 +15,7 @@ const MAX_EMAILS = 100;
  * @param {string} raw
  * @returns {{ emails: string[], invalid: string[] }}
  */
-export function parseCandidateEmails(raw) {
+function parseCandidateEmails(raw) {
   const seen = new Set();
   const emails = [];
   const invalid = [];
