@@ -6,8 +6,51 @@ import {
   isAnswered,
   isAttemptLocked,
   isTimeExpired,
+  resolveRemainingSeconds,
   resolveTopDisclaimer,
+  resolveWriteRemainingSeconds,
 } from './runner-logic';
+
+describe('resolveRemainingSeconds', () => {
+  it('prefers the server integer over the full duration', () => {
+    expect(resolveRemainingSeconds({ duration_seconds: 180, remaining_seconds: 42 })).toBe(42);
+  });
+
+  it('keeps an expired server value at zero instead of resetting to the duration', () => {
+    expect(resolveRemainingSeconds({ duration_seconds: 180, remaining_seconds: 0 })).toBe(0);
+    expect(resolveRemainingSeconds({ duration_seconds: 180, remaining_seconds: -5 })).toBe(0);
+  });
+
+  it('falls back to the full duration when the payload has no server value (preview)', () => {
+    expect(resolveRemainingSeconds({ duration_seconds: 180 })).toBe(180);
+    expect(resolveRemainingSeconds({ duration_seconds: 180, remaining_seconds: null })).toBe(180);
+  });
+
+  it('is null for untimed modules', () => {
+    expect(resolveRemainingSeconds({ duration_seconds: null, remaining_seconds: 99 })).toBeNull();
+  });
+});
+
+describe('resolveWriteRemainingSeconds', () => {
+  it('prefers write_remaining_seconds for the expire seed', () => {
+    expect(
+      resolveWriteRemainingSeconds({
+        duration_seconds: 180,
+        remaining_seconds: 0,
+        write_remaining_seconds: 15,
+      }),
+    ).toBe(15);
+  });
+
+  it('falls back to display remaining when write_remaining_seconds is omitted', () => {
+    expect(
+      resolveWriteRemainingSeconds({
+        duration_seconds: 180,
+        remaining_seconds: 42,
+      }),
+    ).toBe(42);
+  });
+});
 
 const q = (type: string): RunnerQuestion => ({
   id: 'q',

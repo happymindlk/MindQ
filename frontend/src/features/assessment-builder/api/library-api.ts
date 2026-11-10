@@ -100,6 +100,10 @@ export interface RunnerTest {
   show_confidentiality_notice?: boolean;
   confidentiality_notice_text?: string | null;
   started_at: string | null;
+  /** Server-computed display countdown seed (UTC); null when untimed. */
+  remaining_seconds?: number | null;
+  /** Seconds until write lock (duration + grace); expire / auto-submit seed. */
+  write_remaining_seconds?: number | null;
   questions: RunnerQuestion[];
   answers: Record<string, unknown>;
 }
@@ -225,29 +229,20 @@ function toWireQuestionPayload(payload: QuestionPayload): QuestionPayload | Retu
  * @param path - Library questions collection or item path.
  * @param method - ``POST`` (create) or ``PUT`` (update).
  * @param payload - Normalized editor payload.
- * @param debugCtx - Optional ids for debug instrumentation.
  * @returns Saved template question row.
  */
 async function saveTemplateQuestion(
   path: string,
   method: 'POST' | 'PUT',
   payload: QuestionPayload,
-  debugCtx: { moduleId?: string; questionId?: string } = {},
 ): Promise<TemplateQuestion> {
   const wirePayload = toWireQuestionPayload(payload);
-  // #region agent log
-  fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion',message:'question save attempt',data:{method,path,moduleId:debugCtx.moduleId??null,questionId:debugCtx.questionId??null,type:payload.type,editorKeys:Object.keys(payload),wireKeys:Object.keys(wirePayload),wireHasOptions:'options' in wirePayload,wireHasScalePoints:'scale_points' in wirePayload},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
   try {
-    const saved = await request<TemplateQuestion>(path, {
+    return await request<TemplateQuestion>(path, {
       method,
       fallback: 'Could not save this question.',
       body: { payload: wirePayload },
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:success',message:'question save succeeded',data:{method,questionId:saved.id,wireMode:payload.type==='likert'?'legacy-likert':'full'},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    return saved;
   } catch (err) {
     const detail = err instanceof ApiError ? err.detail : null;
     const canRetryFull =
@@ -255,22 +250,12 @@ async function saveTemplateQuestion(
       err instanceof ApiError &&
       err.status === 422 &&
       !isLikertOptionsForbiddenDetail(detail);
-    // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:catch',message:'question save failed',data:{method,status:err instanceof ApiError?err.status:null,canRetryFull,detail},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!canRetryFull) throw err;
-    // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:full-retry',message:'retrying Likert with full options payload',data:{method,fullKeys:Object.keys(payload)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    const saved = await request<TemplateQuestion>(path, {
+    return request<TemplateQuestion>(path, {
       method,
       fallback: 'Could not save this question.',
       body: { payload },
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ee8c61'},body:JSON.stringify({sessionId:'ee8c61',runId:'post-fix',hypothesisId:'A',location:'library-api.ts:saveTemplateQuestion:success',message:'question save succeeded after full retry',data:{method,questionId:saved.id,wireMode:'full-retry'},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    return saved;
   }
 }
 
@@ -367,7 +352,6 @@ export const libraryApi = {
       `/library/templates/${moduleId}/questions/${questionId}`,
       'PUT',
       payload,
-      { moduleId, questionId },
     );
   },
 

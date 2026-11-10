@@ -299,12 +299,12 @@ async def test_require_writable_blocks_unstarted_module_after_deadline():
     now = datetime.now(timezone.utc)
     candidate = SimpleNamespace(id=uuid4(), package_id=uuid4())
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=_window_result(None, now - HOUR))
     with (
         patch.object(
-            CandidateService, "require_assessment_in_package", AsyncMock(return_value=object())
+            CandidateService,
+            "load_runner_context",
+            AsyncMock(side_effect=PackageClosedError("closed")),
         ),
-        patch.object(CandidateService, "_get_progress", AsyncMock(return_value=None)),
         pytest.raises(PackageClosedError),
     ):
         await CandidateService.require_writable_assessment(session, candidate, uuid4())
@@ -316,13 +316,11 @@ async def test_require_writable_allows_in_progress_module_after_deadline():
     candidate = SimpleNamespace(id=uuid4(), package_id=uuid4())
     progress = SimpleNamespace(status="IN_PROGRESS", started_at=now - 2 * HOUR)
     session = AsyncMock()
-    session.execute = AsyncMock(return_value=_window_result(None, now - HOUR))
     assessment = object()
-    with (
-        patch.object(
-            CandidateService, "require_assessment_in_package", AsyncMock(return_value=assessment)
-        ),
-        patch.object(CandidateService, "_get_progress", AsyncMock(return_value=progress)),
+    with patch.object(
+        CandidateService,
+        "load_runner_context",
+        AsyncMock(return_value=(assessment, progress, {})),
     ):
         result = await CandidateService.require_writable_assessment(session, candidate, uuid4())
     assert result == (assessment, progress)

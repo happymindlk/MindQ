@@ -1,22 +1,25 @@
 from uuid import UUID
-from typing import NoReturn, Any
-import json
+from typing import NoReturn
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.response import ResponseSave, ResponseSubmit
-from app.services.candidate_service import CandidateService, _assessment_duration
+from app.services.candidate_service import CandidateService, assessment_duration_seconds
 from app.services.background import finalize_and_score_ai
-from app.services.runner_payload import build_runner_payload
+from app.services.runner_payload import (
+    build_runner_payload,
+    remaining_seconds,
+    write_remaining_seconds,
+)
 from app.auth import get_current_candidate
 from app.exceptions import (
     AssessmentAlreadySubmittedError,
     AssessmentNotFoundError,
+    AssessmentNotStartedError,
     AssessmentTimeExpiredError,
     PackageClosedError,
     PackageNotOpenError,
@@ -28,42 +31,6 @@ logger = logging.getLogger("app.candidate")
 router = APIRouter()
 
 
-def _agent_debug_log(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any],
-) -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "5f236f",
-            "runId": "pre-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
-        }
-        path = Path(r"d:\happy-mind-psychometrics\.cursor\debug-5f236f.log")
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, default=str) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
-
-def _server_remaining_seconds(started_at: datetime | None, duration_seconds: int | None) -> int | None:
-    if not duration_seconds:
-        return None
-    if started_at is None:
-        return int(duration_seconds)
-    now_utc = datetime.now(timezone.utc)
-    started = started_at if started_at.tzinfo is not None else started_at.replace(tzinfo=timezone.utc)
-    elapsed = (now_utc - started).total_seconds()
-    return max(0, int(duration_seconds - elapsed))
-
-
 def _raise_integrity(exc: Exception) -> NoReturn:
     if isinstance(exc, AssessmentNotFoundError):
         raise HTTPException(status_code=404, detail="Test not found") from exc
@@ -72,6 +39,10 @@ def _raise_integrity(exc: Exception) -> NoReturn:
     if isinstance(exc, AssessmentTimeExpiredError):
         raise HTTPException(
             status_code=409, detail={"code": "TIME_EXPIRED", "message": exc.detail}
+        ) from exc
+    if isinstance(exc, AssessmentNotStartedError):
+        raise HTTPException(
+            status_code=409, detail={"code": exc.code, "message": exc.detail}
         ) from exc
     if isinstance(exc, (PackageNotOpenError, PackageClosedError)):
         raise HTTPException(
@@ -104,10 +75,9 @@ async def get_test(
     is therefore safe and will not mark modules ``IN_PROGRESS``.
     """
     try:
-        assessment, progress = await CandidateService.require_writable_assessment(
-            db, candidate, assessment_id
+        assessment, progress, answers = await CandidateService.load_runner_context(
+            db, candidate, assessment_id, include_answers=True
         )
-        answers = await CandidateService.get_saved_answers(db, candidate.id, assessment_id)
     except (
         AssessmentNotFoundError,
         AssessmentAlreadySubmittedError,
@@ -117,25 +87,6 @@ async def get_test(
         _raise_integrity(exc)
 
     started_at = getattr(progress, "started_at", None) if progress else None
-    duration = _assessment_duration(assessment)
-    remaining = _server_remaining_seconds(started_at, duration)
-    # #region agent log
-    _agent_debug_log(
-        "A",
-        "candidate.py:get_test",
-        "GET test payload timing fields",
-        {
-            "candidate_id": str(candidate.id),
-            "assessment_id": str(assessment_id),
-            "status": getattr(progress, "status", None) if progress else None,
-            "started_at": started_at.isoformat() if started_at else None,
-            "started_at_tzinfo": str(getattr(started_at, "tzinfo", None)) if started_at else None,
-            "duration_seconds": duration,
-            "server_remaining_seconds": remaining,
-            "now_utc": datetime.now(timezone.utc).isoformat(),
-        },
-    )
-    # #endregion
 
     return build_runner_payload(
         assessment_id=assessment.id,
@@ -143,7 +94,8 @@ async def get_test(
         description=assessment.description,
         questions=assessment.questions,
         time_limit_minutes=assessment.time_limit_minutes,
-        duration_seconds=getattr(assessment, "duration_seconds", None),
+        # Same resolver the server deadline uses, so client and server agree on timing.
+        duration_seconds=assessment_duration_seconds(assessment),
         timer_mode=getattr(assessment, "timer_mode", None),
         shuffle=bool(getattr(assessment, "shuffle_questions", False)),
         seed=f"{candidate.id}:{assessment.id}",
@@ -179,32 +131,22 @@ async def start_test(
     ) as exc:
         _raise_integrity(exc)
 
-    duration = _assessment_duration(assessment)
-    remaining = _server_remaining_seconds(progress.started_at, duration)
-    # #region agent log
-    _agent_debug_log(
-        "E",
-        "candidate.py:start_test",
-        "POST start response timing fields",
-        {
-            "candidate_id": str(candidate.id),
-            "assessment_id": str(assessment.id),
-            "status": progress.status,
-            "started_at": progress.started_at.isoformat() if progress.started_at else None,
-            "started_at_tzinfo": str(getattr(progress.started_at, "tzinfo", None))
-            if progress.started_at
-            else None,
-            "duration_seconds": duration,
-            "server_remaining_seconds": remaining,
-            "now_utc": datetime.now(timezone.utc).isoformat(),
-        },
-    )
-    # #endregion
-
+    now = datetime.now(timezone.utc)
+    duration = assessment_duration_seconds(assessment)
     return {
         "assessment_id": str(assessment.id),
         "status": progress.status,
         "started_at": progress.started_at,
+        "remaining_seconds": remaining_seconds(
+            progress.started_at,
+            duration,
+            now,
+        ),
+        "write_remaining_seconds": write_remaining_seconds(
+            progress.started_at,
+            duration,
+            now,
+        ),
     }
 
 
@@ -219,6 +161,7 @@ async def autosave(
     except (
         AssessmentNotFoundError,
         AssessmentAlreadySubmittedError,
+        AssessmentNotStartedError,
         AssessmentTimeExpiredError,
         PackageNotOpenError,
         PackageClosedError,
@@ -251,8 +194,8 @@ async def submit_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
-    # Core facet scoring already ran in the submit transaction. LLM technical
-    # eval, JD synthesis, and HR email stay off the candidate hot path.
+    # Core facet scoring, LLM technical eval, JD synthesis, and HR email all
+    # stay off the candidate hot path.
     background_tasks.add_task(finalize_and_score_ai, candidate.id, assessment_id)
     company_name = await CandidateService.get_company_name(db, candidate)
     # Scores stay server-side: echoing them lets candidates calibrate answers

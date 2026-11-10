@@ -1,18 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
 
 export interface ModuleTimerState {
-  /** Seconds left, clamped at 0. Null when untimed. */
+  /** Display seconds left, clamped at 0. Null when untimed. */
   remainingSeconds: number | null;
   expired: boolean;
 }
 
 interface ModuleTimerOptions {
-  durationSeconds: number | null;
-  /** Server attempt start; null falls back to mount time (preview). */
-  startedAt: string | null;
+  /** Server-computed display countdown seed; null when untimed. */
+  remainingSeconds: number | null;
+  /**
+   * Seconds until write-lock / auto-submit. Defaults to ``remainingSeconds``.
+   * When larger than the display seed (grace window), the clock shows 0:00
+   * while ``onExpire`` waits for this deadline.
+   */
+  expireRemainingSeconds?: number | null;
   onExpire?: () => void;
+  /** Fires once when the display clock hits 0 (may precede ``onExpire`` in grace). */
+  onDisplayExpire?: () => void;
   enabled?: boolean;
+  /** Monotonic millisecond clock; only differences are used, never absolute dates. */
   now?: () => number;
+}
+
+function monotonicNow(): number {
+  return performance.now();
 }
 
 function computeRemaining(deadline: number | null, now: number): number | null {
@@ -20,64 +32,85 @@ function computeRemaining(deadline: number | null, now: number): number | null {
   return Math.ceil((deadline - now) / 1000);
 }
 
+function seedDeadline(
+  remainingSeconds: number | null | undefined,
+  now: number,
+): number | null {
+  if (remainingSeconds === null || remainingSeconds === undefined || !Number.isFinite(remainingSeconds)) {
+    return null;
+  }
+  return now + Math.max(0, remainingSeconds) * 1000;
+}
+
 /**
- * Countdown anchored to the server's `started_at`, so a reload resumes the
- * real remaining time instead of restarting the clock. Any timed module
- * clamps at 00:00 and fires `onExpire` exactly once (hard cut-off).
+ * Countdown seeded by the server's integer remaining seconds.
  *
- * @param options - Duration, anchor, and expiry callback.
+ * The client never diffs `started_at` against its own wall clock, so device
+ * clock skew or timezone parsing cannot shorten or extend an attempt. A
+ * monotonic local deadline (rather than decrementing per interval) keeps the
+ * display accurate when background tabs throttle `setInterval`.
+ *
+ * Display clamps at 00:00 from ``remainingSeconds``. Auto-submit fires from
+ * ``expireRemainingSeconds`` (duration + grace) so resume during the server
+ * grace window does not instant-submit.
+ *
+ * @param options - Server remaining seconds and expiry callback.
  * @returns Remaining seconds (clamped) plus an expiry flag.
  */
 export function useModuleTimer({
-  durationSeconds,
-  startedAt,
+  remainingSeconds,
+  expireRemainingSeconds,
   onExpire,
+  onDisplayExpire,
   enabled = true,
-  now = Date.now,
+  now = monotonicNow,
 }: ModuleTimerOptions): ModuleTimerState {
   const nowRef = useRef(now);
   nowRef.current = now;
   const onExpireRef = useRef(onExpire);
   onExpireRef.current = onExpire;
-  const firedRef = useRef(false);
+  const onDisplayExpireRef = useRef(onDisplayExpire);
+  onDisplayExpireRef.current = onDisplayExpire;
+  const expireFiredRef = useRef(false);
+  const displayFiredRef = useRef(false);
 
-  const [deadline] = useState<number | null>(() => {
-    if (!durationSeconds) return null;
-    const anchor = startedAt ? Date.parse(startedAt) : nowRef.current();
-    const resolved = (Number.isFinite(anchor) ? anchor : nowRef.current()) + durationSeconds * 1000;
-    // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5f236f'},body:JSON.stringify({sessionId:'5f236f',runId:'pre-fix',hypothesisId:'A',location:'use-module-timer.ts:deadline',message:'client timer deadline init',data:{startedAt,startedAtParsed:startedAt?Date.parse(startedAt):null,startedAtFinite:startedAt?Number.isFinite(Date.parse(startedAt)):null,durationSeconds,now:nowRef.current(),deadline:resolved,initialRemaining:Math.ceil((resolved-nowRef.current())/1000),tzOffsetMinutes:new Date().getTimezoneOffset()},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    return resolved;
+  const [displayDeadline] = useState<number | null>(() =>
+    seedDeadline(remainingSeconds, nowRef.current()),
+  );
+  const [expireDeadline] = useState<number | null>(() => {
+    const seed =
+      expireRemainingSeconds === undefined ? remainingSeconds : expireRemainingSeconds;
+    return seedDeadline(seed, nowRef.current());
   });
   const [remaining, setRemaining] = useState<number | null>(() => {
-    const raw = computeRemaining(deadline, nowRef.current());
+    const raw = computeRemaining(displayDeadline, nowRef.current());
     return raw === null ? null : Math.max(0, raw);
   });
 
   useEffect(() => {
-    if (deadline === null || !enabled) return undefined;
+    if ((displayDeadline === null && expireDeadline === null) || !enabled) return undefined;
     const tick = () => {
-      const raw = computeRemaining(deadline, nowRef.current());
-      if (raw === null) {
+      const nowMs = nowRef.current();
+      const displayRaw = computeRemaining(displayDeadline, nowMs);
+      if (displayRaw === null) {
         setRemaining(null);
-        return;
+      } else {
+        setRemaining(Math.max(0, displayRaw));
+        if (displayRaw <= 0 && !displayFiredRef.current) {
+          displayFiredRef.current = true;
+          onDisplayExpireRef.current?.();
+        }
       }
-      // #region agent log
-      if (raw <= 2 || raw % 30 === 0) {
-        fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5f236f'},body:JSON.stringify({sessionId:'5f236f',runId:'pre-fix',hypothesisId:'A',location:'use-module-timer.ts:tick',message:'client timer tick',data:{raw,deadline,now:nowRef.current()},timestamp:Date.now()})}).catch(()=>{});
-      }
-      // #endregion
-      setRemaining(Math.max(0, raw));
-      if (raw <= 0 && !firedRef.current) {
-        firedRef.current = true;
+      const expireRaw = computeRemaining(expireDeadline, nowMs);
+      if (expireRaw !== null && expireRaw <= 0 && !expireFiredRef.current) {
+        expireFiredRef.current = true;
         onExpireRef.current?.();
       }
     };
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [deadline, enabled]);
+  }, [displayDeadline, enabled, expireDeadline]);
 
   return {
     remainingSeconds: remaining,

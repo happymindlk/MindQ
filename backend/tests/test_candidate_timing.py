@@ -8,11 +8,15 @@ from uuid import uuid4
 
 import pytest
 
-from app.exceptions import AssessmentTimeExpiredError
+from app.exceptions import AssessmentNotStartedError, AssessmentTimeExpiredError
 from app.schemas.response import ResponseSave
 from app.services import candidate_service
 from app.services.candidate_service import CandidateService, is_strict_expired
-from app.services.runner_payload import STRICT_GRACE_SECONDS
+from app.services.runner_payload import (
+    STRICT_GRACE_SECONDS,
+    remaining_seconds,
+    write_remaining_seconds,
+)
 
 NOW = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
 
@@ -63,6 +67,62 @@ def test_untimed_module_never_expires():
 
 def test_not_started_attempt_is_not_expired():
     assert is_strict_expired(_assessment(), None, NOW) is False
+
+
+@pytest.mark.parametrize(
+    "started_at, duration, expected",
+    [
+        (None, 180, 180),
+        (NOW - timedelta(seconds=60), 180, 120),
+        (NOW - timedelta(seconds=60.9), 180, 119),
+        (NOW - timedelta(seconds=500), 180, 0),
+        (None, None, None),
+        (NOW - timedelta(seconds=10), 0, None),
+        # Naive DB values are UTC; a local-offset misread would be off by 19800s.
+        (datetime(2026, 10, 5, 11, 59), 180, 120),
+    ],
+)
+def test_remaining_seconds_is_utc_server_authoritative(started_at, duration, expected):
+    assert remaining_seconds(started_at, duration, NOW) == expected
+
+
+@pytest.mark.parametrize(
+    "started_seconds_ago, expected",
+    [
+        (0, 180 + STRICT_GRACE_SECONDS),
+        (180, STRICT_GRACE_SECONDS),
+        (180 + STRICT_GRACE_SECONDS - 5, 5),
+        (180 + STRICT_GRACE_SECONDS + 1, 0),
+    ],
+)
+def test_write_remaining_seconds_tracks_grace_deadline(started_seconds_ago, expected):
+    started = NOW - timedelta(seconds=started_seconds_ago)
+    assert write_remaining_seconds(started, 180, NOW) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("progress", [None, SimpleNamespace(status="NOT_STARTED", started_at=None)])
+async def test_autosave_never_starts_a_module_implicitly(monkeypatch, progress):
+    assessment = _assessment()
+    monkeypatch.setattr(
+        CandidateService,
+        "require_writable_assessment",
+        AsyncMock(return_value=(assessment, progress)),
+    )
+    monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
+    session = AsyncMock()
+    session.add = MagicMock()
+    body = ResponseSave(assessment_id=assessment.id, question_id="q1", response={"answer": "a"})
+
+    with pytest.raises(AssessmentNotStartedError):
+        await CandidateService.autosave_response(
+            session, SimpleNamespace(id=uuid4(), corporate_id=uuid4()), body
+        )
+    session.add.assert_not_called()
+    session.commit.assert_not_awaited()
+    if progress is not None:
+        assert progress.status == "NOT_STARTED"
+        assert progress.started_at is None
 
 
 @pytest.mark.asyncio
@@ -139,17 +199,18 @@ async def test_submit_after_deadline_discards_pending_and_flags_overtime(monkeyp
 
     session.add.assert_not_called()
     session.add_all.assert_not_called()
-    # Late pending answers are skipped; execute only loads rows for core scoring.
-    session.execute.assert_awaited()
+    # Late pending answers are skipped; scoring no longer runs in-request.
+    session.execute.assert_not_awaited()
     assert package_complete is False
     assert result.status == "COMPLETED"
     assert float(result.server_duration_seconds) == 500.0
     assert float(result.client_duration_seconds) == 58.4
     assert result.overtime is True
+    assert result.facet_scores is None
 
 
 @pytest.mark.asyncio
-async def test_submit_in_time_stores_elapsed_and_facets(monkeypatch):
+async def test_submit_in_time_stores_elapsed_without_scoring(monkeypatch):
     questions = [{"id": "l1", "type": "likert", "facet": "Pace", "reverse_scored": True}]
     assessment = _assessment(timer_mode="flexible", duration_seconds=600, questions=questions)
     progress = _progress(120)
@@ -163,13 +224,10 @@ async def test_submit_in_time_stores_elapsed_and_facets(monkeypatch):
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
 
     added: list = []
-    saved_row = SimpleNamespace(question_id="l1", response={"answer": 2})
-    all_rows = MagicMock()
-    all_rows.scalars.return_value.all.return_value = [saved_row]
     session = AsyncMock()
     session.add = MagicMock()
     session.add_all = MagicMock(side_effect=lambda rows: added.extend(rows))
-    session.execute = AsyncMock(side_effect=[_empty_result(), all_rows])
+    session.execute = AsyncMock(return_value=_empty_result())
     pending = [
         ResponseSave(assessment_id=assessment.id, question_id="l1", response={"answer": 2}, elapsed_seconds=7.456)
     ]
@@ -181,13 +239,47 @@ async def test_submit_in_time_stores_elapsed_and_facets(monkeypatch):
         pending_responses=pending,
     )
 
-    # LLM / HR email stay deferred; core facets land in the submit transaction.
+    # Core facets / LLM / HR email stay deferred to finalize_and_score_ai.
     assert complete is True
     assert float(added[0].elapsed_seconds) == 7.46
-    assert result.facet_scores == {"Pace": {"mean": 4.0, "n": 1, "sum": 4.0}}
+    assert result.facet_scores is None
     assert result.overtime is False
     assert result.client_duration_seconds is None
     assert result.derived_profile is None
+
+
+@pytest.mark.asyncio
+async def test_finalize_submission_scores_applies_facets(monkeypatch):
+    questions = [{"id": "l1", "type": "likert", "facet": "Pace", "reverse_scored": True}]
+    assessment = _assessment(timer_mode="flexible", duration_seconds=600, questions=questions)
+    progress = _progress(120)
+    progress.status = "COMPLETED"
+    progress.server_duration_seconds = 120
+    candidate = SimpleNamespace(id=uuid4(), corporate_id=uuid4())
+    monkeypatch.setattr(
+        CandidateService,
+        "get_assessment_for_candidate",
+        AsyncMock(return_value=assessment),
+    )
+    monkeypatch.setattr(
+        CandidateService,
+        "_get_progress",
+        AsyncMock(return_value=progress),
+    )
+    saved_row = SimpleNamespace(question_id="l1", response={"answer": 2})
+    all_rows = MagicMock()
+    all_rows.scalars.return_value.all.return_value = [saved_row]
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=all_rows)
+    session.refresh = AsyncMock()
+
+    result = await CandidateService.finalize_submission_scores(
+        session, candidate, assessment.id
+    )
+
+    assert result is progress
+    assert result.facet_scores == {"Pace": {"mean": 4.0, "n": 1, "sum": 4.0}}
+    session.commit.assert_awaited_once()
 
 
 OCTANT_CODES = ("PA", "BC", "DE", "FG", "HI", "JK", "LM", "NO")
@@ -212,7 +304,7 @@ def _ipc_rows(dominant: str):
     ]
 
 
-async def _submit_ipc(monkeypatch, rows):
+async def _finalize_ipc(monkeypatch, rows):
     assessment = _assessment(
         timer_mode="flexible",
         duration_seconds=1800,
@@ -220,29 +312,37 @@ async def _submit_ipc(monkeypatch, rows):
         scoring_profile="ipip_ipc_v1",
     )
     progress = _progress(300)
+    progress.status = "COMPLETED"
+    progress.server_duration_seconds = 300
     candidate = SimpleNamespace(id=uuid4(), corporate_id=uuid4())
     monkeypatch.setattr(
         CandidateService,
-        "require_writable_assessment",
-        AsyncMock(return_value=(assessment, progress)),
+        "get_assessment_for_candidate",
+        AsyncMock(return_value=assessment),
     )
-    monkeypatch.setattr(CandidateService, "is_package_complete", AsyncMock(return_value=False))
-    monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
+    monkeypatch.setattr(
+        CandidateService,
+        "_get_progress",
+        AsyncMock(return_value=progress),
+    )
     all_rows = MagicMock()
     all_rows.scalars.return_value.all.return_value = rows
     session = AsyncMock()
-    session.add = MagicMock()
     session.execute = AsyncMock(return_value=all_rows)
-    result, _ = await CandidateService.submit_test(session, candidate, assessment.id)
+    session.refresh = AsyncMock()
+    result = await CandidateService.finalize_submission_scores(
+        session, candidate, assessment.id
+    )
     session.commit.assert_awaited_once()
+    assert result is not None
     assert result.status == "COMPLETED"
-    # Core facets + derived profiles land in the submit transaction.
+    # Core facets + derived profiles land in the background finalize path.
     return result
 
 
 @pytest.mark.asyncio
-async def test_submit_persists_derived_profile_for_ipc(monkeypatch):
-    result = await _submit_ipc(monkeypatch, _ipc_rows("PA"))
+async def test_finalize_persists_derived_profile_for_ipc(monkeypatch):
+    result = await _finalize_ipc(monkeypatch, _ipc_rows("PA"))
     assert result.status == "COMPLETED"
     assert result.derived_profile["resolver"] == "ipip_ipc_v1"
     assert result.derived_profile["status"] == "complete"
@@ -250,20 +350,20 @@ async def test_submit_persists_derived_profile_for_ipc(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_submit_with_sparse_octant_stores_insufficient_data(monkeypatch):
+async def test_finalize_with_sparse_octant_stores_insufficient_data(monkeypatch):
     rows = [r for r in _ipc_rows("PA") if r.question_id not in {"NO0", "NO1"}]
-    result = await _submit_ipc(monkeypatch, rows)
+    result = await _finalize_ipc(monkeypatch, rows)
     assert result.derived_profile["status"] == "insufficient_data"
     assert result.derived_profile["data"]["missing_octants"] == ["NO"]
 
 
 @pytest.mark.asyncio
-async def test_resolver_crash_does_not_block_submission(monkeypatch):
+async def test_resolver_crash_does_not_block_finalize(monkeypatch):
     def _boom(_key, _inputs):
         raise RuntimeError("resolver bug")
 
     monkeypatch.setattr(candidate_service, "resolve_profile", _boom)
-    result = await _submit_ipc(monkeypatch, _ipc_rows("PA"))
+    result = await _finalize_ipc(monkeypatch, _ipc_rows("PA"))
     assert result.status == "COMPLETED"
     assert result.derived_profile is None
     assert result.facet_scores["PA"] == {"mean": 5.0, "n": 4, "sum": 20.0}

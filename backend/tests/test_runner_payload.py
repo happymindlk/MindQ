@@ -8,8 +8,10 @@ from app.services.runner_payload import (
     STRICT_GRACE_SECONDS,
     build_runner_payload,
     effective_duration_seconds,
+    remaining_seconds,
     shuffle_questions,
     strict_deadline,
+    write_remaining_seconds,
 )
 
 QUESTIONS = [{"id": f"q{i}", "text": f"Item {i}", "type": "likert", "reverse_scored": i % 2 == 0} for i in range(12)]
@@ -41,6 +43,37 @@ def test_strict_deadline_adds_grace():
     assert strict_deadline(started, 180) == started + timedelta(seconds=180 + STRICT_GRACE_SECONDS)
     assert strict_deadline(None, 180) is None
     assert strict_deadline(started, None) is None
+
+
+def test_write_remaining_seconds_covers_grace_after_display_zero():
+    started = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
+    now = started + timedelta(seconds=180 + 10)
+    assert remaining_seconds(started, 180, now) == 0
+    assert write_remaining_seconds(started, 180, now) == STRICT_GRACE_SECONDS - 10
+    assert write_remaining_seconds(started, 180, started + timedelta(seconds=180 + STRICT_GRACE_SECONDS + 1)) == 0
+    assert write_remaining_seconds(None, 180, now) == 180 + STRICT_GRACE_SECONDS
+    assert write_remaining_seconds(started, None, now) is None
+
+
+def test_build_runner_payload_exposes_write_remaining_seconds():
+    started = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
+    now = started + timedelta(seconds=100)
+    payload = build_runner_payload(
+        assessment_id=uuid4(),
+        title="Timed",
+        description=None,
+        questions=QUESTIONS,
+        time_limit_minutes=None,
+        duration_seconds=180,
+        timer_mode="strict",
+        shuffle=False,
+        seed="cand:assess",
+        started_at=started,
+        now=now,
+    )
+    dumped = payload.model_dump()
+    assert dumped["remaining_seconds"] == 80
+    assert dumped["write_remaining_seconds"] == 80 + STRICT_GRACE_SECONDS
 
 
 def test_build_runner_payload_strips_keys_and_shuffles():

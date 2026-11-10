@@ -14,7 +14,6 @@ import { candidateTestKey, cachedQuery, invalidateQuery, peekQuery, setQuery } f
 import { CANDIDATE_DASHBOARD_KEY } from '../../features/candidate-dashboard/module-status';
 
 const LOCKED_DETAIL = 'Assessment already completed. Modifications are locked.';
-const TEST_STALE_MS = 60000;
 
 function isAssessmentLocked(err) {
   return (err?.status === 409 && err?.code !== 'TIME_EXPIRED') || err?.message === LOCKED_DETAIL;
@@ -41,12 +40,14 @@ export default function TestRunner() {
   const candidateId = typeof window !== 'undefined' ? localStorage.getItem('candidateId') : null;
   const cacheKey = candidateTestKey(testId);
 
-  const cached = typeof testId === 'string' ? peekQuery(cacheKey) : undefined;
-  const [test, setTest] = useState(() => (cached && typeof cached === 'object' ? cached : null));
-  const [initialAnswers, setInitialAnswers] = useState(() => {
-    if (!cached || typeof cached !== 'object') return {};
-    return mergeAnswers(cached.answers || {}, readDraft(candidateId, testId));
-  });
+  // A cached payload only paints the instruction screen. Started attempts wait
+  // for a fresh GET because a cached remaining_seconds is already stale.
+  const peeked = typeof testId === 'string' ? peekQuery(cacheKey) : undefined;
+  const cached = peeked && typeof peeked === 'object' && !peeked.started_at ? peeked : null;
+  const [test, setTest] = useState(cached);
+  const [initialAnswers, setInitialAnswers] = useState(() =>
+    cached ? mergeAnswers(cached.answers || {}, readDraft(candidateId, testId)) : {},
+  );
   const [isLoading, setIsLoading] = useState(() => !cached);
   const [lockDetail, setLockDetail] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -57,20 +58,18 @@ export default function TestRunner() {
     return dash && typeof dash === 'object' ? dash.company_name || '' : '';
   });
   // instructions | running | package_complete | expired
-  const [phase, setPhase] = useState(() =>
-    cached && typeof cached === 'object' && cached.started_at ? 'running' : 'instructions',
-  );
+  const [phase, setPhase] = useState('instructions');
   const exitHandledRef = useRef(false);
+  const startedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     async function loadTest() {
       if (!testId) return;
       try {
-        const data = await cachedQuery(cacheKey, () => api.candidate.getTest(testId), {
-          staleTime: TEST_STALE_MS,
-        });
-        if (cancelled) return;
+        const data = await cachedQuery(cacheKey, () => api.candidate.getTest(testId));
+        // A Start click that resolved first already holds the authoritative timer seed.
+        if (cancelled || startedRef.current) return;
         setInitialAnswers(mergeAnswers(data.answers || {}, readDraft(candidateId, testId)));
         setTest(data);
         setPhase(data.started_at ? 'running' : 'instructions');
@@ -145,11 +144,11 @@ export default function TestRunner() {
       const started = await api.candidate.startTest(testId);
       const next = {
         ...test,
-        started_at: started.started_at || new Date().toISOString(),
+        started_at: started.started_at,
+        remaining_seconds: started.remaining_seconds,
+        write_remaining_seconds: started.write_remaining_seconds,
       };
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'5f236f'},body:JSON.stringify({sessionId:'5f236f',runId:'pre-fix',hypothesisId:'E',location:'TestRunner.jsx:beginModule',message:'startTest response applied',data:{testId,status:started.status,started_at_raw:started.started_at,started_at_used:next.started_at,started_at_parsed:Date.parse(next.started_at),duration_seconds:next.duration_seconds,clientNowIso:new Date().toISOString(),tzOffsetMinutes:new Date().getTimezoneOffset()},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
+      startedRef.current = true;
       setTest(next);
       setQuery(cacheKey, next);
       setPhase('running');
@@ -278,6 +277,7 @@ export default function TestRunner() {
 
   return (
     <AssessmentRunner
+      key={test.id}
       test={test}
       mode="live"
       initialAnswers={initialAnswers}

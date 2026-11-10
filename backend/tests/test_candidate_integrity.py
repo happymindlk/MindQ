@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -7,6 +8,7 @@ from fastapi import HTTPException
 from app.exceptions import (
     AssessmentAlreadySubmittedError,
     AssessmentNotFoundError,
+    AssessmentNotStartedError,
     AssessmentTimeExpiredError,
 )
 from app.schemas.candidate import CandidateQuestion, CandidateTestResponse, strip_answer_keys
@@ -139,16 +141,12 @@ async def test_get_test_response_omits_answer_keys(candidate_client, monkeypatch
     assessment_id = uuid4()
     fake = _assessment(assessment_id)
 
-    async def require_writable(session, candidate, aid):
+    async def load_context(session, candidate, aid, *, for_update=False, include_answers=False):
         assert aid == assessment_id
-        return fake, None
+        assert include_answers is True
+        return fake, None, {"q1": "4"}
 
-    async def saved_answers(session, candidate_id, aid):
-        assert aid == assessment_id
-        return {"q1": "4"}
-
-    monkeypatch.setattr(CandidateService, "require_writable_assessment", require_writable)
-    monkeypatch.setattr(CandidateService, "get_saved_answers", saved_answers)
+    monkeypatch.setattr(CandidateService, "load_runner_context", load_context)
     response = await client.get(f"/api/v1/candidate/test/{assessment_id}")
     assert response.status_code == 200
     body = response.json()
@@ -159,6 +157,57 @@ async def test_get_test_response_omits_answer_keys(candidate_client, monkeypatch
     assert body["answers"] == {"q1": "4"}
     # GET must not start the clock; started_at stays null until POST /start.
     assert body["started_at"] is None
+    assert body["remaining_seconds"] == 15 * 60
+    assert body["write_remaining_seconds"] == 15 * 60 + 30
+
+
+@pytest.mark.asyncio
+async def test_get_test_returns_server_remaining_seconds_for_started_attempt(
+    candidate_client, monkeypatch
+):
+    client, _ = candidate_client
+    assessment_id = uuid4()
+    progress = SimpleNamespace(
+        status="IN_PROGRESS",
+        started_at=datetime.now(timezone.utc) - timedelta(seconds=120),
+    )
+
+    async def load_context(session, candidate, aid, *, for_update=False, include_answers=False):
+        return _assessment(assessment_id), progress, {}
+
+    monkeypatch.setattr(CandidateService, "load_runner_context", load_context)
+    body = (await client.get(f"/api/v1/candidate/test/{assessment_id}")).json()
+    assert body["started_at"].endswith("Z") or body["started_at"].endswith("+00:00")
+    assert 15 * 60 - 122 <= body["remaining_seconds"] <= 15 * 60 - 120
+    assert (
+        15 * 60 + 30 - 122
+        <= body["write_remaining_seconds"]
+        <= 15 * 60 + 30 - 120
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_only_starts_the_requested_module(candidate_client, monkeypatch):
+    client, _ = candidate_client
+    target_id = uuid4()
+    started_ids: list = []
+
+    async def require_writable(session, candidate, aid, for_update=False):
+        return _assessment(aid), None
+
+    async def ensure_started(session, candidate, assessment, progress):
+        started_ids.append(assessment.id)
+        return SimpleNamespace(status="IN_PROGRESS", started_at=datetime.now(timezone.utc))
+
+    monkeypatch.setattr(CandidateService, "require_writable_assessment", require_writable)
+    monkeypatch.setattr(CandidateService, "ensure_started", ensure_started)
+    response = await client.post(f"/api/v1/candidate/test/{target_id}/start")
+    assert response.status_code == 200
+    body = response.json()
+    assert started_ids == [target_id]
+    assert body["status"] == "IN_PROGRESS"
+    assert body["remaining_seconds"] in (15 * 60, 15 * 60 - 1)
+    assert body["write_remaining_seconds"] in (15 * 60 + 30, 15 * 60 + 30 - 1)
 
 
 @pytest.mark.asyncio
@@ -171,14 +220,10 @@ async def test_get_test_carries_module_notices_at_test_level(candidate_client, m
     fake.show_confidentiality_notice = True
     fake.confidentiality_notice_text = "Module confidentiality note."
 
-    async def require_writable(session, candidate, aid):
-        return fake, None
+    async def load_context(session, candidate, aid, *, for_update=False, include_answers=False):
+        return fake, None, {}
 
-    async def saved_answers(session, candidate_id, aid):
-        return {}
-
-    monkeypatch.setattr(CandidateService, "require_writable_assessment", require_writable)
-    monkeypatch.setattr(CandidateService, "get_saved_answers", saved_answers)
+    monkeypatch.setattr(CandidateService, "load_runner_context", load_context)
     response = await client.get(f"/api/v1/candidate/test/{assessment_id}")
     assert response.status_code == 200
     body = response.json()
@@ -244,14 +289,10 @@ async def test_get_test_never_leaks_weights_rationale_or_keys(candidate_client, 
         questions=SERVER_ONLY_QUESTIONS,
     )
 
-    async def require_writable(session, candidate, aid):
-        return fake, None
+    async def load_context(session, candidate, aid, *, for_update=False, include_answers=False):
+        return fake, None, {}
 
-    async def saved_answers(session, candidate_id, aid):
-        return {}
-
-    monkeypatch.setattr(CandidateService, "require_writable_assessment", require_writable)
-    monkeypatch.setattr(CandidateService, "get_saved_answers", saved_answers)
+    monkeypatch.setattr(CandidateService, "load_runner_context", load_context)
     response = await client.get(f"/api/v1/candidate/test/{assessment_id}")
     assert response.status_code == 200
     body = response.json()
@@ -272,6 +313,7 @@ async def test_get_test_never_leaks_weights_rationale_or_keys(candidate_client, 
     assert by_id["lik1"]["likert_label_5"] == "Always"
     assert body["duration_seconds"] == 180
     assert body["timer_mode"] == "strict"
+    assert body["write_remaining_seconds"] == 180 + 30
 
 
 @pytest.mark.asyncio
@@ -279,10 +321,10 @@ async def test_get_test_409_when_already_submitted(candidate_client, monkeypatch
     client, _ = candidate_client
     assessment_id = uuid4()
 
-    async def require_writable(session, candidate, aid):
+    async def load_context(session, candidate, aid, *, for_update=False, include_answers=False):
         raise AssessmentAlreadySubmittedError()
 
-    monkeypatch.setattr(CandidateService, "require_writable_assessment", require_writable)
+    monkeypatch.setattr(CandidateService, "load_runner_context", load_context)
     response = await client.get(f"/api/v1/candidate/test/{assessment_id}")
     assert response.status_code == 409
     assert response.json() == {"detail": "Assessment already completed. Modifications are locked."}
@@ -322,6 +364,22 @@ async def test_autosave_409_time_expired_is_structured(candidate_client, monkeyp
     )
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "TIME_EXPIRED"
+
+
+@pytest.mark.asyncio
+async def test_autosave_409_not_started_is_structured(candidate_client, monkeypatch):
+    client, _ = candidate_client
+
+    async def autosave(session, candidate, save_data):
+        raise AssessmentNotStartedError()
+
+    monkeypatch.setattr(CandidateService, "autosave_response", autosave)
+    response = await client.post(
+        "/api/v1/candidate/autosave",
+        json={"assessment_id": str(uuid4()), "question_id": "q1", "response": {"answer": "4"}},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "NOT_STARTED"
 
 
 @pytest.mark.asyncio

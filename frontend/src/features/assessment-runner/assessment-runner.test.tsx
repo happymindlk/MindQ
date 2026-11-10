@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
@@ -218,12 +218,12 @@ describe('AssessmentRunner psychometric integrity notice', () => {
 
 describe('AssessmentRunner timer tone', () => {
   it('shows the amber caution tone in the middle third of an 18-minute test', () => {
-    const startedAt = new Date(Date.now() - 600_000).toISOString();
     renderRunner(
       test({}, 'psychometric', {
         duration_seconds: 1080,
         timer_mode: 'strict',
-        started_at: startedAt,
+        started_at: new Date(Date.now() - 600_000).toISOString(),
+        remaining_seconds: 480,
       }),
     );
     const badge = screen.getByRole('timer');
@@ -232,12 +232,12 @@ describe('AssessmentRunner timer tone', () => {
   });
 
   it('shows the green safe tone while more than two-thirds remains', () => {
-    const startedAt = new Date(Date.now() - 60_000).toISOString();
     renderRunner(
       test({}, 'psychometric', {
         duration_seconds: 1080,
         timer_mode: 'strict',
-        started_at: startedAt,
+        started_at: new Date(Date.now() - 60_000).toISOString(),
+        remaining_seconds: 1020,
       }),
     );
     const badge = screen.getByRole('timer');
@@ -253,6 +253,7 @@ describe('AssessmentRunner strict expiry', () => {
       duration_seconds: 60,
       timer_mode: 'strict',
       started_at: new Date(Date.now() - 61_000).toISOString(),
+      remaining_seconds: 0,
     };
   }
 
@@ -312,6 +313,58 @@ describe('AssessmentRunner strict expiry', () => {
   });
 });
 
+describe('AssessmentRunner grace resume', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not instant-submit when display is 0 but write grace remains', async () => {
+    vi.useFakeTimers();
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    const onTimeExpired = vi.fn();
+    renderRunner(
+      {
+        ...twoQuestionTest('psychometric'),
+        duration_seconds: 60,
+        timer_mode: 'strict',
+        started_at: new Date(Date.now() - 61_000).toISOString(),
+        remaining_seconds: 0,
+        write_remaining_seconds: 15,
+      },
+      transport,
+      'live',
+      { onTimeExpired },
+    );
+    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(transport.submit).not.toHaveBeenCalled();
+    await act(async () => {
+      vi.advanceTimersByTime(16_000);
+    });
+    expect(onTimeExpired).toHaveBeenCalledTimes(1);
+    expect(transport.submit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AssessmentRunner Next debounce', () => {
+  it('ignores a second Submit-test click within 300ms', async () => {
+    const user = userEvent.setup();
+    renderRunner(twoQuestionTest('psychometric'), TRANSPORT, 'live', {
+      initialAnswers: { q1: 'Alpha', q2: 'Beta' },
+    });
+    await user.click(screen.getByRole('button', { name: /Next question/ }));
+    expect(screen.getByText(/Question 2 of 2/)).toBeInTheDocument();
+    const submitTest = screen.getByRole('button', { name: /Submit test/ });
+    // fireEvent bypasses pointer-events so we can assert the debounce itself.
+    fireEvent.click(submitTest);
+    fireEvent.click(submitTest);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+  });
+});
+
 describe('AssessmentRunner timed hard-cut (flexible tag)', () => {
   it('auto-submits at 00:00 even when timer_mode is flexible', async () => {
     const transport = {
@@ -326,6 +379,7 @@ describe('AssessmentRunner timed hard-cut (flexible tag)', () => {
         duration_seconds: 60,
         timer_mode: 'flexible',
         started_at: new Date(Date.now() - 61_000).toISOString(),
+        remaining_seconds: 0,
       },
       transport,
       'live',

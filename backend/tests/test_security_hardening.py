@@ -163,9 +163,8 @@ async def test_submit_drops_pending_answers_for_unknown_questions(monkeypatch):
     # Security invariant: forged/unknown question ids must never write rows.
     session.add.assert_not_called()
     session.add_all.assert_not_called()
-    # Core scoring (moved into submit) loads existing responses once; that read
-    # is allowed. Upsert must not have queried — only unknown ids were present.
-    session.execute.assert_awaited_once()
+    # Upsert short-circuits when every pending id is unknown; scoring is off-path.
+    session.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio
