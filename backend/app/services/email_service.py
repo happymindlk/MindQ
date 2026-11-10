@@ -64,18 +64,20 @@ class EmailService:
         raise_on_error: bool = False,
         origin: str | None = None,
         close_time: datetime | None = None,
+        candidate_first_name: str | None = None,
     ) -> bool:
         """Send assessment invite with portal magic link and guidelines.
 
         Args:
             email: Candidate email.
-            name: Candidate display name.
-            access_code: Unique candidate (or package) access code.
-            package_title: Assessment package title.
+            name: Candidate display name (legacy; kept for call-site compat).
+            access_code: Unique candidate PIN (``HM-XXXXXX-C``), not a UUID.
+            package_title: Assessment package title mapped to ``{package_name}``.
             corporate_name: Hiring company shown in the email body.
             raise_on_error: When True, propagate SES failures.
             origin: Optional frontend origin for assessment links.
             close_time: Package assessment window end (UTC), if enforced.
+            candidate_first_name: Greeting name; defaults to ``Candidate``.
 
         Returns:
             True when SES accepted the message; False when unconfigured or failed.
@@ -90,16 +92,18 @@ class EmailService:
             access_code,
             link,
         )
-        company = (corporate_name or "").strip() or "MindQ"
-        label = format_package_label(package_title)
-        subject = f"{company} invited you: {label}"
+        package_name = (package_title or "").strip() or "Assessment"
+        company = (corporate_name or "").strip() or "Your hiring organization"
+        first_name = (candidate_first_name or "").strip() or "Candidate"
+        subject = f"MindQ invited you: {package_name} Assessments"
         html_body = render_candidate_invite_html(
             candidate_name=name,
-            package_title=package_title,
+            package_title=package_name,
             access_code=access_code,
             corporate_name=company,
             origin=origin,
             close_time=close_time,
+            candidate_first_name=first_name,
         )
         try:
             result = await send_transactional_email_async(

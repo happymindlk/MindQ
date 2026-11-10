@@ -2,7 +2,7 @@
 from typing import NoReturn
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import issue_candidate_token
@@ -26,9 +26,6 @@ from app.services.candidate_otp import (
     verify_candidate_challenge,
 )
 from app.services.candidate_service import CandidateService
-from app.services.email import resolve_frontend_origin
-from app.services.email_service import EmailService
-from app.services.package_service import PackageService
 
 logger = logging.getLogger("app.candidate_auth")
 
@@ -76,19 +73,17 @@ async def send_candidate_otp(
 @router.post("/otp/verify", response_model=CandidateResponse)
 async def verify_candidate_otp(
     body: CandidateAuthOtpVerifyRequest,
-    background_tasks: BackgroundTasks,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     """Verify an OTP challenge and return the candidate session directly.
 
-    Consumes the challenge, creates or loads the candidate, queues the
-    first-login invite email, and mints the candidate JWT — there is no
-    separate login exchange.
+    Consumes the challenge, creates or loads the candidate, and mints the
+    candidate JWT — there is no separate login exchange. Invite emails are
+    sent only via explicit HR/ops invite endpoints (not on first login).
 
     Args:
         body: Candidate identity, temp token, and six-digit code.
-        background_tasks: Queue for the first-login invite email.
         request: Incoming request (rate-limited per IP).
         db: Async database session.
 
@@ -113,17 +108,6 @@ async def verify_candidate_otp(
         _raise_package_window(exc)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if is_new:
-        package = await PackageService.get_package(db, candidate.package_id)
-        background_tasks.add_task(
-            EmailService.send_candidate_invite_email,
-            candidate.email,
-            candidate.full_name,
-            candidate.access_code,
-            package.title if package else "your assessment",
-            origin=resolve_frontend_origin(request),
-            close_time=getattr(package, "close_time", None) if package else None,
-        )
     candidate.token = issue_candidate_token(candidate)
     logger.info(
         "candidate_login",

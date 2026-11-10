@@ -38,7 +38,12 @@ from app.schemas.client_package import (
     SharePackageRequest,
     SharePackageResponse,
 )
-from app.schemas.candidate import CandidateTestResponse
+from app.schemas.candidate import (
+    BulkCandidateInviteRequest,
+    BulkCandidateInviteResponse,
+    BulkCandidateInviteResult,
+    CandidateTestResponse,
+)
 from app.schemas.library import AddTemplateRequest, AddTemplateResponse
 from app.schemas.package_builder import (
     AssessmentPackageBlueprint,
@@ -47,7 +52,8 @@ from app.schemas.package_builder import (
     SavePackageRequest,
     SavePackageResponse,
 )
-from app.security import enforce_rate_limit, public_limiter
+from app.security import enforce_rate_limit, enforce_user_rate_limit, invite_limiter, public_limiter
+from app.services.candidate_service import CandidateService
 from app.services.client_package import (
     ClientPackageError,
     ClientPackageService,
@@ -55,6 +61,7 @@ from app.services.client_package import (
 )
 from app.services.library import LibraryConflictError, LibraryError, LibraryService
 from app.services.email import resolve_frontend_origin
+from app.api.v1.invites import _dispatch_candidate_invite
 from app.services.package_share import (
     PackageShareError,
     list_corporate_packages,
@@ -464,6 +471,137 @@ async def share_package_endpoint(
         raise HTTPException(
             status_code=_SHARE_ERROR_STATUS.get(exc.code, 400), detail=str(exc)
         ) from exc
+
+
+@router.post(
+    "/{package_id}/candidates/bulk",
+    response_model=BulkCandidateInviteResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def bulk_invite_candidates(
+    package_id: UUID,
+    body: BulkCandidateInviteRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    hr: HRUserContext = Depends(get_current_ops_user),
+):
+    """Create pending candidates and queue invite emails for each new address.
+
+    Existing package+email rows are skipped (no re-send). Duplicate emails in
+    the request payload are de-duplicated case-insensitively.
+
+    Args:
+        package_id: Target published package UUID.
+        body: List of candidate emails (1–100).
+        background_tasks: FastAPI background task queue for SES dispatch.
+        request: Incoming request (Origin used when FRONTEND_URL is unset).
+        db: Async database session.
+        hr: Authenticated ops user (rate-limited).
+
+    Returns:
+        Per-email invite/skipped/error results plus counts.
+    """
+    enforce_user_rate_limit(invite_limiter, hr.user_id, "candidate_invite")
+
+    package = (
+        await db.execute(select(Package).where(Package.id == package_id))
+    ).scalars().first()
+    if not package:
+        raise HTTPException(status_code=404, detail="Package not found")
+    if getattr(package, "status", None) == "draft":
+        raise HTTPException(status_code=400, detail="Package is not published")
+
+    corporate = (
+        await db.execute(select(Corporate).where(Corporate.id == package.corporate_id))
+    ).scalar_one_or_none()
+    origin = resolve_frontend_origin(request)
+    close_time = getattr(package, "close_time", None)
+    package_title = package.title or "your assessment"
+    corporate_name = corporate.name if corporate else None
+
+    seen: set[str] = set()
+    results: list[BulkCandidateInviteResult] = []
+    invited_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    for raw_email in body.emails:
+        email_key = str(raw_email).strip().lower()
+        if not email_key or email_key in seen:
+            continue
+        seen.add(email_key)
+        try:
+            candidate, created = await CandidateService.invite(
+                db,
+                email=email_key,
+                package_id=package.id,
+                corporate_id=package.corporate_id,
+            )
+        except LookupError as exc:
+            error_count += 1
+            results.append(
+                BulkCandidateInviteResult(
+                    email=email_key, status="error", detail=str(exc)
+                )
+            )
+            continue
+        except ValueError as exc:
+            error_count += 1
+            results.append(
+                BulkCandidateInviteResult(
+                    email=email_key, status="error", detail=str(exc)
+                )
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 - isolate one bad email from the batch
+            logger.exception("bulk_invite_failed email=%s package_id=%s", email_key, package_id)
+            error_count += 1
+            results.append(
+                BulkCandidateInviteResult(
+                    email=email_key, status="error", detail=str(exc) or "Invite failed"
+                )
+            )
+            continue
+
+        if not created:
+            skipped_count += 1
+            results.append(
+                BulkCandidateInviteResult(
+                    email=candidate.email,
+                    status="skipped",
+                    access_code=candidate.access_code,
+                    detail="Candidate already invited to this package",
+                )
+            )
+            continue
+
+        background_tasks.add_task(
+            _dispatch_candidate_invite,
+            candidate_email=candidate.email,
+            candidate_name=candidate.full_name,
+            access_code=candidate.access_code,
+            package_title=package_title,
+            corporate_name=corporate_name,
+            origin=origin,
+            close_time=close_time,
+            candidate_first_name=getattr(candidate, "first_name", None),
+        )
+        invited_count += 1
+        results.append(
+            BulkCandidateInviteResult(
+                email=candidate.email,
+                status="invited",
+                access_code=candidate.access_code,
+            )
+        )
+
+    return BulkCandidateInviteResponse(
+        invited_count=invited_count,
+        skipped_count=skipped_count,
+        error_count=error_count,
+        results=results,
+    )
 
 
 @router.get("/review/{review_token}", response_model=BlindReviewResponse)

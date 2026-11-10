@@ -66,6 +66,30 @@ class CandidateInviteResponse(BaseModel):
     status: str = "pending"
 
 
+class BulkCandidateInviteRequest(BaseModel):
+    """Ops payload: invite many candidates to one package by email list."""
+
+    emails: list[EmailStr] = Field(..., min_length=1, max_length=100)
+
+
+class BulkCandidateInviteResult(BaseModel):
+    """Per-email outcome for a bulk candidate invite."""
+
+    email: EmailStr
+    status: Literal["invited", "skipped", "error"]
+    access_code: str | None = None
+    detail: str | None = None
+
+
+class BulkCandidateInviteResponse(BaseModel):
+    """Summary of a bulk candidate invite run."""
+
+    invited_count: int
+    skipped_count: int
+    error_count: int
+    results: list[BulkCandidateInviteResult]
+
+
 _NAME = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 _FULL_NAME = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
@@ -223,5 +247,9 @@ class CandidateTestResponse(BaseModel):
     show_confidentiality_notice: bool = False
     confidentiality_notice_text: Optional[str] = None
     started_at: Optional[datetime] = None
+    # Server-computed display countdown seed; null when untimed.
+    remaining_seconds: Optional[int] = None
+    # Seconds until write lock (duration + grace); client expire seed.
+    write_remaining_seconds: Optional[int] = None
     questions: list[CandidateQuestion] = Field(default_factory=list)
     answers: dict[str, Any] = Field(default_factory=dict)

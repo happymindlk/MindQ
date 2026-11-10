@@ -191,21 +191,27 @@ async def test_invite_email_includes_guidelines(monkeypatch):
     ok = await EmailService.send_candidate_invite_email(
         email="pat@example.com",
         name="Pat",
-        access_code="AP-TEST-1",
+        access_code="HM-ABCDEF-G",
         package_title="Backend Pack",
         corporate_name="Acme Corp",
         origin="https://mindq.pages.dev",
+        candidate_first_name="Pat",
     )
     assert ok is True
-    assert captured["subject"] == "Acme Corp invited you: Backend Pack Assessment"
-    assert "Backend Pack Assessment" in captured["html"]
-    assert "Assessment Package" not in captured["html"]
-    assert "AP-TEST-1" in captured["html"]
+    assert captured["subject"] == "MindQ invited you: Backend Pack Assessments"
+    assert "You're invited to complete few assessments" in captured["html"]
+    assert "Dear Pat," in captured["html"]
+    assert "Your hiring organization" in captured["html"]
     assert "Acme Corp" in captured["html"]
+    assert "for the role of" in captured["html"]
+    assert "Backend Pack" in captured["html"]
+    assert "HM-ABCDEF-G" in captured["html"]
     assert "Guidelines" in captured["html"]
     assert "Start assessment" in captured["html"]
-    assert "https://mindq.pages.dev/assessment?code=AP-TEST-1" in captured["html"]
+    assert "https://mindq.pages.dev/assessment?code=HM-ABCDEF-G" in captured["html"]
     assert "No fixed deadline" in captured["html"]
+    assert "MindQ (Pvt) Ltd" in captured["html"]
+    assert "support@mindqtalent.com" in captured["html"]
 
 
 def test_format_deadline_timestamp_and_invite_html():
@@ -518,9 +524,12 @@ def test_templates_append_assessment_package_without_doubling():
         package_title="Backend Pack",
         access_code="HM-1",
         corporate_name="Acme",
+        candidate_first_name="Pat",
     )
-    assert "Backend Pack Assessment" in invite
-    assert "Assessment Package" not in invite
+    assert "Backend Pack" in invite
+    assert "You're invited to complete few assessments" in invite
+    assert "Dear Pat," in invite
+    assert "MindQ (Pvt) Ltd" in invite
 
     already = render_hr_completion_html(
         hr_name="Acme",
