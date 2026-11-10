@@ -211,7 +211,14 @@ async def test_invite_email_includes_guidelines(monkeypatch):
     assert "https://mindq.pages.dev/assessment?code=HM-ABCDEF-G" in captured["html"]
     assert "No fixed deadline" in captured["html"]
     assert "MindQ (Pvt) Ltd" in captured["html"]
+    assert "Level 35, West Tower, World Trade Center," in captured["html"]
+    assert "Colombo 01, Sri Lanka." in captured["html"]
     assert "support@mindqtalent.com" in captured["html"]
+    assert "color:#60A5FA" in captured["html"]
+    assert 'max-width:120px' in captured["html"]
+    assert "Unsubscribe" not in captured["html"]
+    assert "Brevo" not in captured["html"]
+    assert "newsletter" not in captured["html"].lower()
 
 
 def test_format_deadline_timestamp_and_invite_html():
