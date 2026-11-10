@@ -79,7 +79,7 @@ export default function CandidateReportPreview() {
 
       {!loading && !error && data && (
         <div className="overflow-x-auto rounded-lg border border-border bg-surface-raised p-4 sm:p-8 print:overflow-visible print:rounded-none print:border-0 print:bg-white print:p-0">
-          <div className="mx-auto w-fit rounded-sm shadow-lg ring-1 ring-black/5 print:w-full print:shadow-none print:ring-0">
+          <div className="mx-auto w-full max-w-[210mm] rounded-sm bg-white px-[15mm] py-6 font-['Poppins'] shadow-lg ring-1 ring-black/5 print:max-w-none print:px-0 print:py-0 print:shadow-none print:ring-0">
             <MindQReport data={data} narrativeLoading={narrativeLoading} />
           </div>
         </div>

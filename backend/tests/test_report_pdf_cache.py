@@ -94,10 +94,10 @@ def test_any_rendered_field_change_breaks_the_key(overrides):
 
 def test_template_or_render_version_change_breaks_the_key(monkeypatch):
     before = report_cache_key(_report()).key
-    monkeypatch.setattr(report_cache, "RENDER_VERSION", "2")
+    monkeypatch.setattr(report_cache, "RENDER_VERSION", "999")
     assert report_cache_key(_report()).key != before
 
-    monkeypatch.setattr(report_cache, "RENDER_VERSION", "1")
+    monkeypatch.setattr(report_cache, "RENDER_VERSION", "2")
     report_cache.template_hash.cache_clear()
     monkeypatch.setattr(report_cache, "template_hash", lambda: "0" * 64)
     assert report_cache_key(_report()).key != before

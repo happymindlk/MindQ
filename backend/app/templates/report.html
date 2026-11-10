@@ -2,344 +2,717 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>MindQ Report - {{ report.candidate_full_name }}</title>
+    <title>MindQ Report - {{ view.candidate_name }}</title>
     <style>
+        @font-face {
+            font-family: "Poppins";
+            font-style: normal;
+            font-weight: 300;
+            src: url("fonts/Poppins-Light.ttf") format("truetype");
+        }
+        @font-face {
+            font-family: "Poppins";
+            font-style: normal;
+            font-weight: 400;
+            src: url("fonts/Poppins-Regular.ttf") format("truetype");
+        }
+        @font-face {
+            font-family: "Poppins";
+            font-style: normal;
+            font-weight: 500;
+            src: url("fonts/Poppins-Medium.ttf") format("truetype");
+        }
+        @font-face {
+            font-family: "Poppins";
+            font-style: normal;
+            font-weight: 600;
+            src: url("fonts/Poppins-SemiBold.ttf") format("truetype");
+        }
+        @font-face {
+            font-family: "Poppins";
+            font-style: normal;
+            font-weight: 700;
+            src: url("fonts/Poppins-Bold.ttf") format("truetype");
+        }
+
         @page {
-            size: A4;
+            size: A4 portrait;
             margin: 15mm 15mm 20mm 15mm;
-            @bottom-center {
-                content: "Confidential - MindQ";
+            @bottom-right {
+                content: "Page " counter(page) " of " counter(pages);
+                font-family: "Poppins", sans-serif;
                 font-size: 8pt;
                 color: #64748b;
             }
         }
-        * { box-sizing: border-box; }
-        body {
-            font-family: "Segoe UI", Helvetica, Arial, sans-serif;
-            color: #0f172a;
-            font-size: 10.5pt;
-            line-height: 1.45;
+
+        * {
+            box-sizing: border-box;
+            font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            color: #111827;
+            font-size: 13px;
+            line-height: 1.5;
+            background: #ffffff;
+        }
+
+        .page-break {
+            page-break-before: always;
+            break-before: page;
+        }
+        .avoid-break {
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+
+        .mindq-report {
+            box-sizing: border-box;
+            width: 100%;
+            max-width: 180mm;
+            margin: 0 auto;
+            padding: 0;
+            background: #ffffff;
+            color: #111827;
+            font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 13px;
+            line-height: 1.5;
+            text-align: left;
+        }
+        .mindq-report h1, .mindq-report h2, .mindq-report h3, .mindq-report p {
             margin: 0;
         }
-        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
-        .header-table td { vertical-align: middle; }
-        .logo-img { max-height: 42px; max-width: 160px; }
-        .brand-fallback {
-            font-size: 14pt;
-            font-weight: 700;
-            color: #7048E2;
-            letter-spacing: -0.02em;
-        }
-        .corp-name { font-size: 9pt; color: #64748b; margin-top: 2px; }
-        .meta { text-align: right; font-size: 9pt; color: #64748b; }
-        h1 {
-            font-size: 18pt;
-            margin: 0 0 4px 0;
-            letter-spacing: -0.02em;
-        }
-        .subtitle { color: #64748b; font-size: 10pt; margin: 0 0 16px 0; }
 
-        .exec-card, .summary, .panel, .results-table tr, .footer,
-        .competency-card, .list-section, .strengths-block, .areas-block {
-            break-inside: avoid;
-            page-break-inside: avoid;
+        .mq-header {
+            border-bottom: 2px solid #111827;
+            padding-bottom: 16px;
+            margin-bottom: 16px;
         }
-        .module-card,
-        .assessment-card,
-        .subscale-group,
-        .summary-box,
-        .strengths-block,
-        .areas-block,
-        li,
-        .mq-subscale-row {
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-        }
-        p, li { orphans: 3; widows: 3; }
-        h2, h3 { break-after: avoid; page-break-after: avoid; }
-        .entity { white-space: nowrap; }
-        .exec-card {
+        .mq-header-top {
             width: 100%;
-            border: 1px solid #e2e8f0;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+        }
+        .mq-header-top td { vertical-align: middle; }
+        .mq-header-top .mq-client-cell { text-align: right; }
+        .mq-brand img {
+            display: block;
+            height: 32px;
+            width: auto;
+        }
+        .mq-client {
+            display: inline-block;
+            text-align: right;
+        }
+        .mq-client-inner {
+            display: inline-table;
+            border-collapse: collapse;
+        }
+        .mq-client-inner td {
+            vertical-align: middle;
+            padding: 0;
+        }
+        .mq-client-name {
+            max-width: 200px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+            text-align: right;
+            padding-right: 8px !important;
+            overflow-wrap: anywhere;
+        }
+        .mq-logo {
+            width: 56px;
+            height: 56px;
+            object-fit: contain;
+            border: 1px solid #e5e7eb;
             border-radius: 8px;
-            background: #f8fafc;
-            margin-bottom: 18px;
+            background: #ffffff;
+            padding: 4px;
+        }
+        .mq-logo-fallback {
+            width: 56px;
+            height: 56px;
+            border-radius: 8px;
+            background: #111827;
+            color: #ffffff;
+            text-align: center;
+            line-height: 56px;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .mq-eyebrow {
+            margin-bottom: 4px;
+            font-size: 10px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: #7048E2;
+            font-weight: 700;
+        }
+        .mq-title {
+            margin-bottom: 16px !important;
+            font-size: 26px;
+            font-weight: 700;
+            color: #111827;
+            line-height: 1.2;
+        }
+        .mq-meta-grid {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .mq-meta-grid td {
+            width: 33.33%;
+            vertical-align: top;
+            padding: 0 12px 0 0;
+        }
+        .mq-meta-grid td:last-child { padding-right: 0; }
+        .mq-meta-grid .mq-meta-label {
+            margin: 0;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #6b7280;
+        }
+        .mq-meta-grid .mq-meta-value {
+            margin: 2px 0 0;
+            font-weight: 600;
+            color: #111827;
+        }
+        .mq-break { word-break: break-all; }
+
+        .mq-card, .mq-group, .mq-q-card {
+            width: 100%;
+            max-width: 100%;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 16px;
+            background: #ffffff;
+            box-sizing: border-box;
+        }
+        .mq-card { margin-bottom: 16px; }
+        .mq-section { margin-bottom: 16px; }
+        .mq-card h2, .mq-sr-col h2, .mq-section-title {
+            margin-bottom: 8px;
+            font-size: 11px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #111827;
+            font-weight: 700;
+            border-bottom: 1px solid #d1d5db;
+            padding-bottom: 8px;
+        }
+        .mq-section-title { margin-bottom: 16px; }
+
+        .mq-summary { white-space: pre-wrap; color: #1f2937; }
+        .mq-fallback { color: #6b7280; font-style: italic; }
+
+        .mq-group {
+            margin-bottom: 16px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .mq-group-head h3 {
+            font-size: 15px;
+            font-weight: 700;
+            color: #111827;
+            margin: 0 0 8px 0;
+        }
+        .mq-group-summary {
+            margin-bottom: 8px !important;
+            font-size: 12.5px;
+            line-height: 1.55;
+            color: #374151;
+        }
+        .mq-score-list { list-style: none; margin: 0; padding: 0; }
+        .mq-score-item {
+            padding: 8px 0;
+            border-top: 1px solid #f3f4f6;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .mq-score-item:first-child { border-top: 0; padding-top: 0; }
+        .mq-score-row {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .mq-score-row td { vertical-align: middle; padding: 0; }
+        .mq-score-name-cell {
+            width: 220px;
+            max-width: 220px;
+            padding-right: 16px !important;
+        }
+        .mq-score-name {
+            color: #111827;
+            font-weight: 600;
+            overflow-wrap: anywhere;
+        }
+        .mq-score-bar-cell { width: auto; padding-right: 16px !important; }
+        .mq-score-value-cell { width: 1%; white-space: nowrap; text-align: right; }
+        .mq-score-value, .mq-score-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #f3eefc;
+            color: #7048E2;
+            font-weight: 700;
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        .mq-score-summary {
+            margin-top: 4px !important;
+            font-size: 12.5px;
+            color: #4b5563;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .mq-subscales { list-style: none; margin: 8px 0 0; padding: 0; }
+        .mq-subscale-row {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            color: #4b5563;
+            margin-top: 4px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .mq-subscale-row td { vertical-align: middle; padding: 2px 0; }
+        .mq-subscale-name-cell {
+            width: 200px;
+            max-width: 200px;
+            padding-right: 16px !important;
+        }
+        .mq-subscale-value {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #f3f4f6;
+            color: #374151;
+            font-weight: 600;
+            font-size: 12px;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        .mq-bar-track {
+            height: 8px;
+            width: 100%;
+            min-width: 72px;
+            border-radius: 999px;
+            background: #e5e7eb;
             overflow: hidden;
         }
-        .exec-inner { width: 100%; border-collapse: collapse; }
-        .exec-inner td {
-            padding: 14px 16px;
-            text-align: center;
-            border-right: 1px solid #e2e8f0;
-        }
-        .exec-inner td:last-child { border-right: none; }
-        .metric-label {
-            font-size: 8pt;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: #64748b;
-            margin-bottom: 6px;
-        }
-        .metric-value {
-            font-size: 22pt;
-            font-weight: 700;
-            font-variant-numeric: tabular-nums;
-            color: #0f172a;
+        .mq-bar-fill {
+            display: block;
+            height: 8px;
+            border-radius: 999px;
+            background: #7048E2;
+            max-width: 100%;
         }
 
-        h2 {
-            font-size: 12pt;
-            margin: 20px 0 10px 0;
-            padding-bottom: 4px;
-            border-bottom: 1px solid #e2e8f0;
-            color: #0f172a;
+        .mq-strengths-risks {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 16px;
+            page-break-inside: avoid;
+            break-inside: avoid;
         }
-        .summary {
-            background: #fff;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 12px 14px;
-            margin-bottom: 8px;
-        }
-
-        .two-col { width: 100%; border-collapse: collapse; margin-top: 4px; }
-        .two-col > tbody > tr > td {
+        .mq-strengths-risks > tbody > tr > td {
             width: 50%;
             vertical-align: top;
             padding: 0;
         }
-        .two-col .col-left { padding-right: 8px; }
-        .two-col .col-right { padding-left: 8px; }
-        .panel {
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 10px 12px;
-            min-height: 80px;
+        .mq-strengths-risks .col-left { padding-right: 8px; }
+        .mq-strengths-risks .col-right { padding-left: 8px; }
+        .mq-sr-col {
+            border-radius: 8px;
+            padding: 16px;
+            border: 1px solid #e5e7eb;
+            page-break-inside: avoid;
+            break-inside: avoid;
         }
-        .panel h3 {
-            margin: 0 0 8px 0;
-            font-size: 10pt;
-            color: #0f172a;
-        }
-        .panel ul, .list-section ul, .strengths-block ul, .areas-block ul {
+        .mq-sr-strengths { background: #f0fdf4; border-color: #86efac; }
+        .mq-sr-risks { background: #fff7ed; border-color: #fdba74; }
+        .mq-sr-col ul {
             margin: 0;
             padding-left: 1.25rem;
             list-style-type: disc;
             list-style-position: outside;
         }
-        .panel li, .list-section li, .strengths-block li, .areas-block li {
+        .mq-sr-col li {
             display: list-item;
             margin-bottom: 4px;
-            font-size: 9.5pt;
-            color: #334155;
+            color: #1f2937;
+            page-break-inside: avoid;
+            break-inside: avoid;
         }
-        .panel-risks { border-color: #fecaca; background: #fff7f7; }
+        .mq-status-note {
+            margin-top: 4px !important;
+            font-size: 11.5px;
+            color: #92400e;
+            font-style: italic;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .mq-timed-out-badge {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: #fff7ed;
+            color: #9a3412;
+            font-size: 11px;
+            font-weight: 600;
+        }
 
-        .results-table {
+        .mq-q-stack { margin: 0; }
+        .mq-q-card {
+            margin-bottom: 16px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .mq-q-top {
             width: 100%;
             border-collapse: collapse;
-            font-size: 9.5pt;
-            margin-top: 6px;
+            margin-bottom: 8px;
         }
-        .results-table th {
-            text-align: left;
-            background: #f1f5f9;
-            padding: 7px 8px;
-            border-bottom: 1px solid #e2e8f0;
-            color: #64748b;
-            font-weight: 600;
+        .mq-q-top td { vertical-align: middle; padding: 0; }
+        .mq-q-index {
+            font-size: 10px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: #6b7280;
         }
-        .results-table td {
-            padding: 7px 8px;
-            border-bottom: 1px solid #f1f5f9;
-            vertical-align: top;
+        .mq-q-prompt {
+            margin-bottom: 8px !important;
+            font-size: 15px;
+            font-weight: 700;
+            color: #111827;
         }
-        .score-cell { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
-
-        .muted { color: #64748b; font-size: 9pt; }
-        .disclaimer {
-            margin-top: 24px;
-            padding: 10px 12px;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            background: #f8fafc;
-            font-size: 8.5pt;
-            color: #334155;
-        }
-        .footer {
-            margin-top: 20px;
-            padding-top: 10px;
-            border-top: 1px solid #e2e8f0;
-            text-align: center;
-        }
-        .mq-badge {
+        .mq-chip {
             display: inline-block;
-            padding: 3px 10px;
+            margin-bottom: 8px !important;
+            padding: 2px 8px;
             border-radius: 999px;
-            background: #0b0f17;
-            color: #e8edf5;
-            font-size: 8pt;
+            background: #f3f4f6;
+            color: #374151;
+            font-size: 11px;
             font-weight: 600;
-            letter-spacing: 0.04em;
         }
+        .mq-answer {
+            margin: 0 0 8px;
+            padding: 8px 12px;
+            border-left: 3px solid #9ca3af;
+            background: #f9fafb;
+            border-radius: 0 6px 6px 0;
+        }
+        .mq-answer-label, .mq-eval-label {
+            margin-bottom: 4px !important;
+            font-size: 10px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .mq-answer-label { color: #6b7280; }
+        .mq-answer pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px;
+            color: #111827;
+        }
+        .mq-eval-box {
+            border: 1px solid #e4daf8;
+            background: #f7f4fd;
+            border-radius: 6px;
+            padding: 8px 12px;
+        }
+        .mq-eval-label { color: #7048E2; font-weight: 700; }
+        .mq-eval-text { white-space: pre-wrap; color: #111827; }
+        .mq-scorecard { margin: 8px 0 0; padding-left: 18px; }
+        .mq-scorecard li { margin-bottom: 4px; color: #1f2937; }
+
+        .mq-footer {
+            margin-top: 24px;
+            padding-top: 12px;
+            border-top: 1px solid #d1d5db;
+            background: #ffffff;
+            page-break-inside: avoid;
+            break-inside: avoid;
+        }
+        .mq-footer-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .mq-footer-table td { vertical-align: top; padding: 0; }
+        .mq-footer-brand { width: 1%; padding-right: 16px !important; white-space: nowrap; }
+        .mq-footer-brand img { height: 22px; width: auto; display: block; }
+        .mq-footer-text {
+            font-size: 10px;
+            line-height: 1.5;
+            color: #6b7280;
+            margin: 0 0 4px 0;
+        }
+        .mq-footer-disclaimer { color: #92400e; font-weight: 600; }
+        .mq-entity, .entity { white-space: nowrap; }
+
+        .competency-card, .module-card, .assessment-card,
+        .subscale-group, .summary-box, .strengths-block, .areas-block,
+        .mq-subscale-row, .mq-score-summary, .mq-status-note, li {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+        }
+        p, li { orphans: 3; widows: 3; }
+        h2, h3 { break-after: avoid; page-break-after: avoid; }
     </style>
 </head>
 <body>
-    <table class="header-table">
-        <tr>
-            <td>
-                {% if corporate_logo_url %}
-                <img class="logo-img" src="{{ corporate_logo_url }}" alt="{{ report.company_name or 'Company logo' }}" />
-                {% else %}
-                <div class="brand-fallback">MindQ</div>
-                {% endif %}
-                {% if report.company_name %}
-                <div class="corp-name">{{ report.company_name }}</div>
-                {% endif %}
-            </td>
-            <td class="meta">
-                Generated {{ generated_at }}
-            </td>
-        </tr>
-    </table>
+<div class="mindq-report">
+    <div class="mq-first-page avoid-break">
+        <header class="mq-header">
+            <table class="mq-header-top">
+                <tr>
+                    <td>
+                        <span class="mq-brand" aria-label="MindQ">
+                            <img src="fonts/mindq-logo-light.png" alt="MindQ" />
+                        </span>
+                    </td>
+                    <td class="mq-client-cell">
+                        <div class="mq-client">
+                            <table class="mq-client-inner">
+                                <tr>
+                                    {% if view.company_name %}
+                                    <td class="mq-client-name">{{ view.company_name }}</td>
+                                    {% endif %}
+                                    <td>
+                                        {% if corporate_logo_url %}
+                                        <img class="mq-logo" src="{{ corporate_logo_url }}" alt="{{ view.company_name or 'Client' }} logo" />
+                                        {% else %}
+                                        <div class="mq-logo-fallback" aria-hidden="true">{{ (view.company_name or 'C')[:1]|upper }}</div>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+            <p class="mq-eyebrow">Assessment Report</p>
+            <h1 class="mq-title">{{ view.candidate_name }}</h1>
+            <table class="mq-meta-grid">
+                <tr>
+                    <td>
+                        <p class="mq-meta-label">Target role</p>
+                        <p class="mq-meta-value">{{ view.target_role }}</p>
+                    </td>
+                    <td>
+                        <p class="mq-meta-label">Email</p>
+                        <p class="mq-meta-value mq-break">{{ view.candidate_email }}</p>
+                    </td>
+                    <td>
+                        <p class="mq-meta-label">Assessments completed</p>
+                        <p class="mq-meta-value">{{ view.total_completed }}</p>
+                    </td>
+                </tr>
+            </table>
+        </header>
 
-    <h1>Assessment Report</h1>
-    <p class="subtitle">
-        {{ report.candidate_full_name }} · {{ report.candidate_email }}{% if report.target_role %} · {{ report.target_role }}{% endif %}
-    </p>
-
-    <div class="exec-card">
-        <table class="exec-inner">
-            <tr>
-                <td>
-                    <div class="metric-label">Assessments Completed</div>
-                    <div class="metric-value">{{ report.total_assessments_completed }}</div>
-                </td>
-                {% for item in category_averages %}
-                <td>
-                    <div class="metric-label">{{ item.category }}</div>
-                    <div class="metric-value">{{ '%.1f' | format(item.average) }}%</div>
-                </td>
-                {% endfor %}
-            </tr>
-        </table>
+        <section class="mq-card summary-box avoid-break">
+            <h2>Executive Summary</h2>
+            {% if view.summary %}
+            <p class="mq-summary">{{ view.summary }}</p>
+            {% elif view.synthesis_status == 'failed' %}
+            <p class="mq-fallback">The executive summary could not be completed on the last attempt. It retries automatically when this report is reopened.</p>
+            {% elif view.synthesis_status == 'skipped' %}
+            <p class="mq-fallback">An executive summary needs a target role and at least one completed assessment.</p>
+            {% elif view.synthesis_status == 'generating' %}
+            <p class="mq-fallback">The executive summary is still being generated. Reopen this report in a minute.</p>
+            {% else %}
+            <p class="mq-fallback">The executive summary is not available yet. Scoring may still be in progress; reopen this report shortly.</p>
+            {% endif %}
+        </section>
     </div>
 
-    <h2>Executive Summary</h2>
-    {% if report.executive_summary %}
-    <div class="summary summary-box">{{ report.executive_summary }}</div>
-    {% elif report.synthesis_status == 'skipped' %}
-    <p class="muted">An executive summary needs a target role and at least one completed assessment.</p>
-    {% elif report.synthesis_status == 'failed' %}
-    <p class="muted">The executive summary was unavailable when this report was generated.</p>
-    {% elif report.synthesis_status == 'generating' %}
-    <p class="muted">The executive summary is still being generated. Download the report again in a minute.</p>
-    {% else %}
-    <p class="muted">The executive summary is not available for this candidate yet.</p>
-    {% endif %}
-
-    <h2>Competency Breakdown</h2>
-    {% if report.category_summaries %}
-        {% for item in report.category_summaries %}
-    <div class="summary summary-box">
-        <strong>{{ item.category }}</strong>
-        <p style="margin: 4px 0 0 0;">{{ item.summary }}</p>
-    </div>
-        {% endfor %}
-    {% endif %}
-    {% if report.competency_breakdown %}
-    <table class="results-table">
-        <thead>
-            <tr>
-                <th>Category</th>
-                <th>Assessment</th>
-                <th>Score</th>
-                <th>Performance Summary</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for item in report.competency_breakdown %}
-            <tr class="competency-card module-card assessment-card">
-                <td>{{ item.category }}</td>
-                <td>
-                    {{ item.assessment_name }}
-                    {% if item.timed_out or item.status == 'TIMED_OUT' %}
-                    <div class="muted">{{ item.band or 'Timed Out / Incomplete' }}</div>
+    <section class="mq-section competency-section" aria-label="Competency Breakdown">
+        <h2 class="mq-section-title">Competency Breakdown</h2>
+        {% if view.groups %}
+            {% for group in view.groups %}
+        <article class="mq-group avoid-break">
+            <div class="mq-group-head">
+                <h3>{{ group.category }}</h3>
+            </div>
+            {% if group.summary %}
+            <p class="mq-group-summary">{{ group.summary }}</p>
+            {% endif %}
+            <ul class="mq-score-list">
+                {% for row in group.rows %}
+                <li class="mq-score-item competency-card module-card assessment-card avoid-break">
+                    <table class="mq-score-row">
+                        <tr>
+                            <td class="mq-score-name-cell">
+                                <div class="mq-score-name">
+                                    {{ row.assessment_name }}
+                                    {% if row.timed_out %}
+                                    <div><span class="mq-timed-out-badge">Timed Out / Incomplete</span></div>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td class="mq-score-bar-cell">
+                                {% if row.score is not none %}
+                                <div class="mq-bar-track" aria-hidden="true">
+                                    <div class="mq-bar-fill" style="width: {{ '%.1f'|format(row.bar_width) }}%;{% if row.bar_width > 0 %} min-width: 2px;{% endif %}"></div>
+                                </div>
+                                {% endif %}
+                            </td>
+                            <td class="mq-score-value-cell">
+                                {% if row.value_label %}
+                                <span class="mq-score-value">{{ row.value_label }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </table>
+                    {% if row.subscales %}
+                    <ul class="mq-subscales subscale-group">
+                        {% for facet in row.subscales %}
+                        <li>
+                            <table class="mq-subscale-row">
+                                <tr>
+                                    <td class="mq-subscale-name-cell">{{ facet.name }}</td>
+                                    <td class="mq-score-bar-cell">
+                                        {% if facet.position_pct is not none %}
+                                        <div class="mq-bar-track" aria-hidden="true">
+                                            <div class="mq-bar-fill" style="width: {{ '%.1f'|format(facet.bar_width) }}%;{% if facet.bar_width > 0 %} min-width: 2px;{% endif %}"></div>
+                                        </div>
+                                        {% endif %}
+                                    </td>
+                                    <td class="mq-score-value-cell">
+                                        {% if facet.value_label %}
+                                        <span class="mq-subscale-value">{{ facet.value_label }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            </table>
+                        </li>
+                        {% endfor %}
+                    </ul>
                     {% endif %}
-                </td>
-                <td class="score-cell">
-                    {% if item.display_score %}{{ item.display_score }}{% elif item.score is not none %}{{ '%.1f' | format(item.score) }}%{% else %}—{% endif %}
-                    {% if item.band %}<div class="muted">{{ item.band }}</div>{% endif %}
-                </td>
-                <td>
-                    {{ item.performance_summary or '' }}
-                    {% if item.status_note %}<div class="muted" style="margin-top: 4px;">{{ item.status_note }}</div>{% endif %}
-                </td>
-            </tr>
+                    {% if row.summary %}
+                    <p class="mq-score-summary">{{ row.summary }}</p>
+                    {% endif %}
+                    {% if row.status_note %}
+                    <p class="mq-status-note">{{ row.status_note }}</p>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </article>
             {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="muted">No scored assessments have been completed yet.</p>
-    {% endif %}
+        {% else %}
+        <p class="mq-fallback">Competency scores are not available yet.</p>
+        {% endif %}
+    </section>
 
-    {% if report.headline %}
-    <div class="summary summary-box">{{ report.headline }}</div>
-    {% endif %}
-
-    {% if report.key_takeaways %}
-    <h2>Key takeaways</h2>
-    <ul>
-        {% for item in report.key_takeaways %}
-        <li>{{ item }}</li>
-        {% endfor %}
-    </ul>
-    {% endif %}
-
-    {% if report.strengths or report.areas_to_explore %}
-    <h2>Analysis</h2>
-    <table class="two-col list-section">
+    <table class="mq-strengths-risks list-section avoid-break">
         <tr>
             <td class="col-left">
-                <div class="panel strengths-block">
-                    <h3>Strengths</h3>
-                    {% if report.strengths %}
+                <div class="mq-sr-col mq-sr-strengths strengths-block">
+                    <h2>Strengths</h2>
+                    {% if view.strengths %}
                     <ul>
-                        {% for item in report.strengths %}
+                        {% for item in view.strengths %}
                         <li>{{ item }}</li>
                         {% endfor %}
                     </ul>
                     {% else %}
-                    <p class="muted">No strengths recorded.</p>
+                    <p class="mq-fallback">No strengths recorded yet.</p>
                     {% endif %}
                 </div>
             </td>
             <td class="col-right">
-                <div class="panel panel-risks areas-block">
-                    <h3>Areas to explore</h3>
-                    {% if report.areas_to_explore %}
+                <div class="mq-sr-col mq-sr-risks areas-block">
+                    <h2>Areas to explore</h2>
+                    {% if view.risks %}
                     <ul>
-                        {% for item in report.areas_to_explore %}
+                        {% for item in view.risks %}
                         <li>{{ item }}</li>
                         {% endfor %}
                     </ul>
                     {% else %}
-                    <p class="muted">No areas to explore recorded.</p>
+                    <p class="mq-fallback">No areas to explore recorded yet.</p>
                     {% endif %}
                 </div>
             </td>
         </tr>
     </table>
+
+    {% if view.customs %}
+    <section class="mq-section">
+        <h2 class="mq-section-title">Granular Technical Assessment</h2>
+        <div class="mq-q-stack">
+            {% for q in view.customs %}
+            <article class="mq-q-card avoid-break">
+                <table class="mq-q-top">
+                    <tr>
+                        <td><p class="mq-q-index">Question {{ q.index }}</p></td>
+                        <td style="text-align: right;">
+                            {% if q.score_label %}
+                            <span class="mq-score-badge">{{ q.score_label }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                </table>
+                <h3 class="mq-q-prompt">{{ q.prompt }}</h3>
+                {% if q.evaluated_competency %}
+                <p class="mq-chip">{{ q.evaluated_competency }}</p>
+                {% endif %}
+                {% if q.answer %}
+                <blockquote class="mq-answer">
+                    <p class="mq-answer-label">Candidate answer</p>
+                    <pre>{{ q.answer }}</pre>
+                </blockquote>
+                {% endif %}
+                <div class="mq-eval-box">
+                    <p class="mq-eval-label">Evaluation / Feedback</p>
+                    {% if q.show_fallback %}
+                    <p class="mq-fallback">Evaluation pending or unavailable for this item.</p>
+                    {% else %}
+                    <p class="mq-eval-text">{{ q.evaluation }}</p>
+                    {% if q.scorecard %}
+                    <ul class="mq-scorecard">
+                        {% for bullet in q.scorecard %}
+                        <li>{{ bullet }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                    {% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
     {% endif %}
 
-    <div class="footer">
-        <span class="mq-badge">MindQ</span>
-        <p class="muted" style="margin-top: 8px;">
-            This is an auto-generated MindQ report. This document cannot be reproduced, edited, or redistributed without the written consent of <span class="entity">MindQ (Pvt.) Ltd.</span>
-        </p>
-        <p class="disclaimer">
-            This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.
-        </p>
-    </div>
+    <footer class="mq-footer">
+        <table class="mq-footer-table">
+            <tr>
+                <td class="mq-footer-brand">
+                    <span class="mq-brand" aria-label="MindQ">
+                        <img src="fonts/mindq-logo-light.png" alt="MindQ" />
+                    </span>
+                </td>
+                <td>
+                    <p class="mq-footer-text">
+                        This is an auto-generated MindQ report. This document cannot be reproduced, edited, or redistributed without the written consent of <span class="entity mq-entity">MindQ (Pvt.) Ltd.</span>
+                    </p>
+                    <p class="mq-footer-text mq-footer-disclaimer">
+                        This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.
+                    </p>
+                </td>
+            </tr>
+        </table>
+    </footer>
+</div>
 </body>
 </html>

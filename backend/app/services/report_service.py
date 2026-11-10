@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.config import settings
+from app.services.report_view import build_report_view
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,7 @@ class ReportService:
         now = datetime.now(timezone.utc)
         return template.render(
             report=report,
+            view=build_report_view(report),
             category_averages=[],
             corporate_logo_url=_safe_logo(report.get("company_logo_url")),
             generated_at=now.strftime("%B %d, %Y at %H:%M UTC"),
