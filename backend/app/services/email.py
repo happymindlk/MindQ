@@ -228,18 +228,16 @@ _CODE_BOX_STYLE = (
 
 _EMAIL_COMPANY_FOOTER = (
     "MindQ (Pvt) Ltd<br>"
-    "Level 35, West Tower,<br>"
-    "World Trade Center,<br>"
-    "Colombo 01,<br>"
-    "Sri Lanka.<br>"
+    "Level 35, West Tower, World Trade Center,<br>"
+    "Colombo 01, Sri Lanka.<br><br>"
     "For support inquiries: "
-    '<a href="mailto:support@mindqtalent.com" style="color:#6B7280;text-decoration:underline;">'
+    '<a href="mailto:support@mindqtalent.com" style="color:#60A5FA;text-decoration:underline;">'
     "support@mindqtalent.com</a>"
 )
 
 
 def _light_email_shell(body_html: str, *, origin: str | None = None) -> str:
-    """Wrap ``body_html`` in the shared light-theme MindQ email shell.
+    """Wrap ``body_html`` in the shared light-theme MindQ transactional shell.
 
     Args:
         body_html: Inner card content (already escaped by the caller).
@@ -247,19 +245,21 @@ def _light_email_shell(body_html: str, *, origin: str | None = None) -> str:
             ``frontend_origin()``.
 
     Returns:
-        Full HTML document with a light-gray wrapper, white card, logo, and
-        company footer.
+        Full HTML document with a centered MindQ logo, white content card, and
+        company address footer. No newsletter/unsubscribe/Brevo marketing chrome.
     """
     base = (origin or frontend_origin()).rstrip("/")
     logo_url = html.escape(f"{base}/branding/logo-light.png")
     return f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#F9FAFB;color:#1F2937;font-family:Segoe UI,Helvetica,Arial,sans-serif;">
   <div style="max-width:560px;margin:0 auto;padding:32px 20px;">
+    <div style="text-align:center;padding:0 0 24px;">
+      <img src="{logo_url}" alt="MindQ" width="120" style="display:inline-block;max-width:120px;width:120px;height:auto;border:0;outline:none;text-decoration:none;" />
+    </div>
     <div style="background:#FFFFFF;border:1px solid #E5E7EB;border-radius:12px;padding:32px 28px;">
-      <img src="{logo_url}" alt="MindQ" style="height:32px;margin-bottom:24px;" />
       {body_html}
     </div>
-    <p style="margin:24px 0 0;text-align:center;font-size:11px;line-height:1.55;color:#9CA3AF;">
+    <p style="margin:28px 0 0;text-align:center;font-size:11px;line-height:1.55;color:#9CA3AF;">
       {_EMAIL_COMPANY_FOOTER}
     </p>
   </div>
