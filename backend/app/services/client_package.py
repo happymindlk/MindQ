@@ -427,22 +427,26 @@ def pipeline_status(
 ) -> str:
     """Map progress counts to Pending / Scoring / Completed.
 
+    Package completion is based only on module submits. Report synthesis /
+    PDF compilation failures must not keep a finished candidate in Scoring.
+
     Args:
         completed: Completed assessment count.
         total: Assessments in the package.
         logged_in: Whether the candidate has entered the portal.
-        evaluated: Whether a usable report synthesis has been stored.
+        evaluated: Whether a usable report synthesis has been stored
+            (informational for logs/UI; does not gate Completed).
 
     Returns:
         One of ``pending``, ``scoring``, ``completed``.
     """
     if total > 0 and completed >= total:
-        status = "completed" if evaluated else "scoring"
+        status = "completed"
         # #region agent log
         try:
             import json as _json, time as _time
             with open(r"d:\happy-mind-psychometrics\.cursor\debug-f04232.log", "a", encoding="utf-8") as _f:
-                _f.write(_json.dumps({"sessionId": "f04232", "hypothesisId": "H1", "location": "client_package.py:pipeline_status", "message": "pipeline_status_modules_done", "data": {"completed": completed, "total": total, "evaluated": evaluated, "status": status, "logged_in": logged_in}, "timestamp": int(_time.time() * 1000)}) + "\n")
+                _f.write(_json.dumps({"sessionId": "f04232", "runId": "post-fix", "hypothesisId": "H1", "location": "client_package.py:pipeline_status", "message": "pipeline_status_modules_done", "data": {"completed": completed, "total": total, "evaluated": evaluated, "status": status, "logged_in": logged_in}, "timestamp": int(_time.time() * 1000)}) + "\n")
         except Exception:
             pass
         # #endregion

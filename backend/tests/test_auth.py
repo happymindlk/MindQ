@@ -112,3 +112,42 @@ async def test_hr_user_no_corporate_context():
     with pytest.raises(HTTPException) as exc:
         await auth.get_current_hr_user(authorization=f"Bearer {token}")
     assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_es256_signing_key_cached_by_kid(monkeypatch):
+    """JWKS resolve runs once per kid; later verifies stay on the in-memory cache."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = private_key.public_key()
+    kid = "test-kid-cache"
+    corp = uuid.uuid4()
+    token = jwt.encode(
+        {
+            "sub": str(uuid.uuid4()),
+            "aud": "authenticated",
+            "exp": int(time.time()) + 3600,
+            "email": "ops@example.com",
+            "app_metadata": {"corporate_id": str(corp), "corporate_role": "admin"},
+        },
+        private_key,
+        algorithm="ES256",
+        headers={"kid": kid},
+    )
+
+    calls = {"n": 0}
+
+    def fake_resolve(_token: str):
+        calls["n"] += 1
+        return public_key
+
+    monkeypatch.setattr(auth, "_resolve_signing_key_sync", fake_resolve)
+    auth._signing_keys_by_kid.clear()
+
+    first = await auth.decode_hr_token(token)
+    second = await auth.decode_hr_token(token)
+    assert first["email"] == "ops@example.com"
+    assert second["sub"] == first["sub"]
+    assert calls["n"] == 1
+    assert kid in auth._signing_keys_by_kid

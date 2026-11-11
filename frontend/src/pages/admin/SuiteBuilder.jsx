@@ -380,14 +380,21 @@ export default function SuiteBuilder() {
 
   useEffect(() => {
     let cancelled = false;
+    const shouldHydratePackage =
+      Boolean(loadPackageId) && hydratedPackageIdRef.current !== loadPackageId;
+
     (async () => {
-      // allSettled: a failed company list must not also discard the module catalog.
-      // cachedQuery shares Layout hover prefetch for corporates and StrictMode remounts.
-      const [modResult, corpResult] = await Promise.allSettled([
+      // Catalog, companies, and (when editing) package detail are independent —
+      // fire together. cachedQuery dedupes Layout shell prefetch + StrictMode remounts.
+      const [modResult, corpResult, pkgResult] = await Promise.allSettled([
         cachedQuery(PACKAGE_MODULES_QUERY_KEY, () => adminApi.listGlobalModules()),
         cachedQuery(CORPORATES_QUERY_KEY, () => adminApi.listCorporates()),
+        shouldHydratePackage
+          ? adminApi.getAdminPackage(loadPackageId)
+          : Promise.resolve(null),
       ]);
       if (cancelled) return;
+
       if (modResult.status === 'fulfilled') {
         // Merge rather than replace: the package load may already have added
         // cart modules with package-specific fields, and either request can land first.
@@ -403,6 +410,7 @@ export default function SuiteBuilder() {
           variant: 'error',
         });
       }
+
       if (corpResult.status === 'fulfilled') {
         setCorporates(corpResult.value);
       } else {
@@ -412,97 +420,87 @@ export default function SuiteBuilder() {
           variant: 'error',
         });
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [toast]);
 
-  useEffect(() => {
-    if (!loadPackageId) return;
-    // Same package id in this mount: do not wipe local/session-restored form state.
-    if (hydratedPackageIdRef.current === loadPackageId) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const pkg = await adminApi.getAdminPackage(loadPackageId);
-        if (cancelled) return;
-        skipSave.current = true;
-        skipCacheWrite.current = true;
-        setPackageId(pkg.id);
-        setCorporateId(pkg.corporate_id);
-        setTitle(pkg.title || '');
-        setDescription(pkg.description || '');
-        setTargetRole(pkg.target_role || '');
-        setOpenTime(toSriLankaInputValue(pkg.open_time));
-        setCloseTime(toSriLankaInputValue(pkg.close_time));
-        setStatus(pkg.status);
-        setCustomQuestions(pkg.custom_questions || []);
-        setCartIds((pkg.modules || []).map((m) => m.module_id).filter(Boolean));
-        const overrides = {};
+      if (!shouldHydratePackage) return;
+      if (pkgResult.status !== 'fulfilled' || !pkgResult.value) {
+        if (pkgResult.status === 'rejected') console.error(pkgResult.reason);
+        return;
+      }
+
+      const pkg = pkgResult.value;
+      skipSave.current = true;
+      skipCacheWrite.current = true;
+      setPackageId(pkg.id);
+      setCorporateId(pkg.corporate_id);
+      setTitle(pkg.title || '');
+      setDescription(pkg.description || '');
+      setTargetRole(pkg.target_role || '');
+      setOpenTime(toSriLankaInputValue(pkg.open_time));
+      setCloseTime(toSriLankaInputValue(pkg.close_time));
+      setStatus(pkg.status);
+      setCustomQuestions(pkg.custom_questions || []);
+      setCartIds((pkg.modules || []).map((m) => m.module_id).filter(Boolean));
+      const overrides = {};
+      (pkg.modules || []).forEach((m) => {
+        if (m.module_id && Array.isArray(m.questions) && m.questions.length > 0) {
+          overrides[m.module_id] = m.questions;
+        }
+      });
+      setModuleOverrides(overrides);
+      setModules((prev) => {
+        const map = new Map(prev.map((m) => [m.id, m]));
         (pkg.modules || []).forEach((m) => {
-          if (m.module_id && Array.isArray(m.questions) && m.questions.length > 0) {
-            overrides[m.module_id] = m.questions;
-          }
+          if (!m.module_id) return;
+          const existing = map.get(m.module_id) || {};
+          map.set(m.module_id, {
+            ...existing,
+            id: m.module_id,
+            slug: m.slug,
+            title: m.title,
+            description: m.description,
+            module_kind: m.module_kind,
+            time_limit_minutes: m.time_limit_minutes,
+            duration_seconds: m.duration_seconds,
+            timer_mode: m.timer_mode,
+            version: m.version,
+            upgraded_from_version: m.upgraded_from_version ?? null,
+            question_count: m.question_count,
+            is_active: m.is_active,
+            questions: m.questions || existing.questions || [],
+          });
         });
-        setModuleOverrides(overrides);
-        setModules((prev) => {
-          const map = new Map(prev.map((m) => [m.id, m]));
-          (pkg.modules || []).forEach((m) => {
-            if (!m.module_id) return;
-            const existing = map.get(m.module_id) || {};
-            map.set(m.module_id, {
-              ...existing,
-              id: m.module_id,
-              slug: m.slug,
-              title: m.title,
-              description: m.description,
-              module_kind: m.module_kind,
-              time_limit_minutes: m.time_limit_minutes,
-              duration_seconds: m.duration_seconds,
-              timer_mode: m.timer_mode,
-              version: m.version,
-              upgraded_from_version: m.upgraded_from_version ?? null,
-              question_count: m.question_count,
-              is_active: m.is_active,
-              questions: m.questions || existing.questions || [],
-            });
-          });
-          return Array.from(map.values());
+        return Array.from(map.values());
+      });
+      // Prefer newer session draft (e.g. work typed before company/title autosave).
+      const sessionDraft = readSuiteDraft(loadPackageId);
+      if (suiteDraftHasContent(sessionDraft) && pkg.status !== 'published') {
+        applyCachedSuiteFields(sessionDraft, {
+          setCorporateId,
+          setTitle,
+          setDescription,
+          setTargetRole,
+          setOpenTime,
+          setCloseTime,
+          setCartIds,
+          setModuleOverrides,
+          setCustomQuestions,
         });
-        // Prefer newer session draft (e.g. work typed before company/title autosave).
-        const sessionDraft = readSuiteDraft(loadPackageId);
-        if (suiteDraftHasContent(sessionDraft) && pkg.status !== 'published') {
-          applyCachedSuiteFields(sessionDraft, {
-            setCorporateId,
-            setTitle,
-            setDescription,
-            setTargetRole,
-            setOpenTime,
-            setCloseTime,
-            setCartIds,
-            setModuleOverrides,
-            setCustomQuestions,
-          });
-        }
-        hydratedPackageIdRef.current = loadPackageId;
-        const upgraded = (pkg.modules || []).filter((m) => m.upgraded_from_version != null);
-        if (upgraded.length > 0 && pkg.status !== 'published') {
-          // Persist the resolved versions so the draft no longer points at stale ones.
-          skipSave.current = false;
-          toast({
-            title: `${upgraded.length} module${upgraded.length === 1 ? '' : 's'} updated to the latest published version`,
-            variant: 'success',
-          });
-        }
-        if (pkg.status === 'published') {
-          setShare({
-            access_code: pkg.access_code,
-            review_path: pkg.review_token ? `/client/review/${pkg.review_token}` : null,
-          });
-        }
-      } catch (err) {
-        console.error(err);
+      }
+      hydratedPackageIdRef.current = loadPackageId;
+      const upgraded = (pkg.modules || []).filter((m) => m.upgraded_from_version != null);
+      if (upgraded.length > 0 && pkg.status !== 'published') {
+        // Persist the resolved versions so the draft no longer points at stale ones.
+        skipSave.current = false;
+        toast({
+          title: `${upgraded.length} module${upgraded.length === 1 ? '' : 's'} updated to the latest published version`,
+          variant: 'success',
+        });
+      }
+      if (pkg.status === 'published') {
+        setShare({
+          access_code: pkg.access_code,
+          review_path: pkg.review_token ? `/client/review/${pkg.review_token}` : null,
+        });
       }
     })();
     return () => {
