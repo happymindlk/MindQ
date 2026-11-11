@@ -115,7 +115,8 @@ def test_public_review_prefers_custom_technical_questions():
 def test_pipeline_status_pending_scoring_completed():
     assert pipeline_status(completed=0, total=3, logged_in=False, evaluated=False) == "pending"
     assert pipeline_status(completed=1, total=3, logged_in=True, evaluated=False) == "scoring"
-    assert pipeline_status(completed=3, total=3, logged_in=True, evaluated=False) == "scoring"
+    # Module completion alone marks Completed; report synthesis must not gate it.
+    assert pipeline_status(completed=3, total=3, logged_in=True, evaluated=False) == "completed"
     assert pipeline_status(completed=3, total=3, logged_in=True, evaluated=True) == "completed"
     assert pipeline_status(completed=1, total=3, logged_in=True, evaluated=True) == "scoring"
 

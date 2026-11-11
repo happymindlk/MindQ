@@ -203,8 +203,16 @@ async def submit_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
-    # Core facet scoring, LLM technical eval, JD synthesis, PDF prewarm, and HR
-    # email all stay off the candidate hot path — return COMPLETED immediately.
+    # Module COMPLETED is already committed in submit_test. Report synthesis /
+    # PDF work stays on BackgroundTasks so failures cannot revert completion.
+    # #region agent log
+    try:
+        import json as _json, time as _time
+        with open(r"d:\happy-mind-psychometrics\.cursor\debug-f04232.log", "a", encoding="utf-8") as _f:
+            _f.write(_json.dumps({"sessionId": "f04232", "runId": "post-fix", "hypothesisId": "H5", "location": "candidate.py:submit_test", "message": "queue_finalize_after_commit", "data": {"candidate_id": str(candidate.id), "assessment_id": str(assessment_id), "package_complete": package_complete, "progress_status": progress.status}, "timestamp": int(_time.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     background_tasks.add_task(finalize_and_score_ai, candidate.id, assessment_id)
     # Always resolve company_name: clients and tests treat it as part of the
     # submit contract even when the package is still incomplete.
