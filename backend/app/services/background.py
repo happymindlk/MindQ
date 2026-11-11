@@ -111,6 +111,14 @@ async def finalize_and_score_ai(
                 assessment_id,
             )
 
+    # #region agent log
+    try:
+        import json as _json, time as _time
+        with open(r"d:\happy-mind-psychometrics\.cursor\debug-f04232.log", "a", encoding="utf-8") as _f:
+            _f.write(_json.dumps({"sessionId": "f04232", "hypothesisId": "H3", "location": "background.py:finalize_and_score_ai", "message": "finalize_scores_done_starting_ai", "data": {"candidate_id": str(candidate_id), "assessment_id": str(assessment_id)}, "timestamp": int(_time.time() * 1000)}) + "\n")
+    except Exception:
+        pass
+    # #endregion
     await score_ai_for_candidate(candidate_id, assessment_id)
     await notify_hr_if_package_complete(candidate_id)
     await prewarm_report_pdf(candidate_id)
@@ -182,7 +190,31 @@ async def score_ai_for_candidate(
                     assessment_id,
                 )
             try:
+                # #region agent log
+                try:
+                    import json as _json, time as _time
+                    _pkg_done = await CandidateService.is_package_complete(session, candidate)
+                    with open(r"d:\happy-mind-psychometrics\.cursor\debug-f04232.log", "a", encoding="utf-8") as _f:
+                        _f.write(_json.dumps({"sessionId": "f04232", "hypothesisId": "H2", "location": "background.py:score_ai_for_candidate", "message": "before_jd_eval", "data": {"candidate_id": str(candidate_id), "package_complete": _pkg_done, "assessment_id": str(assessment_id) if assessment_id else None}, "timestamp": int(_time.time() * 1000)}) + "\n")
+                except Exception:
+                    pass
+                # #endregion
                 await CandidateService.evaluate_jd_if_package_complete(session, candidate)
+                # #region agent log
+                try:
+                    import json as _json, time as _time
+                    from sqlalchemy import select as _select
+                    from app.models.candidate_evaluation import CandidateEvaluation as _CE
+                    _ev = (
+                        await session.execute(
+                            _select(_CE.status, _CE.last_error).where(_CE.candidate_id == candidate_id)
+                        )
+                    ).first()
+                    with open(r"d:\happy-mind-psychometrics\.cursor\debug-f04232.log", "a", encoding="utf-8") as _f:
+                        _f.write(_json.dumps({"sessionId": "f04232", "hypothesisId": "H2", "location": "background.py:score_ai_for_candidate", "message": "after_jd_eval", "data": {"candidate_id": str(candidate_id), "eval_status": (_ev[0] if _ev else None), "last_error": ((_ev[1][:160] if _ev and _ev[1] else None))}, "timestamp": int(_time.time() * 1000)}) + "\n")
+                except Exception:
+                    pass
+                # #endregion
             except Exception:
                 logger.exception("jd_background_failed candidate_id=%s", candidate_id)
 

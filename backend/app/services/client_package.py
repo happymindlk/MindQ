@@ -437,7 +437,16 @@ def pipeline_status(
         One of ``pending``, ``scoring``, ``completed``.
     """
     if total > 0 and completed >= total:
-        return "completed" if evaluated else "scoring"
+        status = "completed" if evaluated else "scoring"
+        # #region agent log
+        try:
+            import json as _json, time as _time
+            with open(r"d:\happy-mind-psychometrics\.cursor\debug-f04232.log", "a", encoding="utf-8") as _f:
+                _f.write(_json.dumps({"sessionId": "f04232", "hypothesisId": "H1", "location": "client_package.py:pipeline_status", "message": "pipeline_status_modules_done", "data": {"completed": completed, "total": total, "evaluated": evaluated, "status": status, "logged_in": logged_in}, "timestamp": int(_time.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
+        return status
     if completed > 0 or logged_in:
         return "scoring"
     return "pending"

@@ -1017,6 +1017,14 @@ class CandidateService:
             raise AssessmentAlreadySubmittedError() from exc
 
         package_complete = await CandidateService.is_package_complete(session, candidate)
+        # #region agent log
+        try:
+            import json as _json, time as _time
+            with open(r"d:\happy-mind-psychometrics\.cursor\debug-f04232.log", "a", encoding="utf-8") as _f:
+                _f.write(_json.dumps({"sessionId": "f04232", "hypothesisId": "H5", "location": "candidate_service.py:submit_test", "message": "submit_committed_package_check", "data": {"candidate_id": str(candidate.id), "assessment_id": str(assessment_id), "progress_status": progress.status, "package_complete": package_complete, "completed_at": progress.completed_at.isoformat() if progress.completed_at else None}, "timestamp": int(_time.time() * 1000)}) + "\n")
+        except Exception:
+            pass
+        # #endregion
         return progress, package_complete
 
     @staticmethod

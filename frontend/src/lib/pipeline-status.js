@@ -3,12 +3,17 @@
 export function pipelineStatus(row) {
   const total = Number(row.total_assessments) || 0;
   const completed = Number(row.completed_assessments) || 0;
-  if (row.pipeline_status) return row.pipeline_status;
+  let status;
+  if (row.pipeline_status) status = row.pipeline_status;
+  else if (total > 0 && completed >= total) status = row.evaluated ? 'completed' : 'scoring';
+  else if (completed > 0 || row.logged_in_at) status = 'scoring';
+  else status = 'pending';
+  // #region agent log
   if (total > 0 && completed >= total) {
-    return row.evaluated ? 'completed' : 'scoring';
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f04232'},body:JSON.stringify({sessionId:'f04232',hypothesisId:'H1',location:'pipeline-status.js:pipelineStatus',message:'ui_status_for_full_package',data:{id:row.id||row.candidate_id||null,completed,total,evaluated:!!row.evaluated,pipeline_status:row.pipeline_status||null,status,label:status==='scoring'?'In Progress':status},timestamp:Date.now()})}).catch(()=>{});
   }
-  if (completed > 0 || row.logged_in_at) return 'scoring';
-  return 'pending';
+  // #endregion
+  return status;
 }
 
 /** Shared Tailwind classes — keep in sync with Badge variants. */
