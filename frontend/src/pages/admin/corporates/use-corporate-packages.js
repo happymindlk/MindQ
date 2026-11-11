@@ -2,6 +2,9 @@ import { useCallback } from 'react';
 import { useCachedQuery } from '../../../hooks/use-cached-query';
 import { adminApi } from '../../../lib/adminApi';
 
+/** Full ops package list (Assessment History + Layout prefetch). */
+export const PACKAGES_QUERY_KEY = 'admin:packages';
+
 /**
  * @param {string | undefined} corporateId
  * @returns {string | null}

@@ -25,12 +25,32 @@ import { cachedQuery } from '../../lib/query-cache';
 import { formatDate } from '../../lib/format-date';
 import DeadlineLabel from '../../features/package-schedule/deadline-label';
 import ExtendDeadlineModal from '../../features/package-schedule/extend-deadline-modal';
+import { CORPORATES_QUERY_KEY } from './corporates/use-corporates';
+import { PACKAGES_QUERY_KEY } from './corporates/use-corporate-packages';
 import {
   PIPELINE_BADGE_VARIANT,
   PIPELINE_LABEL,
   packageLifecycleStatus,
   pipelineStatus,
 } from '../../lib/pipeline-status';
+
+/**
+ * Group a flat package list by corporate_id for accordion rows.
+ *
+ * @param {Array<{ corporate_id?: string }>} rows
+ * @returns {Record<string, unknown[]>}
+ */
+function groupPackagesByCorporate(rows) {
+  /** @type {Record<string, unknown[]>} */
+  const grouped = {};
+  (rows || []).forEach((pkg) => {
+    const corpId = pkg.corporate_id;
+    if (!corpId) return;
+    if (!grouped[corpId]) grouped[corpId] = [];
+    grouped[corpId].push(pkg);
+  });
+  return grouped;
+}
 
 function AccordionPanel({ open, children }) {
   return (
@@ -124,6 +144,7 @@ export default function AssessmentHistory() {
   const [expandedCompanies, setExpandedCompanies] = useState(() => new Set());
   const [expandedPackages, setExpandedPackages] = useState(() => new Set());
   const [loadingCompanies, setLoadingCompanies] = useState(true);
+  const [packagesLoaded, setPackagesLoaded] = useState(false);
   const [loadingPackages, setLoadingPackages] = useState({});
   const [loadingCandidates, setLoadingCandidates] = useState({});
   const [error, setError] = useState(null);
@@ -149,17 +170,34 @@ export default function AssessmentHistory() {
     setDeadlineTarget(null);
   }, []);
 
-  const loadCompanies = useCallback(async () => {
+  const loadHistoryLists = useCallback(async () => {
     setLoadingCompanies(true);
     setError(null);
     try {
-      const rows = await cachedQuery('admin:corporates', () => adminApi.listCorporates());
-      setCompanies(rows || []);
-      const seeded = {};
-      (rows || []).forEach((c) => {
-        if (c.contact_email) seeded[c.id] = c.contact_email;
-      });
-      setHrEmails((prev) => ({ ...seeded, ...prev }));
+      // Corporates + packages are independent — fire together; both share Layout cache.
+      const [corpResult, pkgResult] = await Promise.allSettled([
+        cachedQuery(CORPORATES_QUERY_KEY, () => adminApi.listCorporates()),
+        cachedQuery(PACKAGES_QUERY_KEY, () => adminApi.getPackages()),
+      ]);
+
+      if (corpResult.status === 'fulfilled') {
+        const rows = corpResult.value || [];
+        setCompanies(rows);
+        const seeded = {};
+        rows.forEach((c) => {
+          if (c.contact_email) seeded[c.id] = c.contact_email;
+        });
+        setHrEmails((prev) => ({ ...seeded, ...prev }));
+      } else {
+        throw corpResult.reason;
+      }
+
+      if (pkgResult.status === 'fulfilled') {
+        setPackagesByCompany(groupPackagesByCorporate(pkgResult.value || []));
+        setPackagesLoaded(true);
+      } else {
+        setError(pkgResult.reason?.message || 'Failed to load assessment suites');
+      }
     } catch (err) {
       setError(err.message || 'Failed to load history');
     } finally {
@@ -167,18 +205,22 @@ export default function AssessmentHistory() {
     }
   }, []);
 
-  const loadPackages = useCallback(async (corpId) => {
-    setLoadingPackages((prev) => ({ ...prev, [corpId]: true }));
-    try {
-      const pkgRows = await adminApi.getPackages();
-      const scoped = (pkgRows || []).filter((p) => p.corporate_id === corpId);
-      setPackagesByCompany((prev) => ({ ...prev, [corpId]: scoped }));
-    } catch (err) {
-      setError(err.message || 'Failed to load assessment suites');
-    } finally {
-      setLoadingPackages((prev) => ({ ...prev, [corpId]: false }));
-    }
-  }, []);
+  const ensurePackagesForCompany = useCallback(
+    async (corpId) => {
+      if (packagesLoaded || loadingPackages[corpId]) return;
+      setLoadingPackages((prev) => ({ ...prev, [corpId]: true }));
+      try {
+        const pkgRows = await cachedQuery(PACKAGES_QUERY_KEY, () => adminApi.getPackages());
+        setPackagesByCompany(groupPackagesByCorporate(pkgRows || []));
+        setPackagesLoaded(true);
+      } catch (err) {
+        setError(err.message || 'Failed to load assessment suites');
+      } finally {
+        setLoadingPackages((prev) => ({ ...prev, [corpId]: false }));
+      }
+    },
+    [packagesLoaded, loadingPackages],
+  );
 
   const loadCandidates = useCallback(async (pkgId) => {
     setLoadingCandidates((prev) => ({ ...prev, [pkgId]: true }));
@@ -193,16 +235,14 @@ export default function AssessmentHistory() {
   }, []);
 
   useEffect(() => {
-    loadCompanies();
-  }, [loadCompanies]);
+    void loadHistoryLists();
+  }, [loadHistoryLists]);
 
   useEffect(() => {
     if (!companyId) return;
     setExpandedCompanies((prev) => new Set(prev).add(companyId));
-    if (!packagesByCompany[companyId] && !loadingPackages[companyId]) {
-      loadPackages(companyId);
-    }
-  }, [companyId, packagesByCompany, loadingPackages, loadPackages]);
+    void ensurePackagesForCompany(companyId);
+  }, [companyId, ensurePackagesForCompany]);
 
   useEffect(() => {
     if (!packageId || !companyId) return;
@@ -230,7 +270,7 @@ export default function AssessmentHistory() {
       } else {
         next.add(corpId);
         navigate(`/admin/history/${corpId}`);
-        if (!packagesByCompany[corpId]) loadPackages(corpId);
+        void ensurePackagesForCompany(corpId);
       }
       return next;
     });

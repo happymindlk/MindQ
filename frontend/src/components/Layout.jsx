@@ -21,6 +21,12 @@ import { useIdleTimer } from '../hooks/use-idle-timer';
 import { cachedQuery } from '../lib/query-cache';
 import { adminApi } from '../lib/adminApi';
 import { libraryApi } from '../features/assessment-builder/api/library-api';
+import { CORPORATES_QUERY_KEY } from '../pages/admin/corporates/use-corporates';
+import { PACKAGES_QUERY_KEY } from '../pages/admin/corporates/use-corporate-packages';
+import { LIBRARY_MODULES_QUERY_KEY } from '../features/assessment-builder/hooks/use-module-library';
+
+/** Suite Builder catalog (`GET /packages/modules`) — distinct from library templates. */
+const PACKAGE_MODULES_QUERY_KEY = 'admin:package-modules';
 
 const navigation = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
@@ -31,6 +37,31 @@ const navigation = [
 
 const SETTINGS_HREF = '/admin/settings';
 const SIDEBAR_ID = 'admin-sidebar';
+
+/** Fire-and-forget warm of shared admin list endpoints (deduped by cachedQuery). */
+function prefetchAdminDataset(key, fetcher) {
+  void cachedQuery(key, fetcher).catch(() => undefined);
+}
+
+function prefetchForNavHref(href) {
+  if (href === '/admin' || href === '/admin/dashboard') {
+    prefetchAdminDataset(CORPORATES_QUERY_KEY, () => adminApi.listCorporates());
+    return;
+  }
+  if (href === '/admin/library') {
+    prefetchAdminDataset(LIBRARY_MODULES_QUERY_KEY, () => libraryApi.listModules());
+    return;
+  }
+  if (href === '/admin/packages/create') {
+    prefetchAdminDataset(PACKAGE_MODULES_QUERY_KEY, () => adminApi.listGlobalModules());
+    prefetchAdminDataset(CORPORATES_QUERY_KEY, () => adminApi.listCorporates());
+    return;
+  }
+  if (href === '/admin/history') {
+    prefetchAdminDataset(CORPORATES_QUERY_KEY, () => adminApi.listCorporates());
+    prefetchAdminDataset(PACKAGES_QUERY_KEY, () => adminApi.getPackages());
+  }
+}
 
 function resolveShellTitle(pathname) {
   if (pathname.startsWith(SETTINGS_HREF)) {
@@ -67,6 +98,17 @@ export default function Layout() {
   const { user, profile, signOut, lockSession } = useAuth();
 
   useIdleTimer({ onIdle: lockSession });
+
+  // Warm shared list endpoints once at the shell so tab mounts hit cache,
+  // and independent GETs leave the browser together instead of a waterfall.
+  useEffect(() => {
+    void Promise.allSettled([
+      cachedQuery(CORPORATES_QUERY_KEY, () => adminApi.listCorporates()),
+      cachedQuery(LIBRARY_MODULES_QUERY_KEY, () => libraryApi.listModules()),
+      cachedQuery(PACKAGES_QUERY_KEY, () => adminApi.getPackages()),
+      cachedQuery(PACKAGE_MODULES_QUERY_KEY, () => adminApi.listGlobalModules()),
+    ]);
+  }, []);
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -147,16 +189,7 @@ export default function Layout() {
                   }
                 `}
                 onClick={() => setSidebarOpen(false)}
-                onMouseEnter={() => {
-                  // Prefetch adjacent tab payloads so the click paints from cache.
-                  if (item.href === '/admin' || item.href === '/admin/dashboard') {
-                    void cachedQuery('admin:corporates', () => adminApi.listCorporates()).catch(() => undefined);
-                  } else if (item.href === '/admin/library') {
-                    void cachedQuery('admin:library-modules', () => libraryApi.listModules()).catch(() => undefined);
-                  } else if (item.href === '/admin/history') {
-                    void cachedQuery('admin:corporates', () => adminApi.listCorporates()).catch(() => undefined);
-                  }
-                }}
+                onMouseEnter={() => prefetchForNavHref(item.href)}
               >
                 <item.icon className="w-4 h-4 shrink-0" />
                 {item.name}

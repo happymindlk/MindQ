@@ -8,13 +8,14 @@ import Skeleton from '../../../components/ui/Skeleton';
 import { useToast } from '../../../components/ui/useToast';
 import { adminApi } from '../../../lib/adminApi';
 import { friendlyErrorMessage } from '../../../lib/friendly-error';
+import { invalidateQuery } from '../../../lib/query-cache';
 import CorporateLogo from './corporate-logo';
 import CorporatePackageCard from './corporate-package-card';
 import SharePackageModal from './share-package-modal';
 import ShareWithCandidatesModal from './share-with-candidates-modal';
 import ExtendDeadlineModal from '../../../features/package-schedule/extend-deadline-modal';
 import { useCorporates } from './use-corporates';
-import { useCorporatePackages } from './use-corporate-packages';
+import { PACKAGES_QUERY_KEY, useCorporatePackages } from './use-corporate-packages';
 
 const GRID = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4';
 
@@ -124,6 +125,7 @@ export default function CorporateDetail() {
     try {
       await adminApi.deletePackage(deleting.id);
       removePackage(deleting.id);
+      invalidateQuery(PACKAGES_QUERY_KEY);
       toast({
         title: 'Package deleted',
         description: 'Pending invitations no longer admit new candidates. History is kept.',

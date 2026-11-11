@@ -12,8 +12,10 @@ Two independent token types:
   with SECRET_KEY under a dedicated audience so they can never satisfy
   ops/HR dependencies (and Supabase tokens never satisfy client dependencies).
 """
+import asyncio
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import jwt
 from fastapi import Depends, Header, HTTPException
@@ -97,7 +99,12 @@ class HRUserContext:
         self.role = role
 
 # Cached JWKS client for asymmetric tokens (local `supabase start` uses ES256).
+# PyJWKClient fetches via synchronous urllib; never call that on the event loop.
 _jwks_client: jwt.PyJWKClient | None = None
+_jwks_lock = asyncio.Lock()
+# kid → public key material. Survives PyJWKClient's 5-minute set refresh so hot
+# paths stay local after the first successful resolve.
+_signing_keys_by_kid: dict[str, Any] = {}
 _ASYMMETRIC_ALGS = frozenset({"ES256", "RS256"})
 
 
@@ -109,7 +116,33 @@ def _jwks() -> jwt.PyJWKClient:
     return _jwks_client
 
 
-def decode_hr_token(token: str) -> dict:
+def _resolve_signing_key_sync(token: str) -> Any:
+    """Blocking JWKS lookup (urllib). Must run off the event loop via to_thread."""
+    return _jwks().get_signing_key_from_jwt(token).key
+
+
+async def _signing_key_for_token(token: str) -> Any:
+    """Return the asymmetric public key for ``token``, caching by ``kid``.
+
+    Cache hits are pure memory. Cache misses run ``PyJWKClient`` in a worker
+    thread so a JWKS HTTP round-trip cannot freeze FastAPI's event loop when many
+    authenticated requests arrive together (the frontend waterfall case).
+    """
+    header = jwt.get_unverified_header(token)
+    kid = header.get("kid")
+    if isinstance(kid, str) and kid in _signing_keys_by_kid:
+        return _signing_keys_by_kid[kid]
+
+    async with _jwks_lock:
+        if isinstance(kid, str) and kid in _signing_keys_by_kid:
+            return _signing_keys_by_kid[kid]
+        key = await asyncio.to_thread(_resolve_signing_key_sync, token)
+        if isinstance(kid, str) and kid:
+            _signing_keys_by_kid[kid] = key
+        return key
+
+
+async def decode_hr_token(token: str) -> dict:
     """Verify an HR access token.
 
     Hosted projects and older local stacks mint HS256 tokens with JWT_SECRET.
@@ -123,7 +156,7 @@ def decode_hr_token(token: str) -> dict:
     if alg not in _ASYMMETRIC_ALGS:
         # Never let the token pick its own verification scheme (alg=none / HS-with-public-key confusion).
         raise jwt.InvalidAlgorithmError(f"Unsupported token algorithm: {alg!r}")
-    key = _jwks().get_signing_key_from_jwt(token).key
+    key = await _signing_key_for_token(token)
     return jwt.decode(token, key, algorithms=[alg], **decode_kwargs)
 
 
@@ -133,7 +166,7 @@ async def get_current_supabase_user(
     """Verify a Supabase access token without requiring tenant provisioning."""
     token = _bearer(authorization)
     try:
-        payload = decode_hr_token(token)
+        payload = await decode_hr_token(token)
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
