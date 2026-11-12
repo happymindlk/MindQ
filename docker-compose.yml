@@ -1,14 +1,28 @@
-# Legacy compose — do not use for the hybrid Supabase stack.
+# Local helper services for MindQ development.
 #
-# Day-to-day local development:
+# Day-to-day app stack still uses:
 #   1. `supabase start` + `supabase db reset`  (Postgres on :54322)
 #   2. Backend uvicorn on :8000 against DATABASE_URL → that Postgres
-#   3. Frontend Vite on :5173
+#   3. `arq app.jobs.worker.WorkerSettings` (consumes REDIS_URL)
+#   4. Frontend Vite on :5173
 # See DEPLOYMENT.md.
 #
-# This file remains only as a reminder that the old SQLite single-compose
-# demo is retired. Prefer a container host that points DATABASE_URL at
-# Supabase (local or cloud) and installs WeasyPrint system libs (see
-# backend/Dockerfile).
+# Start Redis only:
+#   docker compose up -d redis
 
-services: {}
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - mindq_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mindq_redis_data:

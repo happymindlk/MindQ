@@ -118,6 +118,14 @@ class Settings(BaseSettings):
     # Incomplete candidates older than this many hours are nudged by the job.
     NUDGE_AFTER_HOURS: int = 24
 
+    # Durable ARQ job queue (Redis). Web process enqueues; a separate
+    # `arq app.jobs.worker.WorkerSettings` process consumes.
+    REDIS_URL: str = "redis://localhost:6379/0"
+    ARQ_MAX_JOBS: int = 10
+    # Gemini technical + JD synthesis + WeasyPrint prewarm can exceed a few minutes.
+    ARQ_JOB_TIMEOUT: int = 300
+    ARQ_MAX_TRIES: int = 3
+
     # Accepts a comma-separated string or a JSON / Python list in env / code.
     # NoDecode: pydantic-settings otherwise JSON-parses list env values first.
     CORS_ORIGINS: Annotated[str | list[str], NoDecode] = (

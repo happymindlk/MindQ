@@ -1,11 +1,11 @@
 from uuid import UUID
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_hr_user, HRUserContext, is_ops_role
+from app.jobs.enqueue import enqueue_nudge_email
 from app.services.candidate_service import CandidateService
 from app.services.package_service import PackageService
-from app.services.email_service import EmailService
 from app.services import storage as storage_service
 from app.security import email_limiter, enforce_user_rate_limit
 
@@ -15,7 +15,6 @@ router = APIRouter()
 @router.post("/{id}/nudge")
 async def nudge_candidate(
     id: UUID,
-    background_tasks: BackgroundTasks,
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -29,12 +28,12 @@ async def nudge_candidate(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     package = await PackageService.get_package(db, candidate.package_id)
-    background_tasks.add_task(
-        EmailService.send_nudge_email,
+    await enqueue_nudge_email(
         candidate.email,
         candidate.full_name,
         candidate.access_code,
         package.title if package else "your assessment",
+        candidate_id=candidate.id,
     )
     return {"sent": True, "queued": True, "candidate_id": str(candidate.id)}
 

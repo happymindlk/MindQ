@@ -2,14 +2,14 @@ from uuid import UUID
 from typing import NoReturn
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
+from app.jobs.enqueue import enqueue_finalize_and_score_ai
 from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.response import ResponseSave, ResponseSubmit
 from app.services.candidate_service import CandidateService, assessment_duration_seconds
-from app.services.background import finalize_and_score_ai
 from app.services.runner_payload import (
     build_runner_payload,
     remaining_seconds,
@@ -183,7 +183,6 @@ async def autosave(
 @router.post("/test/{assessment_id}/submit")
 async def submit_test(
     assessment_id: UUID,
-    background_tasks: BackgroundTasks,
     candidate: Candidate = Depends(get_current_candidate),
     db: AsyncSession = Depends(get_db),
     body: ResponseSubmit | None = None,
@@ -203,8 +202,8 @@ async def submit_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
-    # Module COMPLETED is already committed in submit_test. Report synthesis /
-    # PDF work stays on BackgroundTasks so failures cannot revert completion.
+    # Module COMPLETED is already committed in submit_test. Scoring / Gemini /
+    # PDF work is durable on ARQ so failures cannot revert completion.
     # #region agent log
     try:
         import json as _json, time as _time
@@ -213,7 +212,7 @@ async def submit_test(
     except Exception:
         pass
     # #endregion
-    background_tasks.add_task(finalize_and_score_ai, candidate.id, assessment_id)
+    await enqueue_finalize_and_score_ai(candidate.id, assessment_id)
     # Always resolve company_name: clients and tests treat it as part of the
     # submit contract even when the package is still incomplete.
     company_name = await CandidateService.get_company_name(db, candidate)

@@ -2,12 +2,13 @@
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import HRUserContext, get_current_hr_user, is_ops_role
 from app.database import get_db
+from app.jobs.enqueue import enqueue_candidate_invite
 from app.models.corporate import Corporate
 from app.models.package import Package
 from app.schemas.candidate import CandidateInviteRequest, CandidateInviteResponse
@@ -36,7 +37,7 @@ async def _dispatch_candidate_invite(
     close_time: datetime | None = None,
     candidate_first_name: str | None = None,
 ) -> None:
-    """BackgroundTasks worker for one candidate invite; never raises silently.
+    """ARQ / inline worker for one candidate invite; never raises silently.
 
     Args:
         candidate_email: Raw candidate address (sanitized before dispatch).
@@ -92,7 +93,6 @@ async def _dispatch_candidate_invite(
 )
 async def invite_candidate(
     body: CandidateInviteRequest,
-    background_tasks: BackgroundTasks,
     request: Request,
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
@@ -148,8 +148,7 @@ async def invite_candidate(
     )
     # Mocks / partial package objects may omit close_time; never AttributeError here.
     close_time = getattr(package, "close_time", None) if package else None
-    background_tasks.add_task(
-        _dispatch_candidate_invite,
+    await enqueue_candidate_invite(
         candidate_email=candidate.email,
         candidate_name=candidate.full_name,
         access_code=candidate.access_code,

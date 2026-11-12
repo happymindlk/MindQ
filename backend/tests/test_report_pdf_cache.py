@@ -228,7 +228,7 @@ def _get(report, *, cached, rendered=(PDF, True)):
         ),
         patch("app.services.report_pdf.ReportService.generate_report_bytes", new=render),
         patch("app.services.report_pdf.storage_service.fetch_cached_report", new=fetch),
-        patch("app.services.report_pdf.storage_service.store_cached_report", new=store),
+        patch("app.jobs.tasks.storage_service.store_cached_report", new=store),
     ):
         res = _client(report).get(f"/api/v1/admin/candidates/{CANDIDATE}/report")
     return res, fetch, store, render

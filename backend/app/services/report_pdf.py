@@ -15,10 +15,10 @@ from typing import Literal
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import BackgroundTasks
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+from app.jobs.enqueue import enqueue_store_cached_report
 from app.schemas.mindq_report import MindQReportResponse
 from app.services import storage as storage_service
 from app.services.report_cache import report_cache_key
@@ -99,7 +99,6 @@ async def render_report(
     *,
     corporate_id: UUID,
     candidate_id: UUID,
-    background_tasks: BackgroundTasks,
     portal: Portal,
 ) -> RenderedReport:
     """Return cached PDF bytes, or render once and queue the upload.
@@ -108,7 +107,6 @@ async def render_report(
         report: Fully assembled report for an already-authorized candidate.
         corporate_id: Candidate's tenant (storage prefix).
         candidate_id: Candidate id (storage path segment).
-        background_tasks: Request-scoped queue for the cache upload.
         portal: Calling portal, for telemetry only.
 
     Returns:
@@ -137,8 +135,7 @@ async def render_report(
             content=content, is_pdf=is_pdf, cache_state="MISS" if cacheable else "BYPASS"
         )
         if is_pdf and cacheable:
-            background_tasks.add_task(
-                storage_service.store_cached_report,
+            await enqueue_store_cached_report(
                 corporate_id,
                 candidate_id,
                 cache_key.key,
@@ -164,7 +161,7 @@ async def render_and_store_report(
 ) -> RenderedReport:
     """Render (or fetch) a report PDF and persist cache hits synchronously.
 
-    Used by background warmers that have no request-scoped ``BackgroundTasks``.
+    Used by background warmers that should not enqueue a second upload job.
     Skips caching while ``synthesis_status == "generating"``.
 
     Args:
@@ -220,7 +217,6 @@ async def serve_report_pdf(
     *,
     corporate_id: UUID,
     candidate_id: UUID,
-    background_tasks: BackgroundTasks,
     portal: Portal,
 ) -> StreamingResponse:
     """Render (or fetch) the report and wrap it in the download response.
@@ -229,7 +225,6 @@ async def serve_report_pdf(
         report: Fully assembled report for an already-authorized candidate.
         corporate_id: Candidate's tenant (storage prefix).
         candidate_id: Candidate id (storage path segment).
-        background_tasks: Request-scoped queue for the cache upload.
         portal: Calling portal, for telemetry only.
 
     Returns:
@@ -240,7 +235,6 @@ async def serve_report_pdf(
         report,
         corporate_id=corporate_id,
         candidate_id=candidate_id,
-        background_tasks=background_tasks,
         portal=portal,
     )
     ext = "pdf" if rendered.is_pdf else "html"
