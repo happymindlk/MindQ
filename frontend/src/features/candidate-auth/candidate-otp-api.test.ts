@@ -32,6 +32,7 @@ describe('sendCandidateOtp', () => {
       email: 'ada@example.com',
       first_name: 'Ada',
       full_name: 'Ada Lovelace',
+      terms_accepted: true,
     });
   });
 
@@ -68,6 +69,7 @@ describe('verifyCandidateOtp', () => {
       email: 'ada@example.com',
       temp_token: 'temp-token-value',
       otp_code: '123456',
+      terms_accepted: true,
     });
     expect(session).toEqual({
       token: 'cand-jwt',

@@ -23,6 +23,7 @@ function fill(result: { current: ReturnType<typeof useCandidateOtpLogin> }) {
     result.current.updateField('firstName', complete.firstName);
     result.current.updateField('lastName', complete.lastName);
     result.current.updateField('email', complete.email);
+    result.current.setTermsAccepted(true);
   });
 }
 
@@ -56,6 +57,20 @@ describe('useCandidateOtpLogin', () => {
     expect(result.current.canSend).toBe(false);
     await act(() => result.current.sendCode());
     expect(sendCandidateOtp).not.toHaveBeenCalled();
+  });
+
+  it('blocks sending until terms are accepted even when identity is complete', async () => {
+    const { result } = renderHook(() => useCandidateOtpLogin('HM-1', vi.fn()));
+    act(() => {
+      result.current.updateField('firstName', complete.firstName);
+      result.current.updateField('lastName', complete.lastName);
+      result.current.updateField('email', complete.email);
+    });
+    expect(result.current.canSend).toBe(false);
+    await act(() => result.current.sendCode());
+    expect(sendCandidateOtp).not.toHaveBeenCalled();
+    act(() => result.current.setTermsAccepted(true));
+    expect(result.current.canSend).toBe(true);
   });
 
   it('moves to the code step and starts the resend cooldown after sending', async () => {
@@ -157,6 +172,7 @@ describe('useCandidateOtpLogin', () => {
     expect(result.current.step).toBe('details');
     expect(result.current.code).toBe('');
     expect(result.current.tempToken).toBe('');
+    expect(result.current.termsAccepted).toBe(true);
     expect(result.current.identity.firstName).toBe('Ada');
     expect(result.current.identity.lastName).toBe('Lovelace');
   });

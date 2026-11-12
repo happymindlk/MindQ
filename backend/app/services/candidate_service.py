@@ -282,6 +282,7 @@ class CandidateService:
             invited.full_name = display_name
             invited.first_name = first_name
             invited.logged_in_at = _utcnow()
+            invited.terms_accepted_at = _utcnow()
             await session.commit()
             await session.refresh(invited)
             return invited, False
@@ -319,6 +320,7 @@ class CandidateService:
             candidate.first_name = first_name
 
         candidate.logged_in_at = _utcnow()
+        candidate.terms_accepted_at = _utcnow()
         await session.commit()
         await session.refresh(candidate)
         return candidate, is_new

@@ -254,6 +254,7 @@ def _login():
         access_code="HM-WIN01-A",
         temp_token="t" * 24,
         otp_code="123456",
+        terms_accepted=True,
     )
 
 

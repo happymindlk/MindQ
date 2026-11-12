@@ -136,6 +136,7 @@ async def test_login_rate_limit_returns_429(async_client, monkeypatch):
         "access_code": "HM-N0PE-Z",
         "temp_token": "x" * 24,
         "otp_code": "123456",
+        "terms_accepted": True,
     }
     for _ in range(2):
         res = await async_client.post(

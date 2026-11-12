@@ -47,6 +47,7 @@ export function useCandidateOtpLogin(
     lastName: '',
     email: '',
   });
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [code, setCodeState] = useState('');
   const [tempToken, setTempToken] = useState('');
   const [loading, setLoading] = useState(false);
@@ -72,7 +73,7 @@ export function useCandidateOtpLogin(
   }, []);
 
   const sendCode = useCallback(async () => {
-    if (!isIdentityComplete(identity) || loading) return;
+    if (!isIdentityComplete(identity) || !termsAccepted || loading) return;
     setLoading(true);
     setError(null);
     try {
@@ -86,7 +87,7 @@ export function useCandidateOtpLogin(
     } finally {
       setLoading(false);
     }
-  }, [identity, loading]);
+  }, [identity, termsAccepted, loading]);
 
   const resendCode = useCallback(async () => {
     if (cooldown > 0 || loading) return;
@@ -94,7 +95,7 @@ export function useCandidateOtpLogin(
   }, [cooldown, loading, sendCode]);
 
   const verifyCode = useCallback(async () => {
-    if (code.length < OTP_MIN_LENGTH || !tempToken || loading) return;
+    if (code.length < OTP_MIN_LENGTH || !tempToken || !termsAccepted || loading) return;
     setLoading(true);
     setError(null);
     try {
@@ -105,7 +106,7 @@ export function useCandidateOtpLogin(
       setError(message(err, 'Invalid or expired code'));
       setLoading(false);
     }
-  }, [code, identity, tempToken, loading, onAuthenticated]);
+  }, [code, identity, tempToken, termsAccepted, loading, onAuthenticated]);
 
   const editDetails = useCallback(() => {
     setStep('details');
@@ -117,13 +118,15 @@ export function useCandidateOtpLogin(
   return {
     step,
     identity,
+    termsAccepted,
+    setTermsAccepted,
     code,
     tempToken,
     loading,
     error,
     cooldown,
-    canSend: isIdentityComplete(identity),
-    canVerify: code.length >= OTP_MIN_LENGTH,
+    canSend: isIdentityComplete(identity) && termsAccepted,
+    canVerify: code.length >= OTP_MIN_LENGTH && termsAccepted,
     updateField,
     setCode,
     sendCode,

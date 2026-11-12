@@ -21,6 +21,7 @@ SEND_PAYLOAD = {
     "full_name": "Ada Lovelace",
     "email": "ada@example.com",
     "access_code": "HM-ABCDEF-1",
+    "terms_accepted": True,
 }
 PAYLOAD = {
     "first_name": "Ada",
@@ -29,6 +30,7 @@ PAYLOAD = {
     "access_code": "HM-ABCDEF-1",
     "temp_token": "t" * 24,
     "otp_code": "123456",
+    "terms_accepted": True,
 }
 
 
@@ -47,6 +49,7 @@ def _isolate(monkeypatch):
 
     async def fake_login(_db, data):
         calls.append(data)
+        now = datetime.now(timezone.utc)
         candidate = SimpleNamespace(
             id=uuid4(),
             corporate_id=uuid4(),
@@ -55,8 +58,9 @@ def _isolate(monkeypatch):
             full_name=data.full_name,
             email=str(data.email),
             access_code=data.access_code,
-            logged_in_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
+            logged_in_at=now,
+            terms_accepted_at=now,
+            created_at=now,
             token=None,
         )
         return candidate, False
@@ -116,8 +120,10 @@ async def test_verified_code_issues_candidate_token(async_client, _isolate):
     assert body["token"]
     assert body["first_name"] == "Ada"
     assert body["full_name"] == "Ada Lovelace"
+    assert body["terms_accepted_at"]
     assert len(_isolate["login"]) == 1
     assert _isolate["verify"][0]["otp_code"] == "123456"
+    assert _isolate["login"][0].terms_accepted is True
 
 
 @pytest.mark.asyncio
@@ -126,6 +132,18 @@ async def test_blank_names_are_rejected(async_client, _isolate, field):
     payload = {**PAYLOAD, field: "   "}
     res = await async_client.post(LOGIN_URL, json=payload)
     assert res.status_code == 422
+    assert _isolate["login"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("url,payload", [(REQUEST_URL, SEND_PAYLOAD), (LOGIN_URL, PAYLOAD)])
+async def test_terms_accepted_required(async_client, _isolate, url, payload):
+    missing = {k: v for k, v in payload.items() if k != "terms_accepted"}
+    res_missing = await async_client.post(url, json=missing)
+    assert res_missing.status_code == 422
+
+    res_false = await async_client.post(url, json={**payload, "terms_accepted": False})
+    assert res_false.status_code == 422
     assert _isolate["login"] == []
 
 

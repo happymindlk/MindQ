@@ -20,6 +20,9 @@ class Candidate(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     access_code: Mapped[str] = mapped_column(String(36), nullable=False)
     logged_in_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

@@ -65,6 +65,7 @@ async def test_package_code_rejects_uninvited_when_enrollment_closed():
         access_code="HM-TEST1-A",
         temp_token="t" * 24,
         otp_code="123456",
+        terms_accepted=True,
     )
     with pytest.raises(ValueError, match="invitation is required"):
         await CandidateService.login(session, login)
@@ -88,12 +89,14 @@ async def test_package_code_open_enrollment_creates_candidate():
         access_code="HM-OPEN1-A",
         temp_token="t" * 24,
         otp_code="123456",
+        terms_accepted=True,
     )
     candidate, is_new = await CandidateService.login(session, login)
     assert is_new is True
     assert candidate.email == "ada@example.com"
     assert candidate.first_name == "Ada"
     assert candidate.full_name == "Ada Lovelace"
+    assert candidate.terms_accepted_at is not None
     assert len(session.added) == 1
 
 
