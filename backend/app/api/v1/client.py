@@ -10,7 +10,7 @@ import asyncio
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError
@@ -25,6 +25,7 @@ from app.auth import (
     is_ops_role,
     issue_client_token,
 )
+from app.services.audit_log import log_report_accessed
 from app.database import SessionLocal, get_db
 from app.exceptions import schema_drift_detail
 from app.models.candidate import Candidate
@@ -199,7 +200,6 @@ async def client_scorecard(
 @router.get("/candidates/{candidate_id}/report-data", response_model=MindQReportResponse)
 async def client_report_data(
     candidate_id: UUID,
-    background_tasks: BackgroundTasks,
     client: ClientUserContext = Depends(get_current_client_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -210,7 +210,6 @@ async def client_report_data(
 
     Args:
         candidate_id: Candidate belonging to the caller's tenant.
-        background_tasks: Queue for narrative regeneration.
         client: Verified client JWT identity.
         db: Async database session.
 
@@ -219,13 +218,20 @@ async def client_report_data(
     """
     enforce_user_rate_limit(report_view_limiter, client.user_id, "client_report_data")
     candidate = await _tenant_candidate(db, client, candidate_id)
-    return await build_technical_report_data(db, candidate, background_tasks)
+    report = await build_technical_report_data(db, candidate)
+    log_report_accessed(
+        actor_id=client.user_id,
+        actor_role=client.role,
+        corporate_id=candidate.corporate_id,
+        candidate_id=candidate.id,
+        format="json",
+    )
+    return report
 
 
 @router.get("/candidates/{candidate_id}/report")
 async def client_report_pdf(
     candidate_id: UUID,
-    background_tasks: BackgroundTasks,
     client: ClientUserContext = Depends(get_current_client_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
@@ -233,7 +239,6 @@ async def client_report_pdf(
 
     Args:
         candidate_id: Candidate belonging to the caller's tenant.
-        background_tasks: Queue for narrative regeneration and the cache upload.
         client: Verified client JWT identity.
         db: Async database session.
 
@@ -242,12 +247,18 @@ async def client_report_pdf(
     """
     enforce_user_rate_limit(report_limiter, client.user_id, "client_report_pdf")
     candidate = await _tenant_candidate(db, client, candidate_id)
-    report = await build_technical_report_data(db, candidate, background_tasks)
+    report = await build_technical_report_data(db, candidate)
+    log_report_accessed(
+        actor_id=client.user_id,
+        actor_role=client.role,
+        corporate_id=candidate.corporate_id,
+        candidate_id=candidate.id,
+        format="pdf",
+    )
     return await serve_report_pdf(
         report,
         corporate_id=candidate.corporate_id,
         candidate_id=candidate.id,
-        background_tasks=background_tasks,
         portal="client",
     )
 
@@ -255,7 +266,6 @@ async def client_report_pdf(
 @router.get("/packages/{package_id}/reports-zip")
 async def client_package_reports_zip(
     package_id: UUID,
-    background_tasks: BackgroundTasks,
     client: ClientUserContext = Depends(get_current_client_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
@@ -268,7 +278,6 @@ async def client_package_reports_zip(
 
     Args:
         package_id: Published package belonging to the caller's tenant.
-        background_tasks: Queue for narrative regeneration and cache uploads.
         client: Verified client JWT identity.
         db: Async database session.
 
@@ -299,14 +308,11 @@ async def client_package_reports_zip(
         async with sem:
             try:
                 async with SessionLocal() as session:
-                    report = await build_technical_report_data(
-                        session, candidate, background_tasks
-                    )
+                    report = await build_technical_report_data(session, candidate)
                     rendered = await render_report(
                         report,
                         corporate_id=candidate.corporate_id,
                         candidate_id=candidate.id,
-                        background_tasks=background_tasks,
                         portal="client",
                     )
                 ext = "pdf" if rendered.is_pdf else "html"

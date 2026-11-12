@@ -463,7 +463,7 @@ async def test_submit_passes_pending_responses_atomically(candidate_client, monk
         return None
 
     monkeypatch.setattr(
-        "app.api.v1.candidate.finalize_and_score_ai",
+        "app.api.v1.candidate.enqueue_finalize_and_score_ai",
         _noop_score,
     )
     response = await client.post(

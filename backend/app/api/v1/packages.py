@@ -7,7 +7,6 @@ from uuid import UUID
 
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Depends,
     File,
     HTTPException,
@@ -61,7 +60,7 @@ from app.services.client_package import (
 )
 from app.services.library import LibraryConflictError, LibraryError, LibraryService
 from app.services.email import resolve_frontend_origin
-from app.api.v1.invites import _dispatch_candidate_invite
+from app.jobs.enqueue import enqueue_candidate_invite
 from app.services.package_share import (
     PackageShareError,
     list_corporate_packages,
@@ -435,7 +434,6 @@ _SHARE_ERROR_STATUS: dict[str, int] = {
 )
 async def share_package_endpoint(
     package_id: UUID,
-    background_tasks: BackgroundTasks,
     request: Request,
     body: SharePackageRequest | None = None,
     db: AsyncSession = Depends(get_db),
@@ -443,11 +441,10 @@ async def share_package_endpoint(
 ):
     """Queue candidate access (link + PIN) and HR portal access via SES.
 
-    Returns 202 immediately; SES delivery runs in a background task.
+    Returns 202 immediately; SES delivery runs on the ARQ worker.
 
     Args:
         package_id: Target package UUID.
-        background_tasks: FastAPI background task queue.
         request: Incoming request (Origin used when FRONTEND_URL is unset).
         body: Optional recipient override; defaults to the corporate HR email.
         db: Async database session.
@@ -462,7 +459,6 @@ async def share_package_endpoint(
             db,
             package_id,
             recipient,
-            background_tasks=background_tasks,
             origin=resolve_frontend_origin(request),
         )
     except LookupError as exc:
@@ -481,7 +477,6 @@ async def share_package_endpoint(
 async def bulk_invite_candidates(
     package_id: UUID,
     body: BulkCandidateInviteRequest,
-    background_tasks: BackgroundTasks,
     request: Request,
     db: AsyncSession = Depends(get_db),
     hr: HRUserContext = Depends(get_current_ops_user),
@@ -494,7 +489,6 @@ async def bulk_invite_candidates(
     Args:
         package_id: Target published package UUID.
         body: List of candidate emails (1–100).
-        background_tasks: FastAPI background task queue for SES dispatch.
         request: Incoming request (Origin used when FRONTEND_URL is unset).
         db: Async database session.
         hr: Authenticated ops user (rate-limited).
@@ -576,8 +570,7 @@ async def bulk_invite_candidates(
             )
             continue
 
-        background_tasks.add_task(
-            _dispatch_candidate_invite,
+        await enqueue_candidate_invite(
             candidate_email=candidate.email,
             candidate_name=candidate.full_name,
             access_code=candidate.access_code,

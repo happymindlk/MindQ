@@ -84,7 +84,7 @@ def synthesis_stub(monkeypatch):
     monkeypatch.setattr(
         candidate_reports.TechnicalEvalService, "evaluate_candidate", staticmethod(_forbidden)
     )
-    monkeypatch.setattr(candidate_reports, "refresh_report_synthesis", _refresh)
+    monkeypatch.setattr(candidate_reports, "enqueue_refresh_report_synthesis", _refresh)
     monkeypatch.setattr(candidate_reports, "load_catalog_categories", _catalog)
     monkeypatch.setattr(
         candidate_reports.TechnicalEvalService,

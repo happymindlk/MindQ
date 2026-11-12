@@ -74,7 +74,7 @@ def storage():
     render = MagicMock(side_effect=[(PDF_A, True), (PDF_B, True)])
     with (
         patch("app.services.report_pdf.storage_service.fetch_cached_report", new=fetch),
-        patch("app.services.report_pdf.storage_service.store_cached_report", new=store),
+        patch("app.jobs.tasks.storage_service.store_cached_report", new=store),
         patch("app.services.report_pdf.ReportService.generate_report_bytes", new=render),
     ):
         yield SimpleNamespace(fetch=fetch, store=store, render=render)

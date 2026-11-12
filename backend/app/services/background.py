@@ -307,12 +307,6 @@ async def prewarm_report_pdf(candidate_id: UUID) -> None:
     from app.services.report_pdf import render_and_store_report
     from app.services.report_snapshot import upsert_report_snapshot
 
-    class _NoopBackgroundTasks:
-        """Drop view-side synthesis queues; this warmer never starts new LLM work."""
-
-        def add_task(self, *_args, **_kwargs) -> None:
-            return None
-
     try:
         async with SessionLocal() as session:
             candidate = await CandidateService.get_candidate(session, candidate_id)
@@ -321,9 +315,10 @@ async def prewarm_report_pdf(candidate_id: UUID) -> None:
             if not await CandidateService.is_package_complete(session, candidate):
                 return
             # Always assemble fresh here so the snapshot and PDF reflect the
-            # latest scores / narrative (bypass read_report_snapshot).
+            # latest scores / narrative (bypass read_report_snapshot). Never
+            # enqueue more LLM work from the warmer itself.
             report = await assemble_technical_report_data(
-                session, candidate, _NoopBackgroundTasks()
+                session, candidate, queue_refresh=False
             )
             if report.synthesis_status == "generating":
                 logger.info(

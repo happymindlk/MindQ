@@ -114,9 +114,9 @@ def test_bulk_invite_queues_new_and_skips_existing(app, corp_id, package_id):
     with (
         patch("app.api.v1.packages.CandidateService.invite", new=_invite),
         patch(
-            "app.api.v1.packages._dispatch_candidate_invite",
+            "app.api.v1.packages.enqueue_candidate_invite",
             new_callable=AsyncMock,
-        ) as dispatch,
+        ) as enqueue_invite,
     ):
         res = client.post(
             f"/api/v1/packages/{package_id}/candidates/bulk",
@@ -131,4 +131,4 @@ def test_bulk_invite_queues_new_and_skips_existing(app, corp_id, package_id):
     statuses = {row["email"]: row["status"] for row in body["results"]}
     assert statuses["new@example.com"] == "invited"
     assert statuses["old@example.com"] == "skipped"
-    dispatch.assert_awaited_once()
+    enqueue_invite.assert_awaited_once()

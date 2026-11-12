@@ -112,7 +112,7 @@ def test_report_allows_ops_other_tenant(home_corp, candidate_id):
         ),
         patch("app.services.report_pdf.ReportService.generate_report_bytes", new=generate),
         patch("app.services.report_pdf.storage_service.fetch_cached_report", return_value=None),
-        patch("app.services.report_pdf.storage_service.store_cached_report", return_value=None),
+        patch("app.jobs.tasks.storage_service.store_cached_report", return_value=None),
     ):
         res = TestClient(app).get(f"/api/v1/admin/candidates/{candidate_id}/report")
     assert res.status_code == 200

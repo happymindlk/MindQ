@@ -4,12 +4,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import HRUserContext, get_current_hr_user, is_ops_role
 from app.database import get_db
+from app.jobs.enqueue import enqueue_refresh_report_synthesis
 from app.models.assessment import Assessment
 from app.models.candidate import Candidate
 from app.models.candidate_progress import CandidateProgress
@@ -27,7 +28,6 @@ from app.security import enforce_user_rate_limit, report_view_limiter
 from app.services.background import (
     claim_report_refresh,
     is_ai_job_inflight,
-    refresh_report_synthesis,
 )
 from app.services.client_package import PSYCHOMETRIC, TECHNICAL, _strip_answer_keys
 from app.services.jd_scoring import CachedSynthesis, JdScoringService
@@ -42,6 +42,7 @@ from app.services.report_synthesis import (
     score_item,
 )
 from app.services.scoring import _extract_answer
+from app.services.audit_log import log_report_accessed
 from app.services.report_snapshot import read_report_snapshot
 from app.services.technical_eval import TechnicalEvalService
 
@@ -174,7 +175,6 @@ def _custom_questions(
 @router.get("/{candidate_id}/report-data", response_model=MindQReportResponse)
 async def get_candidate_report_data(
     candidate_id: UUID,
-    background_tasks: BackgroundTasks,
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -183,11 +183,10 @@ async def get_candidate_report_data(
     Psychometric modules contribute module-level scores only; item responses,
     trait facets, and answer keys are omitted. No fit score or hiring
     recommendation is produced. Never waits on Gemini: a missing narrative is
-    queued in the background and reported as ``synthesis_status="generating"``.
+    queued on ARQ and reported as ``synthesis_status="generating"``.
 
     Args:
         candidate_id: ``candidates.id`` (not ``candidate_progress.id``).
-        background_tasks: Queue for narrative regeneration.
         hr: Authenticated HR or ops user.
         db: Async database session.
 
@@ -204,7 +203,15 @@ async def get_candidate_report_data(
     if not is_ops_role(hr.role) and candidate.corporate_id != hr.corporate_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    return await build_technical_report_data(db, candidate, background_tasks)
+    report = await build_technical_report_data(db, candidate)
+    log_report_accessed(
+        actor_id=hr.user_id,
+        actor_role=hr.role,
+        corporate_id=candidate.corporate_id,
+        candidate_id=candidate.id,
+        format="json",
+    )
+    return report
 
 
 async def _load_responses(db: AsyncSession, candidate_id: UUID) -> list[CandidateResponse]:
@@ -316,12 +323,12 @@ def _progress_with_facet_scores(
     return coerced
 
 
-def _resolve_synthesis_status(
+async def _resolve_synthesis_status(
     candidate_id: UUID,
     cached: CachedSynthesis,
     *,
     missing_open_evals: bool,
-    background_tasks: BackgroundTasks,
+    queue_refresh: bool,
 ) -> SynthesisStatus:
     """Map the cache state to an API status, queueing a refresh when one is due.
 
@@ -329,7 +336,7 @@ def _resolve_synthesis_status(
         candidate_id: Candidate being reported on.
         cached: Read-only cache lookup result.
         missing_open_evals: Whether technical open-ended items still lack a grade.
-        background_tasks: Request-scoped task queue.
+        queue_refresh: When False (PDF warmers), never enqueue new LLM work.
 
     Returns:
         ``ok``/``skipped`` from the cache, ``generating`` while a job is running
@@ -337,19 +344,22 @@ def _resolve_synthesis_status(
     """
     wants_refresh = cached.needs_refresh or missing_open_evals
     if cached.state in ("ok", "skipped"):
-        if missing_open_evals and claim_report_refresh(candidate_id):
-            background_tasks.add_task(refresh_report_synthesis, candidate_id)
+        if queue_refresh and missing_open_evals and claim_report_refresh(candidate_id):
+            await enqueue_refresh_report_synthesis(candidate_id)
         return cached.state
     if is_ai_job_inflight(candidate_id):
         return "generating"
-    if wants_refresh and claim_report_refresh(candidate_id):
-        background_tasks.add_task(refresh_report_synthesis, candidate_id)
+    if queue_refresh and wants_refresh and claim_report_refresh(candidate_id):
+        await enqueue_refresh_report_synthesis(candidate_id)
         return "generating"
     return "failed"
 
 
 async def build_technical_report_data(
-    db: AsyncSession, candidate: Candidate, background_tasks: BackgroundTasks
+    db: AsyncSession,
+    candidate: Candidate,
+    *,
+    queue_refresh: bool = True,
 ) -> MindQReportResponse:
     """Return a pre-computed report snapshot, or assemble one live.
 
@@ -360,7 +370,7 @@ async def build_technical_report_data(
     Args:
         db: Async database session.
         candidate: Candidate row the caller is allowed to read.
-        background_tasks: Request-scoped queue for narrative regeneration.
+        queue_refresh: When False, never enqueue synthesis refresh jobs.
 
     Returns:
         The MindQ Report payload.
@@ -368,22 +378,27 @@ async def build_technical_report_data(
     snapshot = await read_report_snapshot(db, candidate.id)
     if snapshot is not None:
         return snapshot
-    return await assemble_technical_report_data(db, candidate, background_tasks)
+    return await assemble_technical_report_data(
+        db, candidate, queue_refresh=queue_refresh
+    )
 
 
 async def assemble_technical_report_data(
-    db: AsyncSession, candidate: Candidate, background_tasks: BackgroundTasks
+    db: AsyncSession,
+    candidate: Candidate,
+    *,
+    queue_refresh: bool = True,
 ) -> MindQReportResponse:
     """Live-assemble the MindQ Report from progress, responses, and synthesis.
 
     Missing open-ended technical grades and a missing, stale, or failed
-    synthesis are regenerated by ``refresh_report_synthesis`` on
-    ``background_tasks``, and the response reports ``generating`` meanwhile.
+    synthesis are regenerated by ``refresh_report_synthesis`` on ARQ, and the
+    response reports ``generating`` meanwhile.
 
     Args:
         db: Async database session.
         candidate: Candidate row the caller is allowed to read.
-        background_tasks: Request-scoped queue for narrative regeneration.
+        queue_refresh: When False (PDF warmers), never enqueue new LLM work.
 
     Returns:
         The MindQ Report payload.
@@ -434,14 +449,14 @@ async def assemble_technical_report_data(
             db, candidate=candidate, package=package, outcomes=outcomes
         )
         synthesis = synthesis_cache.narrative
-        synthesis_status = _resolve_synthesis_status(
+        synthesis_status = await _resolve_synthesis_status(
             candidate.id,
             synthesis_cache,
             missing_open_evals=missing_open_evals,
-            background_tasks=background_tasks,
+            queue_refresh=queue_refresh,
         )
-    elif missing_open_evals and claim_report_refresh(candidate.id):
-        background_tasks.add_task(refresh_report_synthesis, candidate.id)
+    elif queue_refresh and missing_open_evals and claim_report_refresh(candidate.id):
+        await enqueue_refresh_report_synthesis(candidate.id)
 
     released = bool(synthesis and scores_released)
     summaries = performance_summaries(candidate.full_name, outcomes, synthesis)

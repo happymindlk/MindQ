@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from fastapi import BackgroundTasks
+from app.jobs.enqueue import enqueue_package_share
 from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +23,6 @@ from app.services.email import (
     format_package_label,
     hr_portal_login_link,
     render_package_share_html,
-    send_transactional_email,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,20 +166,18 @@ async def share_package(
     package_id: UUID,
     recipient_email: str | None,
     *,
-    background_tasks: BackgroundTasks,
     origin: str | None = None,
 ) -> SharePackageResponse:
     """Queue candidate + HR access email for a published package and open enrollment.
 
-    SES delivery runs in ``background_tasks`` so the HTTP response returns
-    immediately. Open enrollment is enabled when the share is accepted, not
-    gated on SMTP round-trip success.
+    SES delivery runs on the ARQ worker so the HTTP response returns immediately.
+    Open enrollment is enabled when the share is accepted, not gated on SMTP
+    round-trip success.
 
     Args:
         session: Async database session.
         package_id: Target package UUID.
         recipient_email: Normalized override; None falls back to the corporate HR email.
-        background_tasks: FastAPI background task queue for SES.
         origin: Absolute frontend origin for links in the email and response.
 
     Returns:
@@ -227,16 +224,16 @@ async def share_package(
         package.access_code,
         candidate_link,
     )
-    background_tasks.add_task(
-        send_transactional_email,
-        recipient,
-        subject,
-        html_content,
-    )
-
+    # Open enrollment before SES so a delivery failure cannot undo accept.
     if not package.allow_open_enrollment:
         package.allow_open_enrollment = True
         await session.commit()
+    await enqueue_package_share(
+        package_id=package_id,
+        recipient=recipient,
+        subject=subject,
+        html_content=html_content,
+    )
     logger.info("Package share queued package=%s to=%s", package_id, recipient)
 
     return SharePackageResponse(

@@ -19,6 +19,7 @@ from app.api.v1.router import api_router
 from app.config import settings
 from app.database import engine
 from app.exceptions import is_schema_drift_error, is_transient_db_error, schema_drift_detail
+from app.jobs.settings import close_arq_pool, open_arq_pool
 from app.observability import configure_logging
 from app.security import SecurityHeadersMiddleware, assert_production_ready
 
@@ -28,7 +29,7 @@ logger = logging.getLogger("app.main")
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Validate production config, warm the DB pool, then dispose on shutdown.
+    """Validate production config, warm DB + ARQ pools, then dispose on shutdown.
 
     The database schema is managed by Supabase migrations (supabase/migrations),
     applied via `supabase db reset` / `supabase migration up` - never by
@@ -43,11 +44,13 @@ async def lifespan(app: FastAPI):
         # Do not block process boot if Postgres is briefly unreachable; the first
         # request path still uses pool_pre_ping + retry helpers.
         logger.warning("db_pool_warmup_failed", exc_info=True, extra={"event": "db_pool_warmup_failed"})
+    await open_arq_pool()
     logger.info(
         "app_started",
         extra={"event": "app_started", "debug": settings.DEBUG},
     )
     yield
+    await close_arq_pool()
     await engine.dispose()
     logger.info("app_stopped", extra={"event": "app_stopped"})
 

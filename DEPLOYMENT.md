@@ -41,18 +41,28 @@ frontend (React/Vite) ──supabase-js + HR JWT──► Supabase (Auth, Postgr
    `supabase start` prints the API URL, anon key, service_role key, and JWT
    secret. The custom access token hook is enabled in `supabase/config.toml`.
 
-2. Backend (thin FastAPI service):
+2. Redis (durable ARQ job queue for scoring, Gemini, PDF prewarm, SES):
+   ```bash
+   docker compose up -d redis
+   ```
+   Default URL: `REDIS_URL=redis://localhost:6379/0` (see `backend/.env.example`).
+
+3. Backend (thin FastAPI service + ARQ worker):
    ```bash
    cd backend
    cp .env.example .env    # fill in SUPABASE_* values from `supabase start`
    pip install -r requirements.txt
    python -m uvicorn app.main:app --reload --port 8000
+   # Separate process — consumes durable jobs (do not skip in staging/prod):
+   arq app.jobs.worker.WorkerSettings
    ```
    Key vars: `DATABASE_URL` (Supabase Postgres, port 54322 locally),
    `SUPABASE_JWT_SECRET` (verifies HR tokens), `SUPABASE_SERVICE_ROLE_KEY`
-   (reports/storage), `SECRET_KEY` (signs candidate tokens).
+   (reports/storage), `SECRET_KEY` (signs candidate tokens), `REDIS_URL`.
+   Without Redis in local/dev the API falls back to inline job execution so
+   unit tests keep working; production refuses to boot if Redis is unreachable.
 
-3. Frontend:
+4. Frontend:
    ```bash
    cd frontend
    cp .env.example .env.local   # VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY
@@ -60,7 +70,7 @@ frontend (React/Vite) ──supabase-js + HR JWT──► Supabase (Auth, Postgr
    npm run dev
    ```
 
-4. Create an HR user and map them to a corporate (so their JWT carries
+5. Create an HR user and map them to a corporate (so their JWT carries
    `corporate_id`). Locally you can do this in the SQL editor / psql:
    ```sql
    -- 1. Create the auth user (or use the Studio Auth UI / supabase CLI).
@@ -135,14 +145,18 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
    ```
 2. Enable the custom access token hook (Dashboard: Authentication > Hooks, or via
    `supabase config push`) pointing at `public.custom_access_token_hook`.
-3. Deploy the FastAPI service (any container host). Set env:
+3. Deploy the FastAPI service **and** a dedicated ARQ worker (any container host).
+   Run the worker as a separate process/service:
+   `arq app.jobs.worker.WorkerSettings`. Set env:
    - `DATABASE_URL` = the project's Postgres connection (use the pooler)
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`
    - `SECRET_KEY` (strong random), `DEBUG=false`, `CORS_ORIGINS` = your frontend origin(s)
+   - `REDIS_URL` = managed Redis reachable by both the API and the ARQ worker
    - `WEB_CONCURRENCY` (default **2** in `backend/Dockerfile`): each worker opens
      up to 50 SQLAlchemy sockets (`pool_size=15` + `max_overflow=35`). Cap is
      `WEB_CONCURRENCY × 50` — keep that under your Supavisor client limit
      (Nano/Micro ≈ 200; Small ≈ 400). Do not jump to 4 workers on Nano/Micro.
+     The ARQ process opens its own pool; count it toward the same client budget.
 4. Deploy the frontend to Cloudflare Pages with root directory `frontend/`
    (build `npm run build`, output `dist`). Set env:
    - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
