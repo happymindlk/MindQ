@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -322,6 +323,7 @@ class TechnicalEvalService:
                 continue
 
             answer = _extract_answer(row.response)
+            started = time.perf_counter()
             try:
                 # The SDK call blocks for the whole retry/fallback window; keep it
                 # off the event loop so other requests are served meanwhile.
@@ -342,13 +344,15 @@ class TechnicalEvalService:
                     await asyncio.sleep(throttle)
                 continue
 
-            feedback_preview = (evaluation.feedback or "")[:120]
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            # Metadata only — never log AI prose / candidate answers into drains.
             logger.info(
-                "technical_eval_gemini_ok candidate_id=%s question_id=%s score=%s feedback=%r",
+                "technical_eval_gemini_ok candidate_id=%s question_id=%s score=%s "
+                "latency_ms=%s",
                 candidate.id,
                 qid,
                 evaluation.score,
-                feedback_preview,
+                latency_ms,
             )
             _persist_response(
                 row, merge_evaluation_into_response(row.response, evaluation)

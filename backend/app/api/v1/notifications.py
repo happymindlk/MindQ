@@ -1,5 +1,5 @@
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_hr_user, HRUserContext, is_ops_role
@@ -71,3 +71,37 @@ async def reset_candidate_assessment(
         "success": True,
         "message": "Candidate assessment successfully reset",
     }
+
+
+@router.delete("/{id}", status_code=204)
+async def erase_candidate(
+    id: UUID,
+    hr: HRUserContext = Depends(get_current_hr_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Hard-delete a candidate (right to erasure), including stored reports.
+
+    Ops may erase any tenant; HR is limited to their own corporate. Cross-tenant
+    HR probes and missing ids both return 404 so existence is not leaked.
+
+    Args:
+        id: ``candidates.id``.
+        hr: Authenticated HR or ops user.
+        db: Async database session.
+
+    Returns:
+        Empty 204 response on success.
+    """
+    candidate = await CandidateService.get_candidate(db, id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    if not is_ops_role(hr.role) and candidate.corporate_id != hr.corporate_id:
+        # Collapse forbidden cross-tenant probes to 404 (do not confirm existence).
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    corporate_id, candidate_id = await CandidateService.erase_candidate(
+        db, candidate, admin_user_id=hr.user_id
+    )
+    storage_service.purge_candidate_report_files(corporate_id, candidate_id)
+    return Response(status_code=204)

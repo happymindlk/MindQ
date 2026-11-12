@@ -48,6 +48,7 @@ export async function sendCandidateOtp(identity: CandidateIdentity): Promise<str
     email: normalizeEmail(identity.email),
     first_name: firstName,
     full_name: `${firstName} ${identity.lastName.trim()}`,
+    terms_accepted: true,
   })) as CandidateOtpChallengeResponse;
   if (!res?.temp_token) throw new Error('Verification did not return a session. Request a new code.');
   return res.temp_token;
@@ -77,6 +78,7 @@ export async function verifyCandidateOtp(
     email,
     temp_token: tempToken,
     otp_code: code,
+    terms_accepted: true,
   })) as CandidateVerifyResponse;
   return {
     token: res.token,

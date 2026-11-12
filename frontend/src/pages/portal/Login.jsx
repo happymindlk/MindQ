@@ -1,6 +1,7 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Card from '../../components/ui/Card';
+import LegalPolicyModal from '../../components/LegalPolicyModal';
 import { PreviewRunner } from '../../features/assessment-runner/preview-runner';
 import { PREVIEW_ACCESS_CODE } from '../../features/assessment-builder/lib/preview-protocol';
 import {
@@ -181,6 +182,7 @@ function CandidateLogin({ initialAccessCode }) {
   const navigate = useNavigate();
   const onAuthenticated = useCallback(() => navigate('/portal/guidelines'), [navigate]);
   const login = useCandidateOtpLogin(initialAccessCode, onAuthenticated);
+  const [legalDoc, setLegalDoc] = useState(null);
   const { step, identity, loading } = login;
 
   const submitDetails = (e) => {
@@ -268,6 +270,45 @@ function CandidateLogin({ initialAccessCode }) {
                 outcome based on the results of this assessment. By proceeding, you acknowledge that you understand the
                 purpose of the assessment and agree to complete it to the best of your ability.
               </p>
+              <label
+                htmlFor="candidate-terms-accepted"
+                className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200/80 bg-white p-3.5 text-sm leading-snug text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200"
+              >
+                <input
+                  id="candidate-terms-accepted"
+                  type="checkbox"
+                  checked={login.termsAccepted}
+                  onChange={(e) => login.setTermsAccepted(e.target.checked)}
+                  disabled={loading}
+                  required
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-[#7048E2] focus:ring-[#7048E2]"
+                />
+                <span>
+                  I have read and agree to the{' '}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setLegalDoc('privacy');
+                    }}
+                    className="font-medium text-[#5e3cc4] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7048E2]"
+                  >
+                    Privacy Policy
+                  </button>{' '}
+                  and{' '}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setLegalDoc('terms');
+                    }}
+                    className="font-medium text-[#5e3cc4] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7048E2]"
+                  >
+                    Terms &amp; Conditions
+                  </button>{' '}
+                  (including the retention of irreversibly anonymized metrics for psychometric research).
+                </span>
+              </label>
               <FormError message={login.error} />
               <button
                 type="submit"
@@ -343,6 +384,11 @@ function CandidateLogin({ initialAccessCode }) {
           &lsquo;Technical Support&rsquo; to contact our technical support team.
         </p>
       </div>
+      <LegalPolicyModal
+        isOpen={Boolean(legalDoc)}
+        documentId={legalDoc}
+        onClose={() => setLegalDoc(null)}
+      />
     </div>
   );
 }

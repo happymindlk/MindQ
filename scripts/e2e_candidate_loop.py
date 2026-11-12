@@ -111,6 +111,7 @@ async def main() -> int:
                 "email": candidate_email,
                 "first_name": "E2E",
                 "full_name": "E2E Candidate",
+                "terms_accepted": True,
             },
         )
         otp_request.raise_for_status()
@@ -128,6 +129,7 @@ async def main() -> int:
                 "access_code": access_code,
                 "temp_token": temp_token,
                 "otp_code": otp_code,
+                "terms_accepted": True,
             },
         )
         login.raise_for_status()

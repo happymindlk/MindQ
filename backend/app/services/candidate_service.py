@@ -15,6 +15,8 @@ from app.models.assessment import Assessment
 from app.models.candidate_evaluation import CandidateEvaluation
 from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
+from app.models.support_ticket import SupportTicket
+from app.services.audit_log import log_candidate_erased
 from app.schemas.candidate import CandidateAuthOtpVerifyRequest
 from decimal import Decimal
 
@@ -280,6 +282,7 @@ class CandidateService:
             invited.full_name = display_name
             invited.first_name = first_name
             invited.logged_in_at = _utcnow()
+            invited.terms_accepted_at = _utcnow()
             await session.commit()
             await session.refresh(invited)
             return invited, False
@@ -317,6 +320,7 @@ class CandidateService:
             candidate.first_name = first_name
 
         candidate.logged_in_at = _utcnow()
+        candidate.terms_accepted_at = _utcnow()
         await session.commit()
         await session.refresh(candidate)
         return candidate, is_new
@@ -489,6 +493,50 @@ class CandidateService:
         await session.commit()
         await session.refresh(candidate)
         return candidate
+
+    @staticmethod
+    async def erase_candidate(
+        session: AsyncSession,
+        candidate: Candidate,
+        *,
+        admin_user_id: UUID,
+    ) -> tuple[UUID, UUID]:
+        """Hard-delete a candidate after unlinking support-ticket PII.
+
+        Scrubs ``support_tickets`` (nulls ``candidate_id``, redacts free-text
+        fields), then deletes the ``candidates`` row so PostgreSQL
+        ``ON DELETE CASCADE`` removes responses, progress, evaluations, and
+        report snapshots. Callers must purge object storage using the returned
+        ids after this method commits.
+
+        Args:
+            session: Open async SQLAlchemy session.
+            candidate: Loaded ``candidates`` row to erase.
+            admin_user_id: Authenticated actor id for the audit event.
+
+        Returns:
+            ``(corporate_id, candidate_id)`` of the erased row for storage purge.
+        """
+        corporate_id = candidate.corporate_id
+        candidate_id = candidate.id
+        await session.execute(
+            update(SupportTicket)
+            .where(SupportTicket.candidate_id == candidate_id)
+            .values(
+                candidate_id=None,
+                details="[Candidate data erased]",
+                path=None,
+                user_agent=None,
+            )
+        )
+        await session.execute(delete(Candidate).where(Candidate.id == candidate_id))
+        await session.commit()
+        log_candidate_erased(
+            admin_user_id=admin_user_id,
+            corporate_id=corporate_id,
+            candidate_id=candidate_id,
+        )
+        return corporate_id, candidate_id
 
     @staticmethod
     async def get_company_name(session: AsyncSession, candidate: Candidate) -> str:

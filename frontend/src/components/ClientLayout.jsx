@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import BrandLogo from './BrandLogo';
+import PortalFooter from './PortalFooter';
 import ToastProvider from './ui/Toast';
 import RouteErrorBoundary from './route-error-boundary';
 import ThemeToggle from './ThemeToggle';
@@ -58,6 +59,7 @@ export default function ClientLayout() {
             <KeepAliveOutlet patterns={CLIENT_KEEP_PATTERNS} />
           </RouteErrorBoundary>
         </main>
+        <PortalFooter />
       </div>
     </ToastProvider>
   );

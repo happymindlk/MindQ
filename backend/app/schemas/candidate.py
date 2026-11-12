@@ -108,6 +108,7 @@ class CandidateAuthOtpSendRequest(BaseModel):
     access_code: _ACCESS_CODE
     first_name: _NAME
     full_name: _FULL_NAME
+    terms_accepted: Literal[True]
 
 
 class CandidateOtpChallengeResponse(BaseModel):
@@ -128,6 +129,7 @@ class CandidateAuthOtpVerifyRequest(BaseModel):
     access_code: _ACCESS_CODE
     temp_token: Annotated[str, StringConstraints(strip_whitespace=True, min_length=20, max_length=4096)]
     otp_code: Annotated[str, StringConstraints(strip_whitespace=True, min_length=6, max_length=6, pattern=r"^\d{6}$")]
+    terms_accepted: Literal[True]
 
 
 class CandidateResponse(CandidateBase):
@@ -137,6 +139,7 @@ class CandidateResponse(CandidateBase):
     package_id: uuid.UUID
     access_code: str
     logged_in_at: Optional[datetime] = None
+    terms_accepted_at: Optional[datetime] = None
     created_at: datetime
     token: Optional[str] = None
 

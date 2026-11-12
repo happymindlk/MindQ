@@ -48,7 +48,7 @@ const handleResponse = async (response) => {
 export const api = {
   candidate: {
     /**
-     * @param {{ access_code: string, email: string, first_name: string, full_name: string }} target
+     * @param {{ access_code: string, email: string, first_name: string, full_name: string, terms_accepted: true }} target
      * @returns {Promise<{ status: string, temp_token: string }>}
      */
     sendCandidateOtp: async (target) => {
@@ -60,7 +60,7 @@ export const api = {
       return handleResponse(res);
     },
     /**
-     * @param {{ access_code: string, first_name: string, full_name: string, email: string, temp_token: string, otp_code: string }} credentials
+     * @param {{ access_code: string, first_name: string, full_name: string, email: string, temp_token: string, otp_code: string, terms_accepted: true }} credentials
      */
     verifyCandidateOtp: async (credentials) => {
       const res = await fetch(`${API_BASE}/candidates/auth/otp/verify`, {
