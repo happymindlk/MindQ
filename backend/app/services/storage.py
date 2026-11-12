@@ -392,6 +392,55 @@ def purge_cached_reports(corporate_id: UUID, candidate_id: UUID) -> int:
         return 0
 
 
+def purge_legacy_archived_reports(corporate_id: UUID, candidate_id: UUID) -> int:
+    """Delete legacy flat archive keys ``{corp}/{cand}.pdf`` and ``.html``.
+
+    These keys are written by ``upload_report`` and sit outside the cached-report
+    prefix used by ``purge_cached_reports``.
+
+    Args:
+        corporate_id: Tenant id used as the object prefix.
+        candidate_id: Candidate id used as the object stem.
+
+    Returns:
+        Number of delete requests issued (0 when storage is unavailable).
+    """
+    if not _reports_bucket_safe():
+        return 0
+    bucket = settings.R2_REPORTS_BUCKET_NAME.strip()
+    keys = [
+        {"Key": _report_key(corporate_id, candidate_id, True)},
+        {"Key": _report_key(corporate_id, candidate_id, False)},
+    ]
+    try:
+        client = _s3_client()
+        client.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
+        return len(keys)
+    except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - purge is best-effort
+        logger.warning(
+            "Legacy report archive purge failed for %s/%s: %s",
+            corporate_id,
+            candidate_id,
+            exc,
+        )
+        return 0
+
+
+def purge_candidate_report_files(corporate_id: UUID, candidate_id: UUID) -> int:
+    """Remove every stored report object for a candidate (cache + legacy archives).
+
+    Args:
+        corporate_id: Tenant id used as the object prefix.
+        candidate_id: Candidate whose report objects should be erased.
+
+    Returns:
+        Combined count of keys requested for deletion.
+    """
+    return purge_cached_reports(corporate_id, candidate_id) + purge_legacy_archived_reports(
+        corporate_id, candidate_id
+    )
+
+
 def _logo_upload_failure_detail(exc: BaseException) -> str:
     """Map an upstream storage failure to a safe, actionable client-facing detail.
 
