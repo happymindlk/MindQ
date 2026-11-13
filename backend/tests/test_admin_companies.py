@@ -14,9 +14,29 @@ from app.api.v1.admin_ops import router as admin_router
 from app.auth import HRUserContext, get_current_ops_user
 from app.database import get_db
 from app.models.corporate import Corporate
+from app.services.corporate_hr_access import normalize_hr_email_list, sync_contact_email
 from app.services.storage import LOGO_MAX_BYTES
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+
+async def _fake_sync_hr_access(session, corporate: Corporate, emails: list[str]) -> None:
+    """Apply whitelist + contact_email without touching Supabase Auth."""
+    desired = normalize_hr_email_list(emails)
+    if getattr(corporate, "id", None) is None:
+        corporate.id = uuid4()
+    corporate.allowed_hr_emails = desired
+    sync_contact_email(corporate, desired)
+
+
+@pytest.fixture(autouse=True)
+def _stub_hr_access_sync():
+    # create/update import this symbol inside the method body.
+    with patch(
+        "app.services.corporate_hr_access.sync_corporate_hr_access",
+        new=_fake_sync_hr_access,
+    ):
+        yield
 
 
 def _scalar(value: object) -> MagicMock:
@@ -31,6 +51,7 @@ def _session(*execute_results: object) -> MagicMock:
     session.commit = AsyncMock()
     session.rollback = AsyncMock()
     session.refresh = AsyncMock()
+    session.flush = AsyncMock()
     return session
 
 
@@ -218,6 +239,32 @@ def test_update_company_replaces_whitelist():
 
     assert res.status_code == 200
     assert corp.allowed_hr_emails == ["new@acme.test"]
+    # Legacy contact_email stays aligned with the first chip.
+    assert corp.contact_email == "new@acme.test"
+
+
+def test_create_company_grants_access_for_all_whitelist_emails():
+    """Multi-email create syncs contact_email to the first entry."""
+    session = _session(None)
+
+    async def _refresh(obj: Corporate) -> None:
+        obj.id = uuid4()
+        obj.created_at = datetime.now(timezone.utc)
+
+    session.refresh.side_effect = _refresh
+
+    res = _client(session).post(
+        "/admin/companies",
+        json={
+            "name": "Acme",
+            "allowed_hr_emails": ["hr@acme.test", "people@acme.test"],
+        },
+    )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["allowed_hr_emails"] == ["hr@acme.test", "people@acme.test"]
+    assert body["contact_email"] == "hr@acme.test"
 
 
 def test_soft_delete_company_marks_inactive():

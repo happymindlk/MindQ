@@ -138,6 +138,9 @@ async def client_dashboard(
     Returns:
         Corporate branding and package-grouped candidate metrics.
     """
+    from app.services.assessment_expiry import ensure_expired_assessments_finalized
+
+    await ensure_expired_assessments_finalized()
     try:
         return await ClientPackageService.get_client_dashboard(db, client.corporate_id)
     except LookupError as exc:
@@ -162,6 +165,9 @@ async def client_pipeline(
     Returns:
         Pending / Scoring / Completed rows. No psychometric item data.
     """
+    from app.services.assessment_expiry import ensure_expired_assessments_finalized
+
+    await ensure_expired_assessments_finalized()
     try:
         return await ClientPackageService.list_client_pipeline(db, client.corporate_id)
     except ProgrammingError as exc:

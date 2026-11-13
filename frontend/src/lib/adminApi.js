@@ -75,6 +75,16 @@ export const adminApi = {
   },
 
   async getCandidates(packageId) {
+    // Finalize timed-out attempts server-side before reading the overview view
+    // so Admin History shows Completed without requiring the candidate to return.
+    try {
+      await authedJson('/api/v1/admin/jobs/finalize-expired', 'Failed to finalize expired assessments', {
+        method: 'POST',
+        body: {},
+      });
+    } catch {
+      // Sweep is best-effort; still load the overview if the job call fails.
+    }
     let query = supabase
       .from('candidate_overview')
       .select('*')

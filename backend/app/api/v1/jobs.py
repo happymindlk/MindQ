@@ -5,17 +5,34 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import HRUserContext, get_current_hr_user
+from app.auth import HRUserContext, get_current_hr_user, get_current_ops_user
 from app.config import settings
 from app.database import get_db
 from app.models.assessment import Assessment
 from app.models.candidate import Candidate
 from app.models.candidate_progress import CandidateProgress
 from app.models.package import Package
+from app.services.assessment_expiry import ensure_expired_assessments_finalized
 from app.services.email_service import EmailService
 from app.security import enforce_user_rate_limit, report_limiter
 
 router = APIRouter()
+
+
+@router.post("/finalize-expired")
+async def finalize_expired_assessments_job(
+    _: HRUserContext = Depends(get_current_ops_user),
+):
+    """Complete timed attempts past their server deadline (ops / admin dashboards).
+
+    Idempotent: safe to call before reading ``candidate_overview`` so expired
+    modules appear as Completed without requiring the candidate to reopen.
+
+    Returns:
+        Count of assessments newly transitioned to ``COMPLETED``.
+    """
+    finalized = await ensure_expired_assessments_finalized()
+    return {"finalized": finalized}
 
 
 @router.post("/nudge-due")
@@ -23,6 +40,7 @@ async def nudge_candidates_due(
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
 ):
+
     """Nudge incomplete candidates whose package is older than NUDGE_AFTER_HOURS.
 
     Intended to be called by an external scheduler (T-24h). Scoped to the
