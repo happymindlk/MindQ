@@ -26,12 +26,12 @@ from app.models.candidate_progress import CandidateProgress
 from app.services.candidate_service import (
     IN_PROGRESS_STATUS,
     CandidateService,
-    is_strict_expired,
+    is_display_expired,
 )
 
 logger = logging.getLogger("app.assessment_expiry")
 
-# Periodic sweep interval for the in-process background loop.
+# Periodic sweep interval for the in-process background loop / ARQ cron.
 EXPIRY_SWEEP_INTERVAL_SECONDS = 45
 
 
@@ -43,31 +43,34 @@ async def list_expired_in_progress(
     session: AsyncSession,
     *,
     now: datetime | None = None,
+    candidate_id: UUID | None = None,
 ) -> list[tuple[CandidateProgress, Assessment]]:
-    """Return ``IN_PROGRESS`` attempts whose server deadline has passed.
+    """Return ``IN_PROGRESS`` attempts whose display deadline has passed.
 
     Args:
         session: Async database session.
         now: Clock override for tests; defaults to UTC now.
+        candidate_id: When set, only that candidate's attempts are considered.
 
     Returns:
         Pairs of ``(progress, assessment)`` that should be auto-submitted.
     """
     clock = now or _utcnow()
-    rows = (
-        await session.execute(
-            select(CandidateProgress, Assessment)
-            .join(Assessment, Assessment.id == CandidateProgress.assessment_id)
-            .where(
-                CandidateProgress.status == IN_PROGRESS_STATUS,
-                CandidateProgress.started_at.is_not(None),
-            )
-            .options(defer(Assessment.questions))
+    stmt = (
+        select(CandidateProgress, Assessment)
+        .join(Assessment, Assessment.id == CandidateProgress.assessment_id)
+        .where(
+            CandidateProgress.status == IN_PROGRESS_STATUS,
+            CandidateProgress.started_at.is_not(None),
         )
-    ).all()
+        .options(defer(Assessment.questions))
+    )
+    if candidate_id is not None:
+        stmt = stmt.where(CandidateProgress.candidate_id == candidate_id)
+    rows = (await session.execute(stmt)).all()
     expired: list[tuple[CandidateProgress, Assessment]] = []
     for progress, assessment in rows:
-        if is_strict_expired(assessment, progress, clock):
+        if is_display_expired(assessment, progress, clock):
             expired.append((progress, assessment))
     return expired
 
@@ -77,29 +80,98 @@ async def finalize_one_expired(
     *,
     candidate: Candidate,
     assessment_id: UUID,
+    completed_at: datetime | None = None,
 ) -> bool:
     """Finalize one expired attempt via the normal submit path.
+
+    ``submit_test`` takes ``FOR UPDATE`` and transitions ``IN_PROGRESS`` →
+    ``COMPLETED``, so concurrent client/worker calls never double-submit.
 
     Args:
         session: Async database session.
         candidate: Candidate who owns the attempt.
         assessment_id: Timed module that has passed its deadline.
+        completed_at: Optional stamp (defaults to now; pass ``expires_at`` for
+            server auto-finalize audit fidelity).
 
     Returns:
         ``True`` when this call transitioned the row to ``COMPLETED``;
         ``False`` when another worker already finalized it.
     """
     try:
-        await CandidateService.submit_test(
+        progress, _package_complete = await CandidateService.submit_test(
             session,
             candidate,
             assessment_id,
             pending_responses=None,
             client_duration_seconds=None,
+            completed_at=completed_at,
         )
     except AssessmentAlreadySubmittedError:
         return False
-    return True
+    return progress is not None
+
+
+async def finalize_expired_assessment(
+    session: AsyncSession,
+    candidate_id: UUID,
+    *,
+    assessment_id: UUID | None = None,
+    now: datetime | None = None,
+    enqueue: bool = True,
+) -> list[tuple[UUID, UUID]]:
+    """Finalize expired timed attempts for one candidate (idempotent).
+
+    Args:
+        session: Async database session.
+        candidate_id: Candidate whose attempts to scan.
+        assessment_id: Optional single module filter.
+        now: Clock override for tests.
+        enqueue: When True, queue post-submit scoring for each new completion.
+
+    Returns:
+        ``(candidate_id, assessment_id)`` pairs newly marked completed.
+    """
+    expired = await list_expired_in_progress(
+        session, now=now, candidate_id=candidate_id
+    )
+    if assessment_id is not None:
+        expired = [(p, a) for p, a in expired if p.assessment_id == assessment_id]
+    if not expired:
+        return []
+
+    candidate = (
+        await session.execute(
+            select(Candidate).where(
+                Candidate.id == candidate_id,
+                Candidate.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if candidate is None:
+        return []
+
+    finalized: list[tuple[UUID, UUID]] = []
+    for progress, _assessment in expired:
+        stamp = getattr(progress, "expires_at", None) or (now or _utcnow())
+        claimed = await finalize_one_expired(
+            session,
+            candidate=candidate,
+            assessment_id=progress.assessment_id,
+            completed_at=stamp,
+        )
+        if not claimed:
+            continue
+        pair = (candidate.id, progress.assessment_id)
+        finalized.append(pair)
+        if enqueue:
+            await enqueue_finalize_and_score_ai(candidate.id, progress.assessment_id)
+        logger.info(
+            "assessment_auto_finalized candidate_id=%s assessment_id=%s",
+            candidate.id,
+            progress.assessment_id,
+        )
+    return finalized
 
 
 async def finalize_expired_assessments(
@@ -148,10 +220,12 @@ async def finalize_expired_assessments(
                 progress.candidate_id,
             )
             continue
+        stamp = getattr(progress, "expires_at", None) or (now or _utcnow())
         claimed = await finalize_one_expired(
             session,
             candidate=candidate,
             assessment_id=progress.assessment_id,
+            completed_at=stamp,
         )
         if not claimed:
             continue

@@ -1,7 +1,12 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Badge from './Badge';
 import { ArrowRight, CheckCircle, Clock, FileText, Lock } from 'lucide-react';
 import { normalizeModuleStatus } from '../../features/candidate-dashboard/module-status';
+import {
+  computeServerOffsetMs,
+  remainingFromDeadline,
+} from '../../features/assessment-runner/use-server-timer';
+import { formatClock } from '../../features/assessment-runner/use-module-timer';
 
 /**
  * Compact assessment status tile for the candidate dashboard.
@@ -14,6 +19,10 @@ import { normalizeModuleStatus } from '../../features/candidate-dashboard/module
  * @param {() => void} [props.onPrefetch] Warm the module payload on hover/focus.
  * @param {string | null} [props.lockedReason] When set, the tile cannot be launched and shows why.
  * @param {string | null} [props.durationLabel] Optional duration badge (e.g. `⏱ 4 mins`).
+ * @param {string | null} [props.expiresAt] ISO display deadline for in-progress countdown.
+ * @param {string | null} [props.serverNow] ISO server clock for offset sync.
+ * @param {number | null} [props.remainingSeconds] Server seed for in-progress countdown.
+ * @param {() => void} [props.onTimerExpired] Fired once when the live countdown hits zero.
  */
 export default function StatusTile({
   title,
@@ -23,12 +32,55 @@ export default function StatusTile({
   onPrefetch,
   lockedReason = null,
   durationLabel = null,
+  expiresAt = null,
+  serverNow = null,
+  remainingSeconds = null,
+  onTimerExpired = null,
 }) {
   const lifecycle = normalizeModuleStatus(status);
   const isCompleted = lifecycle === 'completed';
   const isInProgress = lifecycle === 'in_progress';
   const isLocked = !isCompleted && Boolean(lockedReason);
   const interactive = !isCompleted && !isLocked && typeof onClick === 'function';
+
+  const [liveRemaining, setLiveRemaining] = useState(() => {
+    if (!isInProgress) return null;
+    if (expiresAt) {
+      return remainingFromDeadline(expiresAt, computeServerOffsetMs(serverNow));
+    }
+    return typeof remainingSeconds === 'number' ? remainingSeconds : null;
+  });
+
+  useEffect(() => {
+    if (!isInProgress || !expiresAt) {
+      setLiveRemaining(
+        isInProgress && typeof remainingSeconds === 'number' ? remainingSeconds : null,
+      );
+      return undefined;
+    }
+    const offset = computeServerOffsetMs(serverNow);
+    let expiredNotified = false;
+    const tick = () => {
+      const left = remainingFromDeadline(expiresAt, offset);
+      setLiveRemaining(left);
+      if (left !== null && left <= 0 && !expiredNotified && typeof onTimerExpired === 'function') {
+        expiredNotified = true;
+        onTimerExpired();
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', tick);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', tick);
+    };
+  }, [isInProgress, expiresAt, serverNow, remainingSeconds, onTimerExpired]);
 
   const icon = isCompleted ? (
     <CheckCircle className="h-5 w-5 text-emerald-500" />
@@ -46,7 +98,11 @@ export default function StatusTile({
     </Badge>
   ) : isInProgress ? (
     <Badge variant="active" showDot>
-      In Progress
+      {liveRemaining != null && liveRemaining <= 0
+        ? 'Completed'
+        : liveRemaining != null
+          ? `In Progress · ${formatClock(liveRemaining)}`
+          : 'In Progress'}
     </Badge>
   ) : (
     <Badge variant="neutral">Not started</Badge>

@@ -19,6 +19,7 @@ import {
   resolveWriteRemainingSeconds,
 } from './runner-logic';
 import { formatClock, timerTone, useModuleTimer } from './use-module-timer';
+import { useServerTimer } from './use-server-timer';
 import { useQuestionTelemetry } from './use-question-telemetry';
 
 /** Leading-edge guard against rapid Next / confirm double-clicks. */
@@ -150,14 +151,24 @@ export function AssessmentRunner({
     setTimeUp(true);
   }, []);
 
-  const timer = useModuleTimer({
-    remainingSeconds: resolveRemainingSeconds(test),
-    expireRemainingSeconds: resolveWriteRemainingSeconds(test),
-    onExpire,
-    onDisplayExpire,
-    // State-driven enable so React tears down the interval as soon as submit starts.
-    enabled: !submitting,
+  const hasWallClock =
+    typeof test.expires_at === 'string' && test.expires_at.length > 0;
+  const moduleTimer = useModuleTimer({
+    remainingSeconds: hasWallClock ? null : resolveRemainingSeconds(test),
+    expireRemainingSeconds: hasWallClock ? null : resolveWriteRemainingSeconds(test),
+    onExpire: hasWallClock ? undefined : onExpire,
+    onDisplayExpire: hasWallClock ? undefined : onDisplayExpire,
+    enabled: !hasWallClock && !submitting,
   });
+  const serverTimer = useServerTimer({
+    expiresAt: hasWallClock ? test.expires_at : null,
+    writeExpiresAt: hasWallClock ? (test.write_expires_at ?? test.expires_at) : null,
+    serverNow: test.server_now,
+    onExpire: hasWallClock ? onExpire : undefined,
+    onDisplayExpire: hasWallClock ? onDisplayExpire : undefined,
+    enabled: hasWallClock && !submitting,
+  });
+  const timer = hasWallClock ? serverTimer : moduleTimer;
   timerStopRef.current = timer.stop;
 
   const saveQuestion = useCallback(

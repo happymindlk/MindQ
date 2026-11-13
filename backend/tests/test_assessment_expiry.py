@@ -10,6 +10,7 @@ import pytest
 
 from app.exceptions import AssessmentAlreadySubmittedError
 from app.services.assessment_expiry import (
+    finalize_expired_assessment,
     finalize_expired_assessments,
     finalize_one_expired,
     list_expired_in_progress,
@@ -30,13 +31,15 @@ def _assessment(*, duration_seconds=180):
     )
 
 
-def _progress(*, started_seconds_ago, status="IN_PROGRESS"):
+def _progress(*, started_seconds_ago, status="IN_PROGRESS", duration_seconds=180):
+    started = NOW - timedelta(seconds=started_seconds_ago)
     return SimpleNamespace(
         id=uuid4(),
         candidate_id=uuid4(),
         assessment_id=uuid4(),
         status=status,
-        started_at=NOW - timedelta(seconds=started_seconds_ago),
+        started_at=started,
+        expires_at=started + timedelta(seconds=duration_seconds),
         completed_at=None,
     )
 
@@ -44,13 +47,16 @@ def _progress(*, started_seconds_ago, status="IN_PROGRESS"):
 def _result_all(rows):
     result = MagicMock()
     result.all.return_value = rows
-    result.scalars.return_value.all.return_value = [r[0] if isinstance(r, tuple) else r for r in rows]
+    result.scalars.return_value.all.return_value = [
+        r[0] if isinstance(r, tuple) else r for r in rows
+    ]
     return result
 
 
 @pytest.mark.asyncio
-async def test_list_expired_in_progress_filters_by_deadline():
-    expired_progress = _progress(started_seconds_ago=180 + STRICT_GRACE_SECONDS + 5)
+async def test_list_expired_in_progress_filters_by_display_deadline():
+    """Display deadline (no grace) marks the attempt expired for server finalize."""
+    expired_progress = _progress(started_seconds_ago=181)
     live_progress = _progress(started_seconds_ago=30)
     expired_assessment = _assessment()
     live_assessment = _assessment()
@@ -74,9 +80,25 @@ async def test_list_expired_in_progress_filters_by_deadline():
 
 
 @pytest.mark.asyncio
+async def test_list_expired_does_not_wait_for_grace_window():
+    """Server finalize runs at display expiry, not write-lock (+grace)."""
+    # 5s past display deadline but still inside the 30s grace window.
+    progress = _progress(started_seconds_ago=180 + 5)
+    assessment = _assessment()
+    progress.assessment_id = assessment.id
+    assert 5 < STRICT_GRACE_SECONDS
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=_result_all([(progress, assessment)]))
+
+    found = await list_expired_in_progress(session, now=NOW)
+    assert len(found) == 1
+
+
+@pytest.mark.asyncio
 async def test_finalize_expired_transitions_and_enqueues_scoring(monkeypatch):
     assessment = _assessment(duration_seconds=60)
-    progress = _progress(started_seconds_ago=500)
+    progress = _progress(started_seconds_ago=500, duration_seconds=60)
     progress.assessment_id = assessment.id
     candidate = SimpleNamespace(
         id=progress.candidate_id,
@@ -89,13 +111,21 @@ async def test_finalize_expired_transitions_and_enqueues_scoring(monkeypatch):
     session.execute = AsyncMock(
         side_effect=[
             _result_all([(progress, assessment)]),
-            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[candidate])))),
+            MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(all=MagicMock(return_value=[candidate]))
+                )
+            ),
         ]
     )
 
     submit = AsyncMock(
         return_value=(
-            SimpleNamespace(status="COMPLETED", assessment_id=assessment.id, completed_at=NOW),
+            SimpleNamespace(
+                status="COMPLETED",
+                assessment_id=assessment.id,
+                completed_at=progress.expires_at,
+            ),
             False,
         )
     )
@@ -113,13 +143,14 @@ async def test_finalize_expired_transitions_and_enqueues_scoring(monkeypatch):
 
     assert finalized == [(candidate.id, assessment.id)]
     submit.assert_awaited_once()
+    assert submit.await_args.kwargs.get("completed_at") == progress.expires_at
     enqueue.assert_awaited_once_with(candidate.id, assessment.id)
 
 
 @pytest.mark.asyncio
-async def test_finalize_expired_is_idempotent_when_already_completed(monkeypatch):
+async def test_finalize_expired_assessment_scoped_to_candidate(monkeypatch):
     assessment = _assessment(duration_seconds=60)
-    progress = _progress(started_seconds_ago=500)
+    progress = _progress(started_seconds_ago=500, duration_seconds=60)
     progress.assessment_id = assessment.id
     candidate = SimpleNamespace(
         id=progress.candidate_id,
@@ -132,7 +163,54 @@ async def test_finalize_expired_is_idempotent_when_already_completed(monkeypatch
     session.execute = AsyncMock(
         side_effect=[
             _result_all([(progress, assessment)]),
-            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[candidate])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=candidate)),
+        ]
+    )
+    submit = AsyncMock(
+        return_value=(
+            SimpleNamespace(status="COMPLETED", assessment_id=assessment.id),
+            False,
+        )
+    )
+    enqueue = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.assessment_expiry.CandidateService.submit_test",
+        submit,
+    )
+    monkeypatch.setattr(
+        "app.services.assessment_expiry.enqueue_finalize_and_score_ai",
+        enqueue,
+    )
+
+    finalized = await finalize_expired_assessment(
+        session, candidate.id, now=NOW, enqueue=True
+    )
+
+    assert finalized == [(candidate.id, assessment.id)]
+    enqueue.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_finalize_expired_is_idempotent_when_already_completed(monkeypatch):
+    assessment = _assessment(duration_seconds=60)
+    progress = _progress(started_seconds_ago=500, duration_seconds=60)
+    progress.assessment_id = assessment.id
+    candidate = SimpleNamespace(
+        id=progress.candidate_id,
+        corporate_id=uuid4(),
+        package_id=uuid4(),
+        deleted_at=None,
+    )
+
+    session = AsyncMock()
+    session.execute = AsyncMock(
+        side_effect=[
+            _result_all([(progress, assessment)]),
+            MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(all=MagicMock(return_value=[candidate]))
+                )
+            ),
         ]
     )
 
@@ -169,16 +247,67 @@ async def test_finalize_one_expired_returns_false_on_race():
 
 
 @pytest.mark.asyncio
-async def test_finalize_expired_twice_stays_idempotent(monkeypatch):
-    """Second sweep finds nothing once status is COMPLETED."""
+async def test_concurrent_finalize_calls_remain_idempotent(monkeypatch):
+    """Second concurrent call loses the race and does not double-enqueue."""
     assessment = _assessment(duration_seconds=60)
-    progress = _progress(started_seconds_ago=500, status="COMPLETED")
+    progress = _progress(started_seconds_ago=500, duration_seconds=60)
     progress.assessment_id = assessment.id
+    candidate = SimpleNamespace(
+        id=progress.candidate_id,
+        corporate_id=uuid4(),
+        package_id=uuid4(),
+        deleted_at=None,
+    )
 
     session = AsyncMock()
-    # list_expired filters by is_strict_expired but status is still returned from
-    # the query mock; the SQL WHERE status=IN_PROGRESS would exclude this row.
-    # Simulate an empty second sweep.
+    session.execute = AsyncMock(
+        side_effect=[
+            _result_all([(progress, assessment)]),
+            MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(all=MagicMock(return_value=[candidate]))
+                )
+            ),
+            _result_all([(progress, assessment)]),
+            MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(all=MagicMock(return_value=[candidate]))
+                )
+            ),
+        ]
+    )
+
+    submit = AsyncMock(
+        side_effect=[
+            (
+                SimpleNamespace(status="COMPLETED", assessment_id=assessment.id),
+                False,
+            ),
+            AssessmentAlreadySubmittedError(),
+        ]
+    )
+    enqueue = AsyncMock()
+    monkeypatch.setattr(
+        "app.services.assessment_expiry.CandidateService.submit_test",
+        submit,
+    )
+    monkeypatch.setattr(
+        "app.services.assessment_expiry.enqueue_finalize_and_score_ai",
+        enqueue,
+    )
+
+    first = await finalize_expired_assessments(session, now=NOW)
+    second = await finalize_expired_assessments(session, now=NOW)
+
+    assert first == [(candidate.id, assessment.id)]
+    assert second == []
+    assert enqueue.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_finalize_expired_twice_stays_idempotent(monkeypatch):
+    """Second sweep finds nothing once status is COMPLETED."""
+    session = AsyncMock()
     session.execute = AsyncMock(return_value=_result_all([]))
 
     enqueue = AsyncMock()

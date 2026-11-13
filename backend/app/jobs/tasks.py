@@ -170,6 +170,50 @@ async def task_store_cached_report(
     )
 
 
+async def task_finalize_expired_assessment(
+    ctx: dict[str, Any],
+    candidate_id: UUID | str,
+    assessment_id: UUID | str | None = None,
+) -> int:
+    """Finalize one candidate's expired timed attempt(s) and enqueue scoring.
+
+    Args:
+        ctx: ARQ worker context.
+        candidate_id: Candidate whose in-progress modules to scan.
+        assessment_id: Optional single module filter.
+
+    Returns:
+        Number of modules newly finalized.
+    """
+    del ctx
+    from app.database import SessionLocal
+    from app.services.assessment_expiry import finalize_expired_assessment
+
+    async with SessionLocal() as session:
+        finalized = await finalize_expired_assessment(
+            session,
+            _as_uuid(candidate_id),
+            assessment_id=_as_uuid(assessment_id) if assessment_id else None,
+            enqueue=True,
+        )
+    return len(finalized)
+
+
+async def task_sweep_expired_assessments(ctx: dict[str, Any]) -> int:
+    """Periodic safety sweep for abandoned timed assessments.
+
+    Args:
+        ctx: ARQ worker context.
+
+    Returns:
+        Number of modules newly finalized.
+    """
+    del ctx
+    from app.services.assessment_expiry import ensure_expired_assessments_finalized
+
+    return await ensure_expired_assessments_finalized()
+
+
 TASK_FUNCTIONS = (
     task_finalize_and_score_ai,
     task_refresh_report_synthesis,
@@ -177,4 +221,6 @@ TASK_FUNCTIONS = (
     task_send_package_share,
     task_send_nudge_email,
     task_store_cached_report,
+    task_finalize_expired_assessment,
+    task_sweep_expired_assessments,
 )

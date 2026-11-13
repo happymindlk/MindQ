@@ -454,11 +454,12 @@ async def test_dashboard_reports_closed_window_and_launchable_flags():
         SimpleNamespace(assessment_id=done.id, status="COMPLETED", started_at=now - 3 * HOUR),
     ]
     session = AsyncMock()
-    # package → company_name → assessments → progresses
+    # finalize expired (.all()) → package → company_name → assessments → progresses
     company = MagicMock()
     company.scalar_one_or_none.return_value = "Acme Labs"
     session.execute = AsyncMock(
         side_effect=[
+            _ListResult([]),
             _ListResult(package),
             company,
             _ListResult([fresh, started, done]),

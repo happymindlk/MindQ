@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
-from app.jobs.enqueue import enqueue_finalize_and_score_ai
+from app.jobs.enqueue import (
+    enqueue_finalize_and_score_ai,
+    enqueue_finalize_expired_assessment,
+)
 from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.response import ResponseSave, ResponseSubmit
@@ -13,6 +16,7 @@ from app.services.candidate_service import CandidateService, assessment_duration
 from app.services.runner_payload import (
     build_runner_payload,
     remaining_seconds,
+    strict_deadline,
     write_remaining_seconds,
 )
 from app.auth import get_current_candidate
@@ -87,6 +91,7 @@ async def get_test(
         _raise_integrity(exc)
 
     started_at = getattr(progress, "started_at", None) if progress else None
+    expires_at = getattr(progress, "expires_at", None) if progress else None
 
     return build_runner_payload(
         assessment_id=assessment.id,
@@ -101,6 +106,7 @@ async def get_test(
         seed=f"{candidate.id}:{assessment.id}",
         answers=answers,
         started_at=started_at,
+        expires_at=expires_at,
         module_kind=getattr(assessment, "module_kind", None),
         show_top_disclaimer=bool(getattr(assessment, "show_top_disclaimer", False)),
         top_disclaimer_text=getattr(assessment, "top_disclaimer_text", None),
@@ -142,19 +148,35 @@ async def start_test(
 
     now = datetime.now(timezone.utc)
     duration = assessment_duration_seconds(assessment)
+    expires_at = getattr(progress, "expires_at", None)
+    write_at = strict_deadline(
+        progress.started_at, duration, expires_at=expires_at
+    )
+    # Exact-time ARQ finalize at the display deadline (safety sweep covers misses).
+    if expires_at is not None:
+        await enqueue_finalize_expired_assessment(
+            candidate.id,
+            progress.assessment_id,
+            defer_until=expires_at,
+        )
     return {
         "assessment_id": str(assessment.id),
         "status": progress.status,
         "started_at": progress.started_at,
+        "expires_at": expires_at,
+        "write_expires_at": write_at,
+        "server_now": now,
         "remaining_seconds": remaining_seconds(
             progress.started_at,
             duration,
             now,
+            expires_at=expires_at,
         ),
         "write_remaining_seconds": write_remaining_seconds(
             progress.started_at,
             duration,
             now,
+            expires_at=expires_at,
         ),
     }
 

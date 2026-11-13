@@ -142,6 +142,12 @@ export default function TestDashboard() {
                 status={status}
                 durationLabel={formatDurationBadge(resolveTestDurationSeconds(test))}
                 lockedReason={lockedReasonFor(status, windowState)}
+                expiresAt={test.expires_at ?? null}
+                serverNow={test.server_now ?? dashboardData.server_now ?? null}
+                remainingSeconds={test.remaining_seconds ?? null}
+                onTimerExpired={() => {
+                  void loadDashboard();
+                }}
                 onPrefetch={() => {
                   // Prefetch is safe: GET /test no longer marks IN_PROGRESS.
                   void cachedQuery(

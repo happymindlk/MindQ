@@ -100,6 +100,12 @@ export interface RunnerTest {
   show_confidentiality_notice?: boolean;
   confidentiality_notice_text?: string | null;
   started_at: string | null;
+  /** Immutable display deadline (ISO UTC); null when untimed / not started. */
+  expires_at?: string | null;
+  /** Write-lock deadline (expires_at + grace); null when untimed / not started. */
+  write_expires_at?: string | null;
+  /** Server UTC clock for client offset sync. */
+  server_now?: string | null;
   /** Server-computed display countdown seed (UTC); null when untimed. */
   remaining_seconds?: number | null;
   /** Seconds until write lock (duration + grace); expire / auto-submit seed. */
