@@ -45,6 +45,7 @@ from app.schemas.jd_evaluation import (
 )
 from app.services.gemini_client import (
     GeminiUnavailable,
+    extract_usage,
     generate_content_sync,
     overall_deadline_seconds,
     served_model,
@@ -144,14 +145,31 @@ class BannedLanguageError(JdScoringUnavailable):
 
 
 class ModelText(str):
-    """Completion text tagged with the model that served it (fallback-aware)."""
+    """Completion text tagged with the model and usage that served it."""
 
     model: str | None = None
+    usage: dict[str, Any] | None = None
 
     @classmethod
-    def tagged(cls, text: str, model: str | None) -> ModelText:
+    def tagged(
+        cls,
+        text: str,
+        model: str | None,
+        usage: dict[str, Any] | None = None,
+    ) -> ModelText:
+        """Tag completion text with serving model and optional usage.
+
+        Args:
+            text: Raw model completion.
+            model: Serving model id (fallback-aware).
+            usage: Token / cost dict from ``extract_usage``.
+
+        Returns:
+            ``ModelText`` subclass instance.
+        """
         out = cls(text)
         out.model = model
+        out.usage = usage
         return out
 
 
@@ -422,7 +440,12 @@ def complete_with_gemini(user_prompt: str) -> str:
     text = (getattr(response, "text", None) or "").strip()
     if not text:
         raise JdScoringUnavailable("Gemini returned an empty response")
-    return ModelText.tagged(text, served_model(response, settings.GEMINI_MODEL))
+    model = served_model(response, settings.GEMINI_MODEL)
+    return ModelText.tagged(
+        text,
+        model,
+        extract_usage(response, settings.GEMINI_MODEL).as_dict(),
+    )
 
 
 def parse_evaluation_json(raw: str) -> ReportNarrative:
@@ -562,7 +585,7 @@ def score_against_jd_with_model(
     assessment_scores: list[dict[str, Any]] | None = None,
     target_role: str = "",
     complete: CompleteFn | None = None,
-) -> tuple[ReportNarrative, str]:
+) -> tuple[ReportNarrative, str, dict[str, Any] | None]:
     """Generate the report synthesis and report which model produced it.
 
     Retries once on parse, key, or banned-word failure. Persistent banned
@@ -579,7 +602,7 @@ def score_against_jd_with_model(
         complete: Optional completion stub (tests).
 
     Returns:
-        Parsed synthesis and the serving model name.
+        Parsed synthesis, serving model name, and optional usage/cost dict.
     """
     assert_no_answer_key_fields(evidence)
     prompt = build_user_prompt(
@@ -593,12 +616,15 @@ def score_against_jd_with_model(
     completer = complete or complete_with_gemini
     last_error: Exception | None = None
     model = settings.GEMINI_MODEL
+    usage: dict[str, Any] | None = None
     for attempt in range(2):
         try:
             raw = completer(prompt)
             model = getattr(raw, "model", None) or settings.GEMINI_MODEL
+            raw_usage = getattr(raw, "usage", None)
+            usage = raw_usage if isinstance(raw_usage, dict) else None
             synthesis = _parse_and_validate(raw, assessment_scores)
-            return synthesis, model
+            return synthesis, model, usage
         except (ValidationError, BannedLanguageError, JdScoringUnavailable, json.JSONDecodeError) as exc:
             last_error = exc
             logger.warning(
@@ -641,7 +667,7 @@ def score_against_jd(
     Returns:
         Parsed synthesis.
     """
-    synthesis, _model = score_against_jd_with_model(
+    synthesis, _model, _usage = score_against_jd_with_model(
         job_description=job_description,
         candidate_name=candidate_name,
         package_title=package_title,
@@ -770,7 +796,7 @@ class JdScoringService:
 
         try:
             evidence = build_evidence(assessments, progresses, responses)
-            evaluation, model = await asyncio.wait_for(
+            evaluation, model, usage = await asyncio.wait_for(
                 run_in_threadpool(
                     score_against_jd_with_model,
                     job_description=jd,
@@ -809,6 +835,7 @@ class JdScoringService:
             existing.model = model
             existing.overall_fit = None
             existing.payload = payload
+            existing.usage = usage
             existing.status = EVAL_STATUS_OK
             existing.last_error = None
             existing.generated_at = now
@@ -822,6 +849,7 @@ class JdScoringService:
                     model=model,
                     overall_fit=None,
                     payload=payload,
+                    usage=usage,
                     status=EVAL_STATUS_OK,
                     last_error=None,
                     generated_at=now,
@@ -829,10 +857,14 @@ class JdScoringService:
             )
         await session.commit()
         logger.info(
-            "jd_scoring_generated candidate_id=%s model=%s assessments=%s",
+            "jd_scoring_generated candidate_id=%s model=%s assessments=%s "
+            "prompt_tokens=%s output_tokens=%s estimated_cost_usd=%s",
             candidate.id,
             model,
             len(evaluation.competency_breakdown),
+            (usage or {}).get("prompt_tokens"),
+            (usage or {}).get("candidates_tokens"),
+            (usage or {}).get("estimated_cost_usd"),
         )
         return evaluation, "generated"
 
@@ -864,6 +896,7 @@ class JdScoringService:
                 existing.model = settings.GEMINI_MODEL
                 existing.overall_fit = None
                 existing.payload = {}
+                existing.usage = None
                 existing.status = EVAL_STATUS_FAILED
                 existing.last_error = message
                 existing.generated_at = now
@@ -877,6 +910,7 @@ class JdScoringService:
                         model=settings.GEMINI_MODEL,
                         overall_fit=None,
                         payload={},
+                        usage=None,
                         status=EVAL_STATUS_FAILED,
                         last_error=message,
                         generated_at=now,

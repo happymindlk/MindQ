@@ -7,6 +7,10 @@ stays one env var.
 Resilience layers, in order:
 1. Per-model retries with exponential backoff (jittered for background work).
 2. An ordered fallback chain when a model is saturated (429 / 503 only).
+
+Model IDs must be stable pins (``gemini-3.5-flash``), never ``*-latest`` /
+``*-preview`` / ``*-exp``. Token usage and estimated USD cost are extracted
+from each successful response for per-report cost visibility.
 """
 from __future__ import annotations
 
@@ -18,6 +22,7 @@ import time
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import asdict, dataclass
 from typing import Any, TypeVar
 
 from app.config import settings
@@ -32,6 +37,7 @@ _RETRYABLE_STATUS = frozenset(
 _RETRYABLE_CODES = frozenset({408, 429, 500, 502, 503, 504})
 _CAPACITY_STATUS = frozenset({"RESOURCE_EXHAUSTED", "UNAVAILABLE"})
 _CAPACITY_CODES = frozenset({429, 503})
+_UNPINNED_MARKERS = ("-latest", "-preview", "-exp", "-experimental")
 
 # A ContextVar (not a parameter) so the profile reaches Gemini calls made deep
 # inside services, including ones run via run_in_threadpool / to_thread, which
@@ -43,6 +49,127 @@ _client: Any = None
 
 class GeminiUnavailable(Exception):
     """Gemini is not configured, or the SDK call failed after retries."""
+
+
+@dataclass(frozen=True)
+class GeminiUsage:
+    """Token counters and estimated USD cost for one Gemini completion.
+
+    Attributes:
+        prompt_tokens: Input token count from ``usage_metadata``.
+        candidates_tokens: Output token count (completion).
+        thoughts_tokens: Thinking/reasoning tokens when reported.
+        total_tokens: Provider total when present.
+        estimated_cost_usd: Paid-tier list-price estimate, or None.
+        model: Model id used for the estimate (requested or served).
+    """
+
+    prompt_tokens: int | None
+    candidates_tokens: int | None
+    thoughts_tokens: int | None
+    total_tokens: int | None
+    estimated_cost_usd: float | None
+    model: str
+
+    def as_dict(self) -> dict[str, Any]:
+        """JSON-serializable form for ``candidate_evaluations.usage``.
+
+        Returns:
+            Flat dict of usage fields suitable for JSONB persistence.
+        """
+        return asdict(self)
+
+
+def is_pinned_model_id(model: str) -> bool:
+    """True when ``model`` looks like a stable Gemini pin, not a floating alias.
+
+    Args:
+        model: Model id from settings or the fallback chain.
+
+    Returns:
+        False for blank ids or ``*-latest`` / ``*-preview`` / ``*-exp`` names.
+    """
+    name = (model or "").strip().lower()
+    if not name:
+        return False
+    return not any(marker in name for marker in _UNPINNED_MARKERS)
+
+
+def _rates_for_model(model: str) -> tuple[float, float]:
+    """Return ``(input_usd_per_1m, output_usd_per_1m)`` for a model family."""
+    name = (model or "").lower()
+    if "lite" in name:
+        return (
+            float(settings.GEMINI_LITE_INPUT_USD_PER_1M),
+            float(settings.GEMINI_LITE_OUTPUT_USD_PER_1M),
+        )
+    return (
+        float(settings.GEMINI_INPUT_USD_PER_1M),
+        float(settings.GEMINI_OUTPUT_USD_PER_1M),
+    )
+
+
+def estimate_cost_usd(
+    *,
+    prompt_tokens: int | None,
+    candidates_tokens: int | None,
+    thoughts_tokens: int | None = None,
+    model: str,
+) -> float | None:
+    """Estimate paid-tier USD cost from token counts.
+
+    Thinking tokens are billed as output. Returns None when both input and
+    output counts are missing.
+
+    Args:
+        prompt_tokens: Input tokens.
+        candidates_tokens: Completion tokens.
+        thoughts_tokens: Optional thinking tokens (counted as output).
+        model: Model id selecting the rate table.
+
+    Returns:
+        Rounded USD estimate, or None when usage is unknown.
+    """
+    prompt = prompt_tokens if isinstance(prompt_tokens, int) else None
+    completion = candidates_tokens if isinstance(candidates_tokens, int) else None
+    thoughts = thoughts_tokens if isinstance(thoughts_tokens, int) else 0
+    if prompt is None and completion is None:
+        return None
+    input_rate, output_rate = _rates_for_model(model)
+    input_cost = ((prompt or 0) / 1_000_000) * input_rate
+    output_cost = (((completion or 0) + thoughts) / 1_000_000) * output_rate
+    return round(input_cost + output_cost, 6)
+
+
+def extract_usage(response: Any, requested_model: str) -> GeminiUsage:
+    """Pull token counters and estimated cost from an SDK response.
+
+    Args:
+        response: ``GenerateContentResponse`` (or test double).
+        requested_model: Model id the call was issued with.
+
+    Returns:
+        Structured usage for logging and persistence.
+    """
+    model = served_model(response, requested_model)
+    meta = getattr(response, "usage_metadata", None)
+    prompt = getattr(meta, "prompt_token_count", None)
+    candidates = getattr(meta, "candidates_token_count", None)
+    thoughts = getattr(meta, "thoughts_token_count", None)
+    total = getattr(meta, "total_token_count", None)
+    return GeminiUsage(
+        prompt_tokens=prompt if isinstance(prompt, int) else None,
+        candidates_tokens=candidates if isinstance(candidates, int) else None,
+        thoughts_tokens=thoughts if isinstance(thoughts, int) else None,
+        total_tokens=total if isinstance(total, int) else None,
+        estimated_cost_usd=estimate_cost_usd(
+            prompt_tokens=prompt if isinstance(prompt, int) else None,
+            candidates_tokens=candidates if isinstance(candidates, int) else None,
+            thoughts_tokens=thoughts if isinstance(thoughts, int) else None,
+            model=model,
+        ),
+        model=model,
+    )
 
 
 def require_api_key() -> str:
@@ -83,6 +210,13 @@ def get_client() -> Any:
         from google.genai import types
     except ImportError as exc:
         raise GeminiUnavailable("google-genai is not installed") from exc
+
+    for name in (settings.GEMINI_MODEL, *fallback_models()):
+        if not is_pinned_model_id(name):
+            logger.warning(
+                "gemini_unpinned_model model=%s use a stable id (not *-latest/*-preview/*-exp)",
+                name,
+            )
 
     timeout_ms = max(1, int(settings.GEMINI_TIMEOUT_SECONDS * 1000))
     # SDK HTTP retries are disabled so our wrapper is the single retry policy.
@@ -333,14 +467,17 @@ def served_model(response: Any, requested: str) -> str:
 
 
 def _log_success(response: Any, requested: str) -> None:
-    usage = getattr(response, "usage_metadata", None)
+    usage = extract_usage(response, requested)
     logger.info(
-        "gemini_ok model=%s served=%s prompt_tokens=%s output_tokens=%s total_tokens=%s",
+        "gemini_ok model=%s served=%s prompt_tokens=%s output_tokens=%s "
+        "thoughts_tokens=%s total_tokens=%s estimated_cost_usd=%s",
         requested,
-        served_model(response, requested),
-        getattr(usage, "prompt_token_count", None),
-        getattr(usage, "candidates_token_count", None),
-        getattr(usage, "total_token_count", None),
+        usage.model,
+        usage.prompt_tokens,
+        usage.candidates_tokens,
+        usage.thoughts_tokens,
+        usage.total_tokens,
+        usage.estimated_cost_usd,
     )
 
 

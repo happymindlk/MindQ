@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # Optional S3-compatible fallback for logos + private report archives.
     # Prefer native Supabase Storage above. Accepts R2_*, AWS_S3_*, and the common
     # Supabase docs names AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY when used as
-    # Storage gateway credentials (those same names are also read by SES below —
+    # Storage gateway credentials (those same names are also read by SES below --
     # prefer AWS_S3_* if you need both email and storage keys).
     R2_ACCESS_KEY_ID: str = Field(
         default="",
@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = "MindQ <noreply@mindqtalent.com>"
     # Inbox for gated beta / waitlist access requests (and other admin alerts).
     ADMIN_NOTIFICATION_EMAIL: str = "muhamadnas44@gmail.com"
-    # Legacy alias — prefer ADMIN_NOTIFICATION_EMAIL.
+    # Legacy alias -- prefer ADMIN_NOTIFICATION_EMAIL.
     BETA_ACCESS_ADMIN_EMAIL: str = ""
     # Comma-separated emails that skip waitlist and auto-provision into the
     # local "acme" test tenant (e.g. "dev@example.com,qa@example.com").
@@ -99,14 +99,15 @@ class Settings(BaseSettings):
     PORTAL_URL: str = ""
 
     GEMINI_API_KEY: str = ""
+    # Stable (pinned) Gemini model ID -- never *-latest / *-preview / *-exp.
     # New Gemini API keys cannot call gemini-2.5-*; Google returns 404 NOT_FOUND.
     GEMINI_MODEL: str = "gemini-3.5-flash"
     # Comma-separated chain tried in order once a model exhausts retries on 429/503.
     # Each has its own capacity pool and free-tier daily quota; all must be callable
     # by this key (gemini-2.5-* returns 404). Blank disables fallback.
     GEMINI_FALLBACK_MODELS: str = "gemini-3.6-flash,gemini-3.5-flash-lite"
-    # Soft timeout so submit/report never hang forever on a slow Gemini call.
-    GEMINI_TIMEOUT_SECONDS: float = 45.0
+    # Per-attempt HTTP timeout so submit/report never hang forever on a slow call.
+    GEMINI_TIMEOUT_SECONDS: float = 30.0
     # Total generate_content attempts per model (free-tier 429 / transient errors).
     GEMINI_MAX_RETRIES: int = 3
     # Background jobs have no user waiting, so they ride out capacity spikes longer.
@@ -115,6 +116,12 @@ class Settings(BaseSettings):
     GEMINI_RETRY_MAX_DELAY_SECONDS: float = 30.0
     # Pause between sequential custom-technical item grades (RPM throttle).
     GEMINI_INTER_REQUEST_SECONDS: float = 2.0
+    # Paid-tier USD per 1M tokens for estimated_cost_usd on report usage rows.
+    # Override when Google changes list prices; free-tier still records tokens.
+    GEMINI_INPUT_USD_PER_1M: float = 1.50
+    GEMINI_OUTPUT_USD_PER_1M: float = 9.00
+    GEMINI_LITE_INPUT_USD_PER_1M: float = 0.25
+    GEMINI_LITE_OUTPUT_USD_PER_1M: float = 1.50
     # Incomplete candidates older than this many hours are nudged by the job.
     NUDGE_AFTER_HOURS: int = 24
 

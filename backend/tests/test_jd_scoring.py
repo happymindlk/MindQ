@@ -943,9 +943,18 @@ async def test_get_or_evaluate_retries_failed_row_and_records_served_model():
     session = FakeSession(existing=failed)
     calls = {"n": 0}
 
+    usage = {
+        "prompt_tokens": 900,
+        "candidates_tokens": 400,
+        "thoughts_tokens": None,
+        "total_tokens": 1300,
+        "estimated_cost_usd": 0.00495,
+        "model": "gemini-3.5-flash",
+    }
+
     def complete(_prompt: str) -> str:
         calls["n"] += 1
-        return ModelText.tagged(json.dumps(VALID_SYNTHESIS), "gemini-3.5-flash")
+        return ModelText.tagged(json.dumps(VALID_SYNTHESIS), "gemini-3.5-flash", usage)
 
     evaluation, status = await JdScoringService.get_or_evaluate(
         session, complete=complete, **kwargs
@@ -957,6 +966,7 @@ async def test_get_or_evaluate_retries_failed_row_and_records_served_model():
     assert failed.last_error is None
     assert failed.overall_fit is None
     assert failed.model == "gemini-3.5-flash"
+    assert failed.usage == usage
     assert "overall_fit" not in failed.payload
     assert evaluation_is_ok(failed)
 
