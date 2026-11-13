@@ -32,6 +32,7 @@ from app.schemas.admin_auth import (
     AdminProfile,
     AdminTokenResponse,
 )
+from app.services.admin_team import ensure_ops_bootstrap_membership, is_env_managed_email
 from app.services.email import send_admin_otp_email
 from app.services.supabase_password import (
     SupabaseAuthUnavailable,
@@ -317,13 +318,34 @@ def _held_access_token(row: AdminLoginChallenge) -> str | None:
     return unseal_secret(row.access_token)
 
 
-async def _ops_membership(db: AsyncSession, user_id: UUID) -> HRUser | None:
+async def _ops_membership(
+    db: AsyncSession,
+    user_id: UUID,
+    *,
+    email: str | None = None,
+) -> HRUser | None:
+    """Return an ops ``hr_users`` row, restoring env-bootstrap membership when needed.
+
+    Args:
+        db: Async database session.
+        user_id: Auth user id from the password grant.
+        email: Login email; when listed in ``OPS_ADMIN_EMAILS`` and membership
+            is missing, a Super Admin row is provisioned so bootstrap admins
+            are never locked out.
+
+    Returns:
+        Ops membership row, or None when the account is not a Super Admin.
+    """
     row = (
         await db.execute(select(HRUser).where(HRUser.user_id == user_id))
     ).scalar_one_or_none()
-    if row is None or not is_ops_role(row.role):
-        return None
-    return row
+    if row is not None and is_ops_role(row.role):
+        return row
+    if email and is_env_managed_email(email):
+        return await ensure_ops_bootstrap_membership(
+            db, user_id=user_id, email=email
+        )
+    return None
 
 
 async def _is_locked(db: AsyncSession, user_id: UUID, now: datetime) -> bool:
@@ -468,7 +490,7 @@ async def start_admin_login(
             await _discard_password_session(session)
         raise AdminLoginError(401, _INVALID_CREDENTIALS)
 
-    membership = await _ops_membership(db, session.user_id)
+    membership = await _ops_membership(db, session.user_id, email=normalized)
     if membership is None:
         await _discard_password_session(session)
         raise AdminLoginError(403, _NOT_ADMIN)
@@ -575,7 +597,7 @@ async def verify_admin_otp(
     access_token = _held_access_token(row)
     refresh_token = unseal_secret(row.refresh_token)
     expires_in = row.expires_in
-    membership = await _ops_membership(db, user_id)
+    membership = await _ops_membership(db, user_id, email=row.email)
     if membership is None:
         row.consumed_at = now
         row.otp_hash = ""
