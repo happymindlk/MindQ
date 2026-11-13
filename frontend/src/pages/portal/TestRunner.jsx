@@ -145,6 +145,9 @@ export default function TestRunner() {
       const next = {
         ...test,
         started_at: started.started_at,
+        expires_at: started.expires_at ?? test.expires_at,
+        write_expires_at: started.write_expires_at ?? test.write_expires_at,
+        server_now: started.server_now ?? test.server_now,
         remaining_seconds: started.remaining_seconds,
         write_remaining_seconds: started.write_remaining_seconds,
       };

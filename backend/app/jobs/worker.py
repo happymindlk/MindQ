@@ -4,12 +4,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from arq import cron
 from sqlalchemy import text
 
 from app.config import settings
 from app.database import engine
 from app.jobs.settings import redis_settings_from_url
-from app.jobs.tasks import TASK_FUNCTIONS
+from app.jobs.tasks import TASK_FUNCTIONS, task_sweep_expired_assessments
 from app.observability import configure_logging
 
 configure_logging(debug=settings.DEBUG)
@@ -50,6 +51,10 @@ class WorkerSettings:
     """ARQ worker configuration consumed by the ``arq`` CLI."""
 
     functions = list(TASK_FUNCTIONS)
+    # Safety net every minute; exact-time finalize is deferred at module start.
+    cron_jobs = [
+        cron(task_sweep_expired_assessments, second={0, 30}, run_at_startup=True),
+    ]
     redis_settings = redis_settings_from_url()
     max_jobs = settings.ARQ_MAX_JOBS
     job_timeout = settings.ARQ_JOB_TIMEOUT

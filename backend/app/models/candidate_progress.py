@@ -13,16 +13,18 @@ class CandidateProgress(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     corporate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     assessment_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
     )
     status: Mapped[str] = mapped_column(String(20), default="NOT_STARTED", nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Display deadline (started_at + duration). Immutable after start; null when untimed.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=True)
     client_duration_seconds: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)

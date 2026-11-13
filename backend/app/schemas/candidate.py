@@ -250,6 +250,12 @@ class CandidateTestResponse(BaseModel):
     show_confidentiality_notice: bool = False
     confidentiality_notice_text: Optional[str] = None
     started_at: Optional[datetime] = None
+    # Immutable display deadline (started_at + duration); null when untimed / not started.
+    expires_at: Optional[datetime] = None
+    # Write-lock deadline (expires_at + grace); null when untimed / not started.
+    write_expires_at: Optional[datetime] = None
+    # Server UTC clock for client offset: offsetMs = Date.parse(server_now) - Date.now().
+    server_now: Optional[datetime] = None
     # Server-computed display countdown seed; null when untimed.
     remaining_seconds: Optional[int] = None
     # Seconds until write lock (duration + grace); client expire seed.

@@ -10,6 +10,7 @@ from app.jobs.settings import get_arq_pool
 from app.jobs.tasks import (
     task_dispatch_candidate_invite,
     task_finalize_and_score_ai,
+    task_finalize_expired_assessment,
     task_refresh_report_synthesis,
     task_send_nudge_email,
     task_send_package_share,
@@ -47,6 +48,11 @@ def _job_id_nudge(candidate_id: UUID) -> str:
 def _job_id_store_report(corporate_id: UUID, candidate_id: UUID, cache_key: str) -> str:
     """Dedup key for one content-addressed PDF cache upload."""
     return f"store_report:{corporate_id}:{candidate_id}:{cache_key[:24]}"
+
+
+def _job_id_expire(candidate_id: UUID, assessment_id: UUID) -> str:
+    """Dedup key for one module's deferred expiry finalize."""
+    return f"expire:{candidate_id}:{assessment_id}"
 
 
 async def _enqueue_or_run(
@@ -297,3 +303,55 @@ async def enqueue_store_cached_report(
         job_id=_job_id_store_report(corporate_id, candidate_id, cache_key),
         args=(str(corporate_id), str(candidate_id), cache_key, content),
     )
+
+
+async def enqueue_finalize_expired_assessment(
+    candidate_id: UUID,
+    assessment_id: UUID,
+    *,
+    defer_until: datetime,
+) -> Any:
+    """Schedule exact-time auto-finalize when a timed module starts.
+
+    Uses ARQ ``_defer_until=expires_at``. When Redis is unavailable the job is
+    skipped (not inlined) — the periodic sweep / dashboard hooks cover the gap.
+
+    Args:
+        candidate_id: Candidate who started the module.
+        assessment_id: Timed assessment id.
+        defer_until: UTC display deadline (``progress.expires_at``).
+
+    Returns:
+        ARQ job, ``None`` when deduped or Redis is unavailable.
+    """
+    pool = get_arq_pool()
+    job_id = _job_id_expire(candidate_id, assessment_id)
+    if pool is None:
+        logger.debug(
+            "arq_expire_skipped_no_pool job_id=%s",
+            job_id,
+        )
+        return None
+    try:
+        job = await pool.enqueue_job(
+            task_finalize_expired_assessment.__name__,
+            str(candidate_id),
+            str(assessment_id),
+            _job_id=job_id,
+            _defer_until=defer_until,
+        )
+    except Exception:
+        logger.exception(
+            "arq_expire_enqueue_failed job_id=%s",
+            job_id,
+        )
+        return None
+    if job is None:
+        logger.info("arq_expire_deduped job_id=%s", job_id)
+    else:
+        logger.info(
+            "arq_expire_enqueued job_id=%s defer_until=%s",
+            job_id,
+            defer_until.isoformat(),
+        )
+    return job

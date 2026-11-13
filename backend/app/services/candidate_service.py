@@ -27,7 +27,11 @@ from app.services.package_window import (
     ensure_package_open,
     window_state,
 )
-from app.services.runner_payload import effective_duration_seconds, strict_deadline
+from app.services.runner_payload import (
+    display_expires_at,
+    effective_duration_seconds,
+    strict_deadline,
+)
 from app.services.psychometric_catalog import catalog_duration_seconds
 from app.services.instrument_results import SCORING_VERSION, build_score_details
 from app.services.profiles import ItemResult, ProfileInputs, resolve_profile
@@ -182,14 +186,14 @@ def assessment_duration_seconds(assessment: Assessment) -> int | None:
 def is_strict_expired(
     assessment: Assessment, progress: CandidateProgress | None, now: datetime
 ) -> bool:
-    """Whether a timed attempt is past its server deadline (including grace).
+    """Whether a timed attempt is past its server write deadline (including grace).
 
     Every module with a positive duration hard-cuts regardless of
     ``timer_mode`` (``strict`` / ``flexible`` tags are display metadata only).
 
     Args:
         assessment: Assessment with timer configuration.
-        progress: Candidate progress (provides started_at).
+        progress: Candidate progress (provides started_at / expires_at).
         now: Current UTC time.
 
     Returns:
@@ -198,8 +202,41 @@ def is_strict_expired(
     deadline = strict_deadline(
         getattr(progress, "started_at", None) if progress else None,
         assessment_duration_seconds(assessment),
+        expires_at=getattr(progress, "expires_at", None) if progress else None,
     )
     return deadline is not None and now > deadline
+
+
+def is_display_expired(
+    assessment: Assessment, progress: CandidateProgress | None, now: datetime
+) -> bool:
+    """Whether a timed attempt is past its display deadline (no grace).
+
+    Used by the server-side auto-finalize sweep so abandoned attempts complete
+    as soon as the visible clock hits zero.
+
+    Args:
+        assessment: Assessment with timer configuration.
+        progress: Candidate progress row.
+        now: Current UTC time.
+
+    Returns:
+        True when timed and ``now`` is at or past the display deadline.
+    """
+    if progress is None:
+        return False
+    expires = getattr(progress, "expires_at", None)
+    if expires is None:
+        expires = display_expires_at(
+            getattr(progress, "started_at", None),
+            assessment_duration_seconds(assessment),
+        )
+    if expires is None:
+        return False
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    clock = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    return clock >= expires
 
 
 def ensure_not_submitted(progress: CandidateProgress | None) -> None:
@@ -615,6 +652,12 @@ class CandidateService:
         """
 
         async def _load() -> dict:
+            # Finalize abandoned timed attempts before building the roster so
+            # In Progress cards flip to Completed without re-entering the runner.
+            from app.services.assessment_expiry import finalize_expired_assessment
+
+            await finalize_expired_assessment(session, candidate.id, enqueue=True)
+
             package = (
                 await session.execute(select(Package).where(Package.id == candidate.package_id))
             ).scalars().first()
@@ -642,7 +685,8 @@ class CandidateService:
             progress_map = {p.assessment_id: p for p in progresses}
             open_time = package.open_time if package else None
             close_time = package.close_time if package else None
-            state = window_state(open_time, close_time, _utcnow())
+            clock = _utcnow()
+            state = window_state(open_time, close_time, clock)
 
             tests = []
             for a in assessments:
@@ -655,6 +699,22 @@ class CandidateService:
                 launchable = status != "completed" and (
                     state == "open" or (state == "closed" and started)
                 )
+                duration = assessment_duration_seconds(a)
+                expires = getattr(progress, "expires_at", None) if progress else None
+                if expires is None and started:
+                    expires = display_expires_at(progress.started_at, duration)
+                remaining = None
+                if status == "in_progress" and (expires is not None or duration):
+                    from app.services.runner_payload import (
+                        remaining_seconds as remaining_seconds_fn,
+                    )
+
+                    remaining = remaining_seconds_fn(
+                        progress.started_at if progress else None,
+                        duration,
+                        clock,
+                        expires_at=expires,
+                    )
                 tests.append(
                     {
                         "id": str(a.id),
@@ -662,8 +722,16 @@ class CandidateService:
                         "description": a.description,
                         "status": status,
                         "launchable": launchable,
-                        "duration_seconds": assessment_duration_seconds(a),
-                        "time_limit_seconds": assessment_duration_seconds(a),
+                        "duration_seconds": duration,
+                        "time_limit_seconds": duration,
+                        "started_at": (
+                            progress.started_at.isoformat()
+                            if progress and progress.started_at
+                            else None
+                        ),
+                        "expires_at": expires.isoformat() if expires else None,
+                        "server_now": clock.isoformat(),
+                        "remaining_seconds": remaining,
                     }
                 )
 
@@ -675,6 +743,7 @@ class CandidateService:
                 "open_time": open_time.isoformat() if open_time else None,
                 "close_time": close_time.isoformat() if close_time else None,
                 "window_state": state,
+                "server_now": clock.isoformat(),
                 "tests": tests,
             }
 
@@ -956,19 +1025,33 @@ class CandidateService:
             Progress row with ``started_at`` set.
         """
         if progress is not None and progress.started_at is not None:
+            # Never reset / extend an already-running attempt's deadline.
+            if progress.expires_at is None:
+                duration = assessment_duration_seconds(assessment)
+                deadline = display_expires_at(progress.started_at, duration)
+                if deadline is not None:
+                    progress.expires_at = deadline
+                    await session.commit()
             return progress
+        started = _utcnow()
+        duration = assessment_duration_seconds(assessment)
+        deadline = display_expires_at(started, duration)
         if progress is None:
             progress = CandidateProgress(
                 corporate_id=candidate.corporate_id,
                 candidate_id=candidate.id,
                 assessment_id=assessment.id,
                 status="IN_PROGRESS",
-                started_at=_utcnow(),
+                started_at=started,
+                expires_at=deadline,
             )
             session.add(progress)
         else:
             progress.status = "IN_PROGRESS"
-            progress.started_at = _utcnow()
+            progress.started_at = started
+            # Immutable once set — only assign when still null.
+            if progress.expires_at is None:
+                progress.expires_at = deadline
         try:
             await session.commit()
         except IntegrityError:
@@ -1061,6 +1144,7 @@ class CandidateService:
         assessment_id: UUID,
         pending_responses: list[ResponseSave] | None = None,
         client_duration_seconds: float | None = None,
+        completed_at: datetime | None = None,
     ):
         """Persist answers and mark COMPLETED; core scoring runs in background.
 
@@ -1075,6 +1159,8 @@ class CandidateService:
             assessment_id: Assessment being submitted.
             pending_responses: Optional answer payloads upserted before complete.
             client_duration_seconds: Client-measured total module time (advisory).
+            completed_at: Optional completion stamp (server auto-finalize may
+                pass ``expires_at``); defaults to UTC now.
 
         Returns:
             Tuple of (progress row, package_complete flag).
@@ -1100,12 +1186,13 @@ class CandidateService:
             )
             session.add(progress)
 
+        finish_at = completed_at or now
         server_seconds: float | None = None
         if progress.started_at is not None:
-            server_seconds = max(0.0, (now - progress.started_at).total_seconds())
+            server_seconds = max(0.0, (finish_at - progress.started_at).total_seconds())
 
         progress.status = COMPLETED_STATUS
-        progress.completed_at = now
+        progress.completed_at = finish_at
         progress.client_duration_seconds = _elapsed_decimal(client_duration_seconds)
         if server_seconds is not None:
             progress.server_duration_seconds = _elapsed_decimal(server_seconds)
@@ -1120,14 +1207,6 @@ class CandidateService:
             raise AssessmentAlreadySubmittedError() from exc
 
         package_complete = await CandidateService.is_package_complete(session, candidate)
-        # #region agent log
-        try:
-            import json as _json, time as _time
-            with open(r"d:\happy-mind-psychometrics\.cursor\debug-f04232.log", "a", encoding="utf-8") as _f:
-                _f.write(_json.dumps({"sessionId": "f04232", "hypothesisId": "H5", "location": "candidate_service.py:submit_test", "message": "submit_committed_package_check", "data": {"candidate_id": str(candidate.id), "assessment_id": str(assessment_id), "progress_status": progress.status, "package_complete": package_complete, "completed_at": progress.completed_at.isoformat() if progress.completed_at else None}, "timestamp": int(_time.time() * 1000)}) + "\n")
-        except Exception:
-            pass
-        # #endregion
         return progress, package_complete
 
     @staticmethod
