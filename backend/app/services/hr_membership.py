@@ -89,3 +89,49 @@ async def upsert_hr_membership(
         )
     )
     await db.execute(stmt)
+
+
+async def upsert_ops_membership(
+    db: AsyncSession,
+    *,
+    user_id: UUID,
+    corporate_id: UUID,
+    full_name: str,
+    role: str = "admin",
+) -> None:
+    """Map an Auth user to a corporate with an ops role. Caller commits.
+
+    Unlike ``upsert_hr_membership``, this always sets ``role`` to an ops value
+    (``admin`` / ``owner``), including when promoting an existing HR row.
+
+    Args:
+        db: Async database session.
+        user_id: ``auth.users.id``.
+        corporate_id: Ops home corporate to attach.
+        full_name: Display name stored on the membership row.
+        role: Ops role to persist; must be in ``OPS_ROLES``.
+
+    Raises:
+        ValueError: ``role`` is not an ops role.
+    """
+    normalized_role = (role or "").strip().lower()
+    if normalized_role not in OPS_ROLES:
+        raise ValueError(f"ops role required, got {role!r}")
+    stmt = (
+        pg_insert(HRUser)
+        .values(
+            user_id=user_id,
+            corporate_id=corporate_id,
+            full_name=full_name,
+            role=normalized_role,
+        )
+        .on_conflict_do_update(
+            index_elements=["user_id"],
+            set_={
+                "corporate_id": corporate_id,
+                "full_name": full_name,
+                "role": normalized_role,
+            },
+        )
+    )
+    await db.execute(stmt)

@@ -35,6 +35,57 @@ def log_candidate_erased(
     )
 
 
+def log_admin_granted(
+    *,
+    actor_id: UUID,
+    target_user_id: UUID,
+    target_email: str,
+    corporate_id: UUID,
+) -> None:
+    """Emit ``admin_granted`` after a Super Admin is added via Team management.
+
+    Args:
+        actor_id: Authenticated ops user who granted access.
+        target_user_id: Auth user id that received ``role='admin'``.
+        target_email: Normalized email of the new Super Admin.
+        corporate_id: Ops corporate the membership was attached to.
+    """
+    logger.info(
+        "admin_granted",
+        extra={
+            "event": "admin_granted",
+            "actor_id": str(actor_id),
+            "target_user_id": str(target_user_id),
+            "target_email": (target_email or "").strip().lower(),
+            "corporate_id": str(corporate_id),
+        },
+    )
+
+
+def log_admin_revoked(
+    *,
+    actor_id: UUID,
+    target_user_id: UUID,
+    target_email: str | None,
+) -> None:
+    """Emit ``admin_revoked`` after a Super Admin membership is removed.
+
+    Args:
+        actor_id: Authenticated ops user who revoked access.
+        target_user_id: Auth user id whose ``hr_users`` row was deleted.
+        target_email: Normalized email when known.
+    """
+    logger.info(
+        "admin_revoked",
+        extra={
+            "event": "admin_revoked",
+            "actor_id": str(actor_id),
+            "target_user_id": str(target_user_id),
+            "target_email": (target_email or "").strip().lower() or None,
+        },
+    )
+
+
 def log_report_accessed(
     *,
     actor_id: UUID,
