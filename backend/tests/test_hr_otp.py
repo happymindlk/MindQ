@@ -148,11 +148,13 @@ def test_temp_token_rejects_wrong_type():
         decode_hr_otp_token(forged)
 
 
-def test_three_invalid_codes_lock_and_burn_the_code():
+def test_five_invalid_codes_lock_and_burn_the_code():
     row, now = _challenge(uuid4())
     assert apply_otp_attempt(row, "000001", now) == "rejected"
     assert apply_otp_attempt(row, "000002", now) == "rejected"
-    assert apply_otp_attempt(row, "000003", now) == "locked"
+    assert apply_otp_attempt(row, "000003", now) == "rejected"
+    assert apply_otp_attempt(row, "000004", now) == "rejected"
+    assert apply_otp_attempt(row, "000005", now) == "locked"
     assert row.otp_hash == ""
 
 
