@@ -22,8 +22,8 @@ export const CORPORATES_QUERY_KEY = 'admin:corporates';
  * @typedef {object} SaveCorporateInput
  * @property {string} [id] Present when editing an existing corporate.
  * @property {string} name
- * @property {string} contactEmail Empty string clears the HR email on edit.
- * @property {string[]} [allowedHrEmails] HR portal whitelist for this company.
+ * @property {string} contactEmail First HR email (legacy primary); empty clears it.
+ * @property {string[]} [allowedHrEmails] All HR emails with immediate portal access.
  * @property {File | null} [logoFile]
  */
 

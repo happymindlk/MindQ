@@ -22,24 +22,21 @@ function validateLogoFile(file) {
 }
 
 /**
- * @param {{ name: string, contactEmail: string }} values
- * @returns {{ name?: string, contactEmail?: string }}
+ * @param {{ name: string }} values
+ * @returns {{ name?: string }}
  */
-function validateFields({ name, contactEmail }) {
+function validateFields({ name }) {
   const errors = {};
   if (!name.trim()) errors.name = 'Company name is required.';
   else if (name.trim().length > 255) errors.name = 'Keep the name under 255 characters.';
-  if (contactEmail.trim() && !EMAIL_PATTERN.test(contactEmail.trim())) {
-    errors.contactEmail = 'Enter a valid email address.';
-  }
   return errors;
 }
 
 /**
- * HR portal whitelist editor: add/remove the exact emails allowed to
- * OTP-login to this company's client portal.
+ * Unified HR emails chip editor. Saving grants `/client/login` OTP access for
+ * every listed email immediately (no automated invite email).
  */
-function AllowedHrEmailsEditor({ emails, disabled, onChange }) {
+function HrEmailsEditor({ emails, disabled, onChange }) {
   const [draft, setDraft] = useState('');
   const [error, setError] = useState(null);
 
@@ -53,7 +50,7 @@ function AllowedHrEmailsEditor({ emails, disabled, onChange }) {
       setError('Enter a valid email address.');
       return;
     }
-    if (emails.includes(trimmed)) {
+    if (emails.some((email) => email.toLowerCase() === trimmed)) {
       setError('That email is already on the list.');
       return;
     }
@@ -64,9 +61,9 @@ function AllowedHrEmailsEditor({ emails, disabled, onChange }) {
 
   return (
     <div>
-      <span className="metric-label mb-1.5 block">Allowed HR emails</span>
+      <span className="metric-label mb-1.5 block">HR emails</span>
       {emails.length > 0 ? (
-        <ul className="mb-2 flex flex-wrap gap-1.5" aria-label="Whitelisted HR emails">
+        <ul className="mb-2 flex flex-wrap gap-1.5" aria-label="HR emails">
           {emails.map((email) => (
             <li
               key={email}
@@ -77,7 +74,7 @@ function AllowedHrEmailsEditor({ emails, disabled, onChange }) {
                 type="button"
                 disabled={disabled}
                 onClick={() => onChange(emails.filter((e) => e !== email))}
-                aria-label={`Remove ${email} from allowed HR emails`}
+                aria-label={`Remove ${email}`}
                 className="p-0.5 rounded-full text-neutral-400 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:opacity-50"
               >
                 <X className="w-3 h-3" aria-hidden="true" />
@@ -87,7 +84,7 @@ function AllowedHrEmailsEditor({ emails, disabled, onChange }) {
         </ul>
       ) : (
         <p className="mb-2 text-xs text-neutral-500 dark:text-neutral-400">
-          No HR emails whitelisted yet — nobody can sign in to this company&apos;s HR portal.
+          No HR emails yet — nobody can sign in to this company&apos;s client portal.
         </p>
       )}
       <div className="flex items-start gap-2">
@@ -104,7 +101,7 @@ function AllowedHrEmailsEditor({ emails, disabled, onChange }) {
               }
             }}
             placeholder="hr@acme.com"
-            aria-label="Add an allowed HR email"
+            aria-label="Add an HR email"
             error={error || undefined}
             disabled={disabled}
             autoComplete="off"
@@ -115,7 +112,7 @@ function AllowedHrEmailsEditor({ emails, disabled, onChange }) {
         </Button>
       </div>
       <p className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400">
-        Only these emails (with an HR invite) can sign in to this company&apos;s HR portal.
+        Saving grants portal access immediately. Invite emails are sent manually.
       </p>
     </div>
   );
@@ -215,8 +212,7 @@ export default function CorporateModal({ isOpen, corporate, onClose, onSave }) {
   const isEdit = Boolean(corporate);
 
   const [name, setName] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
-  const [allowedHrEmails, setAllowedHrEmails] = useState([]);
+  const [hrEmails, setHrEmails] = useState([]);
   const [logoFile, setLogoFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [errors, setErrors] = useState({});
@@ -226,14 +222,14 @@ export default function CorporateModal({ isOpen, corporate, onClose, onSave }) {
   useEffect(() => {
     if (!isOpen) return;
     setName(corporate?.name ?? '');
-    setContactEmail(corporate?.contact_email ?? '');
-    setAllowedHrEmails(
-      corporate?.allowed_hr_emails?.length
-        ? [...corporate.allowed_hr_emails]
-        : corporate?.contact_email
-          ? [corporate.contact_email]
-          : [],
-    );
+    const fromWhitelist = corporate?.allowed_hr_emails?.length
+      ? [...corporate.allowed_hr_emails]
+      : [];
+    const contact = (corporate?.contact_email || '').trim().toLowerCase();
+    if (contact && !fromWhitelist.some((e) => e.toLowerCase() === contact)) {
+      fromWhitelist.unshift(contact);
+    }
+    setHrEmails(fromWhitelist);
     setLogoFile(null);
     setErrors({});
     setSubmitError(null);
@@ -261,18 +257,20 @@ export default function CorporateModal({ isOpen, corporate, onClose, onSave }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const fieldErrors = validateFields({ name, contactEmail });
+    const fieldErrors = validateFields({ name });
     setErrors((prev) => ({ logo: prev.logo, ...fieldErrors }));
     if (Object.keys(fieldErrors).length > 0) return;
 
     setIsSaving(true);
     setSubmitError(null);
     try {
+      // Primary contact_email is the first chip for backward-compatible APIs.
+      const contactEmail = hrEmails[0] || '';
       const { corporate: saved, logoError } = await onSave({
         id: corporate?.id,
         name: name.trim(),
-        contactEmail: contactEmail.trim(),
-        allowedHrEmails,
+        contactEmail,
+        allowedHrEmails: hrEmails,
         logoFile,
       });
       if (logoError) {
@@ -328,22 +326,7 @@ export default function CorporateModal({ isOpen, corporate, onClose, onSave }) {
           autoFocus
           required
         />
-        <Input
-          label="HR email"
-          type="email"
-          icon={Mail}
-          value={contactEmail}
-          onChange={(event) => setContactEmail(event.target.value)}
-          placeholder="hr@acme.com"
-          error={errors.contactEmail}
-          disabled={isSaving}
-          autoComplete="off"
-        />
-        <AllowedHrEmailsEditor
-          emails={allowedHrEmails}
-          disabled={isSaving}
-          onChange={setAllowedHrEmails}
-        />
+        <HrEmailsEditor emails={hrEmails} disabled={isSaving} onChange={setHrEmails} />
         <LogoDropzone
           inputId={logoInputId}
           previewUrl={previewUrl ?? corporate?.logo_url ?? null}
@@ -360,7 +343,7 @@ export default function CorporateModal({ isOpen, corporate, onClose, onSave }) {
         )}
         <p className="flex items-center gap-1.5 text-xs text-neutral-500 dark:text-neutral-400">
           <Info className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-          Saving the HR email does not send a portal invite.
+          Saving grants portal access immediately without sending an automated invite email.
         </p>
       </form>
     </Modal>

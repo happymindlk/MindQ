@@ -97,6 +97,8 @@ async def update_company(
         return await ClientPackageService.update_company(db, company_id, body)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ClientPackageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/companies/{company_id}", response_model=CompanyCreateResponse)

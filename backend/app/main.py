@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import json
 import logging
@@ -22,6 +23,7 @@ from app.exceptions import is_schema_drift_error, is_transient_db_error, schema_
 from app.jobs.settings import close_arq_pool, open_arq_pool
 from app.observability import configure_logging
 from app.security import SecurityHeadersMiddleware, assert_production_ready
+from app.services.assessment_expiry import run_expiry_sweep_loop
 
 configure_logging(debug=settings.DEBUG)
 logger = logging.getLogger("app.main")
@@ -45,14 +47,25 @@ async def lifespan(app: FastAPI):
         # request path still uses pool_pre_ping + retry helpers.
         logger.warning("db_pool_warmup_failed", exc_info=True, extra={"event": "db_pool_warmup_failed"})
     await open_arq_pool()
+    stop_expiry = asyncio.Event()
+    expiry_task = asyncio.create_task(
+        run_expiry_sweep_loop(stop_event=stop_expiry),
+        name="assessment-expiry-sweep",
+    )
     logger.info(
         "app_started",
         extra={"event": "app_started", "debug": settings.DEBUG},
     )
-    yield
-    await close_arq_pool()
-    await engine.dispose()
-    logger.info("app_stopped", extra={"event": "app_stopped"})
+    try:
+        yield
+    finally:
+        stop_expiry.set()
+        expiry_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await expiry_task
+        await close_arq_pool()
+        await engine.dispose()
+        logger.info("app_stopped", extra={"event": "app_stopped"})
 
 
 app = FastAPI(

@@ -696,6 +696,11 @@ class CandidateService:
     async def get_candidates(
         session: AsyncSession, corporate_id: UUID | None = None, package_id: UUID | None = None
     ):
+        from app.services.assessment_expiry import ensure_expired_assessments_finalized
+
+        # So Admin/HR overviews show Completed for timed-out attempts without
+        # waiting for the candidate to reopen the assessment link.
+        await ensure_expired_assessments_finalized()
         stmt = select(Candidate).where(Candidate.deleted_at.is_(None))
         if corporate_id:
             stmt = stmt.where(Candidate.corporate_id == corporate_id)

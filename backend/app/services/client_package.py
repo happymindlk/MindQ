@@ -799,8 +799,12 @@ class ClientPackageService:
             Inserted company id, name, slug, and created_at.
 
         Raises:
-            ClientPackageError: Slug collides after suffix attempts.
+            ClientPackageError: Slug collides after suffix attempts, or HR
+                portal provisioning failed.
         """
+        from app.services.corporate_hr_access import sync_corporate_hr_access
+        from app.services.supabase_admin import SupabaseAdminError
+
         base = slugify_company_name(body.slug or body.name)
         slug = base
         for suffix in range(2, 60):
@@ -819,13 +823,20 @@ class ClientPackageService:
         corporate = Corporate(
             name=body.name,
             slug=slug,
-            contact_email=body.contact_email,
-            allowed_hr_emails=allowed,
+            contact_email=None,
+            allowed_hr_emails=[],
             is_active=True,
         )
         session.add(corporate)
         try:
+            await session.flush()
+            await sync_corporate_hr_access(session, corporate, allowed)
             await session.commit()
+        except SupabaseAdminError as exc:
+            await session.rollback()
+            raise ClientPackageError(
+                "Could not grant HR portal access for one or more emails"
+            ) from exc
         except IntegrityError as exc:
             await session.rollback()
             raise ClientPackageError("Company slug already exists") from exc
@@ -838,6 +849,10 @@ class ClientPackageService:
     ) -> CompanyCreateResponse:
         """Apply a partial update to a corporates row.
 
+        When ``allowed_hr_emails`` is set, provisions/revokes ``/client/login``
+        OTP access for that list (no invite email) and syncs ``contact_email``
+        to the first entry for backward compatibility.
+
         Args:
             session: Async database session.
             company_id: Target corporate UUID.
@@ -848,11 +863,43 @@ class ClientPackageService:
 
         Raises:
             LookupError: No corporate exists with ``company_id``.
+            ClientPackageError: HR portal provisioning failed.
         """
+        from app.services.corporate_hr_access import sync_corporate_hr_access
+        from app.services.supabase_admin import SupabaseAdminError
+
         corporate = await _get_corporate_or_raise(session, company_id)
-        for field, value in body.model_dump(exclude_unset=True).items():
+        updates = body.model_dump(exclude_unset=True)
+        whitelist = updates.pop("allowed_hr_emails", None)
+        contact_update = updates.pop("contact_email", None)
+        contact_was_set = "contact_email" in body.model_fields_set
+        for field, value in updates.items():
             setattr(corporate, field, value)
-        await session.commit()
+
+        try:
+            if whitelist is not None:
+                # Unified chip list is authoritative; contact_email follows it.
+                await sync_corporate_hr_access(session, corporate, whitelist)
+            elif contact_was_set:
+                # Legacy single-field edit: keep whitelist in sync with contact.
+                emails = list(corporate.allowed_hr_emails or [])
+                previous_contact = (corporate.contact_email or "").strip().lower()
+                new_contact = (contact_update or "").strip().lower() or None
+                if (
+                    previous_contact
+                    and previous_contact in emails
+                    and previous_contact != new_contact
+                ):
+                    emails = [e for e in emails if e != previous_contact]
+                if new_contact and new_contact not in emails:
+                    emails.insert(0, new_contact)
+                await sync_corporate_hr_access(session, corporate, emails)
+            await session.commit()
+        except SupabaseAdminError as exc:
+            await session.rollback()
+            raise ClientPackageError(
+                "Could not grant HR portal access for one or more emails"
+            ) from exc
         await session.refresh(corporate)
         return _company_response(corporate)
 
