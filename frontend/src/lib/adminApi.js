@@ -487,41 +487,6 @@ export const adminApi = {
   },
 
   /**
-   * List Super Admins (database ops roles + OPS_ADMIN_EMAILS bootstrap).
-   * @returns {Promise<Array<{user_id: string|null, email: string, name: string|null, role: string|null, source: string, is_active: boolean, created_at: string|null, can_revoke: boolean}>>}
-   */
-  async listAdminTeam() {
-    const data = await authedJson('/api/v1/admin/team', 'Failed to load Super Admins');
-    return expectArray(data?.members, 'admin team');
-  },
-
-  /**
-   * Grant Super Admin access to an email (Auth user + hr_users role=admin).
-   * @param {string} email
-   * @param {string} [name]
-   */
-  async addAdmin(email, name) {
-    const data = await authedJson('/api/v1/admin/team', 'Failed to add Super Admin', {
-      method: 'POST',
-      body: { email, name: name || undefined },
-    });
-    if (!data?.member) {
-      throw new ApiError(BAD_RESPONSE_MESSAGE, 200, 'BAD_RESPONSE', 'admin team grant: missing member');
-    }
-    return data.member;
-  },
-
-  /**
-   * Revoke Super Admin access by deleting the hr_users membership.
-   * @param {string} userId
-   */
-  async revokeAdmin(userId) {
-    return authedJson(`/api/v1/admin/team/${userId}`, 'Failed to revoke Super Admin', {
-      method: 'DELETE',
-    });
-  },
-
-  /**
    * Technical-only report payload for client-side PDF export.
    * @param {string} candidateId
    */

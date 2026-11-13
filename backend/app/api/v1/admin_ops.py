@@ -32,17 +32,6 @@ from app.services.client_package import (
     PackageLockedError,
 )
 from app.models.hr_user import HRUser
-from app.schemas.admin_team import (
-    AdminTeamGrantRequest,
-    AdminTeamGrantResponse,
-    AdminTeamListResponse,
-)
-from app.services.admin_team import (
-    AdminTeamError,
-    grant_admin,
-    list_admin_team,
-    revoke_admin,
-)
 from app.services.hr_membership import (
     OPS_ROLES,
     find_ops_role_for_email,
@@ -386,81 +375,4 @@ async def update_package_schedule(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ProgrammingError as exc:
         raise HTTPException(status_code=503, detail=schema_drift_detail(exc)) from exc
-
-
-@router.get("/team", response_model=AdminTeamListResponse)
-async def get_admin_team(
-    db: AsyncSession = Depends(get_db),
-    ops: HRUserContext = Depends(get_current_ops_user),
-):
-    """List Super Admins (database ops roles + ``OPS_ADMIN_EMAILS`` bootstrap).
-
-    Args:
-        db: Async database session.
-        ops: Authenticated ops caller.
-
-    Returns:
-        Team members with ``source`` (``database`` / ``env``) and revoke flags.
-    """
-    members = await list_admin_team(
-        db, caller_user_id=ops.user_id, caller_email=ops.email
-    )
-    return AdminTeamListResponse(members=members)
-
-
-@router.post("/team", response_model=AdminTeamGrantResponse)
-async def post_admin_team(
-    body: AdminTeamGrantRequest,
-    db: AsyncSession = Depends(get_db),
-    ops: HRUserContext = Depends(get_current_ops_user),
-):
-    """Grant Super Admin access: Auth user (no invite email) + ``hr_users.role=admin``.
-
-    Args:
-        body: Email and optional display name.
-        db: Async database session.
-        ops: Authenticated ops caller.
-
-    Returns:
-        The granted team member.
-    """
-    try:
-        member = await grant_admin(
-            db,
-            actor_id=ops.user_id,
-            actor_corporate_id=ops.corporate_id,
-            email=str(body.email),
-            name=body.name,
-        )
-    except AdminTeamError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
-    except SupabaseAdminError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return AdminTeamGrantResponse(member=member)
-
-
-@router.delete("/team/{user_id}", status_code=204)
-async def delete_admin_team_member(
-    user_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    ops: HRUserContext = Depends(get_current_ops_user),
-):
-    """Revoke Super Admin access by deleting the ``hr_users`` membership row.
-
-    Blocks self-revocation and ``OPS_ADMIN_EMAILS`` env-managed entries.
-
-    Args:
-        user_id: Target Auth / ``hr_users.user_id``.
-        db: Async database session.
-        ops: Authenticated ops caller.
-    """
-    try:
-        await revoke_admin(
-            db,
-            actor_id=ops.user_id,
-            actor_email=ops.email,
-            target_user_id=user_id,
-        )
-    except AdminTeamError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
