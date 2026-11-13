@@ -57,24 +57,24 @@ describe('useAdminOtpLogin', () => {
     const { result } = await reachOtp();
     expect(result.current.step).toBe('otp');
     expect(result.current.secondsRemaining).toBe(300);
-    expect(result.current.resendCooldown).toBe(60);
+    expect(result.current.resendCooldown).toBe(120);
     expect(result.current.canResend).toBe(false);
     expect(formatClock(result.current.secondsRemaining)).toBe('05:00');
   });
 
-  it('enables resend only after 60 seconds and resets the code on success', async () => {
+  it('enables resend only after 120 seconds and resets the code on success', async () => {
     const { result } = await reachOtp();
     await act(async () => {
-      vi.advanceTimersByTime(60_000);
+      vi.advanceTimersByTime(120_000);
     });
     expect(result.current.canResend).toBe(true);
-    expect(result.current.secondsRemaining).toBe(240);
+    expect(result.current.secondsRemaining).toBe(180);
     requestAdminOtp.mockResolvedValueOnce({ status: 'otp_required', temp_token: 'n'.repeat(24) });
     await act(async () => {
       await result.current.resend();
     });
     expect(requestAdminOtp).toHaveBeenCalledTimes(2);
-    expect(result.current.resendCooldown).toBe(60);
+    expect(result.current.resendCooldown).toBe(120);
     expect(result.current.secondsRemaining).toBe(300);
     expect(result.current.code).toBe('');
   });

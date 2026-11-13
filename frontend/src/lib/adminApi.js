@@ -455,6 +455,15 @@ export const adminApi = {
     );
   },
 
+  /** Soft-delete a candidate (ops). Historical rows stay in the database. */
+  async softDeleteCandidate(candidateId) {
+    return authedJson(
+      `/api/v1/admin/candidates/${candidateId}/soft-delete`,
+      'Failed to delete candidate',
+      { method: 'POST' },
+    );
+  },
+
   /**
    * Provision an HR user for a company via Supabase Auth Admin invite.
    * @param {string} companyId

@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -227,7 +227,8 @@ async def _seed_candidates(
                     logged_in_at=logged_in_at,
                 )
                 .on_conflict_do_update(
-                    constraint="uq_candidate_package_email",
+                    index_elements=["package_id", "email"],
+                    index_where=text("deleted_at IS NULL"),
                     set_={"logged_in_at": logged_in_at},
                 )
                 .returning(Candidate.id)

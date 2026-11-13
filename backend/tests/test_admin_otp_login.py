@@ -85,21 +85,23 @@ def test_email_body_is_the_admin_verification_sentence():
     assert "<script>" not in render_admin_otp_html("<script>")
 
 
-def test_three_invalid_codes_lock_and_burn_the_code():
+def test_five_invalid_codes_lock_and_burn_the_code():
     row, now = _challenge("123456")
     assert apply_otp_attempt(row, "000001", now) == "rejected"
     assert apply_otp_attempt(row, "000002", now) == "rejected"
-    assert apply_otp_attempt(row, "000003", now) == "locked"
-    assert row.attempt_count == 3
+    assert apply_otp_attempt(row, "000003", now) == "rejected"
+    assert apply_otp_attempt(row, "000004", now) == "rejected"
+    assert apply_otp_attempt(row, "000005", now) == "locked"
+    assert row.attempt_count == 5
     assert row.locked_until == now + LOCKOUT
     assert row.otp_hash == ""
     assert row.consumed_at == now
     assert apply_otp_attempt(row, "123456", now) == "locked"
-    assert row.attempt_count == 3
+    assert row.attempt_count == 5
 
     later = now + LOCKOUT + timedelta(seconds=1)
     assert apply_otp_attempt(row, "123456", later) == "consumed"
-    assert row.attempt_count == 3
+    assert row.attempt_count == 5
 
 
 def test_correct_code_is_one_time_and_expired_codes_do_not_count():
@@ -118,10 +120,14 @@ def test_correct_code_is_one_time_and_expired_codes_do_not_count():
 def test_send_cap_blocks_cooldown_then_window():
     now = datetime.now(timezone.utc)
     assert send_block_reason([], now) is None
-    assert send_block_reason([now - timedelta(seconds=30)], now) == "cooldown"
+    block = send_block_reason([now - timedelta(seconds=30)], now)
+    assert block is not None
+    assert block[0] == "cooldown"
+    assert block[1] == 90
+    # Admin cooldown is 120s; 2 minutes later is clear.
     assert send_block_reason([now - timedelta(minutes=2)], now) is None
     window = [now - timedelta(minutes=2), now - timedelta(minutes=4), now - timedelta(minutes=6)]
-    assert send_block_reason(window, now) == "window"
+    assert send_block_reason(window, now) == ("window", 0)
 
 
 def test_temp_token_is_not_an_admin_session():

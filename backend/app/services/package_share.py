@@ -111,7 +111,10 @@ async def list_corporate_packages(
             completed_per_candidate.c.candidate_id == Candidate.id,
         )
         .outerjoin(assessment_totals, assessment_totals.c.package_id == Candidate.package_id)
-        .where(Candidate.corporate_id == corporate_id)
+        .where(
+            Candidate.corporate_id == corporate_id,
+            Candidate.deleted_at.is_(None),
+        )
         .group_by(Candidate.package_id)
         .subquery()
     )

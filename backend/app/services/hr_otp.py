@@ -2,7 +2,7 @@
 
 Mirrors the candidate OTP discipline for the HR & Client Portal: the code
 is never stored (HMAC-SHA256 keyed by SECRET_KEY and bound to the
-challenge), three wrong codes lock the sign-in for a configurable window, and a new
+challenge), five wrong codes lock the sign-in for a configurable window, and a new
 request supersedes any open code subject to a per-user send cap. No
 Supabase Auth email or session is involved; the email -> ``hr_users``
 mapping is resolved server-side and the session minted at verify is the
@@ -11,7 +11,7 @@ backend ``client_hr`` JWT (``issue_client_token``).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import jwt
@@ -31,6 +31,7 @@ from app.services.admin_otp import (
     OTP_TTL,
     SEND_WINDOW,
     apply_otp_attempt,
+    cooldown_message,
     generate_otp,
     hash_otp,
     locked_message,
@@ -48,6 +49,7 @@ logger = logging.getLogger("app.hr_otp")
 
 HR_OTP_AUDIENCE = "mindq-hr-otp"
 HR_OTP_TYPE = "hr_otp"
+SEND_COOLDOWN = timedelta(seconds=120)
 
 _INVALID_TARGET = "This email is not registered for the client portal"
 _NOT_HR = "Operations accounts must use the admin portal"
@@ -55,7 +57,6 @@ _NO_COMPANY = "Company not found"
 _INVALID_CODE = "Invalid or expired verification code"
 _INVALID_SESSION = "Invalid or expired verification session"
 _LOCKED = locked_message()
-_SEND_COOLDOWN = "A verification code was just sent. Wait a minute before requesting another."
 _SEND_WINDOW_BLOCK = "Too many verification codes were requested. Try again later."
 _MAIL_FAILED = "Could not send the verification email. Try again."
 _AUTH_DOWN = "Authentication service is unavailable"
@@ -384,9 +385,16 @@ async def request_hr_otp(db: AsyncSession, email: str) -> HrOtpChallengeResponse
     if await _is_locked(db, membership.user_id, now):
         raise HrOtpError(429, _LOCKED)
 
-    block = send_block_reason(await _recent_sends(db, membership.user_id, now), now)
+    block = send_block_reason(
+        await _recent_sends(db, membership.user_id, now),
+        now,
+        cooldown=SEND_COOLDOWN,
+    )
     if block is not None:
-        detail = _SEND_COOLDOWN if block == "cooldown" else _SEND_WINDOW_BLOCK
+        reason, remaining = block
+        detail = (
+            cooldown_message(remaining) if reason == "cooldown" else _SEND_WINDOW_BLOCK
+        )
         raise HrOtpError(429, detail)
 
     await _supersede_open(db, membership.user_id, now)
@@ -518,5 +526,21 @@ async def verify_hr_challenge(
             ),
         )
     if verdict == "locked":
+        logger.warning(
+            "hr_otp_locked",
+            extra={
+                "event": "hr_otp_locked",
+                "user_id": str(user_id),
+                "attempt_count": int(row.attempt_count),
+            },
+        )
         raise HrOtpError(429, _LOCKED)
+    logger.info(
+        "hr_otp_rejected",
+        extra={
+            "event": "hr_otp_rejected",
+            "user_id": str(user_id),
+            "attempt_count": int(row.attempt_count),
+        },
+    )
     raise HrOtpError(401, _INVALID_CODE)

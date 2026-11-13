@@ -61,7 +61,12 @@ async def _mint_unique_candidate_access_code(session: AsyncSession) -> str:
         code = _mint_access_code()
         candidate_hit = (
             await session.execute(
-                select(Candidate.id).where(Candidate.access_code == code).limit(1)
+                select(Candidate.id)
+                .where(
+                    Candidate.access_code == code,
+                    Candidate.deleted_at.is_(None),
+                )
+                .limit(1)
             )
         ).scalar_one_or_none()
         if candidate_hit is not None:
@@ -267,7 +272,8 @@ class CandidateService:
             invited = (
                 await session.execute(
                     select(Candidate).where(
-                        func.lower(Candidate.access_code) == raw_code.lower()
+                        func.lower(Candidate.access_code) == raw_code.lower(),
+                        Candidate.deleted_at.is_(None),
                     )
                 )
             ).scalars().first()
@@ -291,6 +297,7 @@ class CandidateService:
             select(Candidate).where(
                 func.lower(Candidate.email) == email_norm.lower(),
                 Candidate.package_id == package.id,
+                Candidate.deleted_at.is_(None),
             )
         )
         candidate = cand_result.scalars().first()
@@ -410,6 +417,7 @@ class CandidateService:
                 select(Candidate).where(
                     Candidate.package_id == package.id,
                     func.lower(Candidate.email) == email_norm,
+                    Candidate.deleted_at.is_(None),
                 )
             )
         ).scalars().first()
@@ -433,6 +441,7 @@ class CandidateService:
                     select(Candidate).where(
                         Candidate.package_id == package.id,
                         func.lower(Candidate.email) == email_norm,
+                        Candidate.deleted_at.is_(None),
                     )
                 )
             ).scalars().first()
@@ -445,10 +454,51 @@ class CandidateService:
     @staticmethod
     async def get_candidate(session: AsyncSession, candidate_id: UUID) -> Candidate | None:
         async def _load() -> Candidate | None:
-            result = await session.execute(select(Candidate).where(Candidate.id == candidate_id))
+            result = await session.execute(
+                select(Candidate).where(
+                    Candidate.id == candidate_id,
+                    Candidate.deleted_at.is_(None),
+                )
+            )
             return result.scalars().first()
 
         return await run_db_op_with_retry(_load, session=session)
+
+    @staticmethod
+    async def soft_delete_candidate(
+        session: AsyncSession,
+        candidate: Candidate,
+        *,
+        admin_user_id: UUID,
+    ) -> Candidate:
+        """Mark a candidate as soft-deleted so they leave active lists.
+
+        Preserves the row and related progress/responses/evaluations for
+        historical audit. Callers must already enforce ops-only access.
+
+        Args:
+            session: Open async SQLAlchemy session.
+            candidate: Active ``candidates`` row to hide.
+            admin_user_id: Authenticated ops actor id for logging.
+
+        Returns:
+            The same candidate instance after ``deleted_at`` is set.
+        """
+        if candidate.deleted_at is not None:
+            return candidate
+        candidate.deleted_at = _utcnow()
+        await session.commit()
+        await session.refresh(candidate)
+        logger.info(
+            "candidate_soft_deleted",
+            extra={
+                "event": "candidate_soft_deleted",
+                "admin_user_id": str(admin_user_id),
+                "corporate_id": str(candidate.corporate_id),
+                "candidate_id": str(candidate.id),
+            },
+        )
+        return candidate
 
     @staticmethod
     async def reset_assessment(session: AsyncSession, candidate: Candidate) -> Candidate:
@@ -646,7 +696,7 @@ class CandidateService:
     async def get_candidates(
         session: AsyncSession, corporate_id: UUID | None = None, package_id: UUID | None = None
     ):
-        stmt = select(Candidate)
+        stmt = select(Candidate).where(Candidate.deleted_at.is_(None))
         if corporate_id:
             stmt = stmt.where(Candidate.corporate_id == corporate_id)
         if package_id:
@@ -1012,7 +1062,7 @@ class CandidateService:
         Timed modules past their deadline still finalize, but late pending
         answers are discarded so only work saved in time counts. Core facet
         scoring, LLM technical eval, JD synthesis, and HR email stay on
-        BackgroundTasks via ``finalize_and_score_ai``.
+        the ARQ queue via ``enqueue_finalize_and_score_ai``.
 
         Args:
             session: Async database session.

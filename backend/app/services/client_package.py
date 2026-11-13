@@ -1555,7 +1555,10 @@ class ClientPackageService:
         candidates = (
             await session.execute(
                 select(Candidate)
-                .where(Candidate.corporate_id == corporate_id)
+                .where(
+                    Candidate.corporate_id == corporate_id,
+                    Candidate.deleted_at.is_(None),
+                )
                 .order_by(Candidate.created_at.desc())
             )
         ).scalars().all()
@@ -1645,6 +1648,7 @@ class ClientPackageService:
                 .where(
                     Candidate.corporate_id == corporate_id,
                     Candidate.package_id == package_id,
+                    Candidate.deleted_at.is_(None),
                 )
                 .order_by(Candidate.full_name, Candidate.created_at)
             )
@@ -1714,6 +1718,7 @@ class ClientPackageService:
                 .where(
                     Candidate.corporate_id == corporate_id,
                     Candidate.package_id.in_(package_ids),
+                    Candidate.deleted_at.is_(None),
                 )
                 .order_by(Candidate.created_at.desc())
             )
@@ -1786,6 +1791,7 @@ class ClientPackageService:
                 select(Candidate).where(
                     Candidate.id == candidate_id,
                     Candidate.corporate_id == corporate_id,
+                    Candidate.deleted_at.is_(None),
                 )
             )
         ).scalar_one_or_none()

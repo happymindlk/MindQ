@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Mail } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Mail, RefreshCw } from 'lucide-react';
 import BrandLogo from '../../components/BrandLogo';
 import { clientApi } from '../../lib/clientApi';
 import { useClientSession } from './use-client-session';
 
 const CODE_LENGTH = 6;
+/** Matches backend HR OTP resend cooldown. */
+const RESEND_COOLDOWN_SECONDS = 120;
 
 function ErrorBanner({ message }) {
   if (!message) return null;
@@ -54,24 +56,42 @@ export default function ClientLogin() {
   const [step, setStep] = useState('email');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
     if (isAuthenticated) navigate(returnTo, { replace: true });
   }, [isAuthenticated, navigate, returnTo]);
 
-  const sendCode = async (event) => {
-    event.preventDefault();
+  useEffect(() => {
+    if (cooldown <= 0) return undefined;
+    const id = window.setInterval(() => setCooldown((s) => Math.max(0, s - 1)), 1000);
+    return () => window.clearInterval(id);
+  }, [cooldown]);
+
+  const requestOtp = useCallback(async () => {
     setError(null);
     setLoading(true);
     try {
       const issuedTempToken = await clientApi.requestOtp(email.trim().toLowerCase());
       setTempToken(issuedTempToken);
+      setCode('');
       setStep('code');
+      setCooldown(RESEND_COOLDOWN_SECONDS);
     } catch (err) {
       setError(err.message || 'Could not send code');
     } finally {
       setLoading(false);
     }
+  }, [email]);
+
+  const sendCode = async (event) => {
+    event.preventDefault();
+    await requestOtp();
+  };
+
+  const resendOtp = async () => {
+    if (cooldown > 0 || loading) return;
+    await requestOtp();
   };
 
   const verify = async (event) => {
@@ -93,6 +113,7 @@ export default function ClientLogin() {
     setTempToken('');
     setCode('');
     setError(null);
+    setCooldown(0);
   };
 
   return (
@@ -168,15 +189,26 @@ export default function ClientLogin() {
               <SubmitButton loading={loading} disabled={code.length < CODE_LENGTH}>
                 Verify and continue
               </SubmitButton>
-              <button
-                type="button"
-                onClick={resetEmail}
-                disabled={loading}
-                className="inline-flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-xs text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 disabled:opacity-50"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-                Use a different email
-              </button>
+              <div className="flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void resendOtp()}
+                  disabled={loading || cooldown > 0}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-xs text-indigo-600 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 disabled:cursor-not-allowed disabled:text-muted disabled:no-underline dark:text-indigo-400"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  {cooldown > 0 ? `Resend OTP in ${cooldown}s` : 'Resend OTP'}
+                </button>
+                <button
+                  type="button"
+                  onClick={resetEmail}
+                  disabled={loading}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-xs text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 disabled:opacity-50"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                  Use a different email
+                </button>
+              </div>
             </form>
           )}
         </div>

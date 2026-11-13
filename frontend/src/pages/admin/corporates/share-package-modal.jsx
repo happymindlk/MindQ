@@ -39,18 +39,18 @@ function buildHrEmails(corporate) {
  */
 function PreviewBox({ title, rows, copyLabel, copyText, copied, onCopy }) {
   return (
-    <div className="rounded-md border border-neutral-800 bg-neutral-900 px-4 py-3">
+    <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">{title}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{title}</p>
         <button
           type="button"
           onClick={() => onCopy(copyText)}
           aria-label={copyLabel}
           title={copyLabel}
-          className="p-1.5 rounded-md text-neutral-400 transition-colors duration-150 hover:text-neutral-100 hover:bg-neutral-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+          className="p-1.5 rounded-md text-slate-500 transition-colors duration-150 hover:text-slate-900 hover:bg-slate-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
         >
           {copied ? (
-            <Check className="w-3.5 h-3.5 text-emerald-400" aria-hidden="true" />
+            <Check className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
           ) : (
             <Copy className="w-3.5 h-3.5" aria-hidden="true" />
           )}
@@ -59,10 +59,10 @@ function PreviewBox({ title, rows, copyLabel, copyText, copied, onCopy }) {
       <dl className="space-y-2">
         {rows.map((row) => (
           <div key={row.label}>
-            <dt className="text-xs text-neutral-400">{row.label}</dt>
+            <dt className="text-xs text-slate-600">{row.label}</dt>
             <dd
-              className={`mt-0.5 font-mono break-all text-neutral-100 ${
-                row.emphasis ? 'text-base tracking-wider text-blue-300' : 'text-xs'
+              className={`mt-0.5 font-mono break-all text-slate-900 ${
+                row.emphasis ? 'text-base tracking-wider text-blue-700' : 'text-xs'
               }`}
             >
               {row.value}
