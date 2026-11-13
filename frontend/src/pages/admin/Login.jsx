@@ -137,7 +137,9 @@ export default function AdminLogin() {
                   void login.resend();
                 }}
               >
-                {login.resendCooldown > 0 ? `Resend code in ${formatClock(login.resendCooldown)}` : 'Resend code'}
+                {login.resendCooldown > 0
+                  ? `Resend OTP in ${formatClock(login.resendCooldown)}`
+                  : 'Resend OTP'}
               </Button>
               <button
                 type="button"

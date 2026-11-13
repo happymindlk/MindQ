@@ -38,9 +38,9 @@ describe('sendCandidateOtp', () => {
 
   it('surfaces backend rate-limit errors verbatim', async () => {
     sendCandidateOtpMock.mockRejectedValue(
-      new Error('A verification code was just sent. Wait a minute before requesting another.'),
+      new Error('A verification code was just sent. Wait 47 seconds before requesting another.'),
     );
-    await expect(sendCandidateOtp(identity)).rejects.toThrow('Wait a minute');
+    await expect(sendCandidateOtp(identity)).rejects.toThrow('Wait 47 seconds');
   });
 
   it('fails fast when the challenge response has no temp token', async () => {

@@ -73,6 +73,41 @@ async def reset_candidate_assessment(
     }
 
 
+@router.post("/{id}/soft-delete")
+async def soft_delete_candidate(
+    id: UUID,
+    hr: HRUserContext = Depends(get_current_hr_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft-delete a candidate so they leave active lists and exports.
+
+    Ops-only. Historical rows (responses, progress, evaluations) remain in
+    PostgreSQL with ``deleted_at`` set.
+
+    Args:
+        id: ``candidates.id``.
+        hr: Authenticated user (must be ops).
+        db: Async database session.
+
+    Returns:
+        Success payload confirming the candidate was soft-deleted.
+    """
+    if not is_ops_role(hr.role):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    candidate = await CandidateService.get_candidate(db, id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    await CandidateService.soft_delete_candidate(
+        db, candidate, admin_user_id=hr.user_id
+    )
+    return {
+        "success": True,
+        "message": "Candidate successfully deleted",
+    }
+
+
 @router.delete("/{id}", status_code=204)
 async def erase_candidate(
     id: UUID,

@@ -1,7 +1,7 @@
 """Admin email OTP: password proof, one-time code, then the withheld Supabase session.
 
 The code is never stored. The database holds HMAC-SHA256(secret, challenge_id || code).
-Three wrong codes lock that sign-in for a configurable window (default 5 minutes,
+Five wrong codes lock that sign-in for a configurable window (default 10 minutes,
 1 minute in qa/staging/DEBUG). A new login supersedes any open code. Retrying
 login is not idempotent: it invalidates the previous code, subject to a
 per-account send cap so a stolen password cannot flood the inbox.
@@ -43,19 +43,19 @@ from app.services.supabase_password import (
 logger = logging.getLogger("app.admin_auth")
 
 OTP_TTL = timedelta(minutes=5)
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 5
 LOCKOUT_MINUTES = settings.auth_lockout_minutes
 LOCKOUT = timedelta(minutes=LOCKOUT_MINUTES)
 MAX_SENDS_PER_WINDOW = 3
 SEND_WINDOW = timedelta(minutes=15)
-SEND_COOLDOWN = timedelta(seconds=60)
+# Admin / HR portal resend cooldown (candidate uses its own 60s constant).
+SEND_COOLDOWN = timedelta(seconds=120)
 ADMIN_OTP_AUDIENCE = "mindq-admin-otp"
 ADMIN_OTP_TYPE = "admin_otp"
 
 _INVALID_CREDENTIALS = "Invalid email or password"
 _INVALID_CODE = "Invalid or expired verification code"
 _INVALID_SESSION = "Invalid or expired verification session"
-_SEND_COOLDOWN = "A verification code was just sent. Wait a minute before requesting another."
 _SEND_WINDOW_BLOCK = "Too many verification codes were requested. Try again later."
 _NOT_ADMIN = "This account cannot access the admin portal"
 _MAIL_FAILED = "Could not send the verification email. Try again."
@@ -185,24 +185,50 @@ def _aware(value: datetime) -> datetime:
     return value
 
 
-def send_block_reason(created_ats: list[datetime], now: datetime) -> str | None:
+def cooldown_message(remaining_seconds: int) -> str:
+    """Client-safe cooldown detail including remaining wait time.
+
+    Args:
+        remaining_seconds: Whole seconds until another send is allowed.
+
+    Returns:
+        Human-readable 429 detail string.
+    """
+    secs = max(1, int(remaining_seconds))
+    unit = "second" if secs == 1 else "seconds"
+    return (
+        f"A verification code was just sent. "
+        f"Wait {secs} {unit} before requesting another."
+    )
+
+
+def send_block_reason(
+    created_ats: list[datetime],
+    now: datetime,
+    *,
+    cooldown: timedelta = SEND_COOLDOWN,
+) -> tuple[str, int] | None:
     """Decide whether another code email is allowed for this account.
 
     Args:
         created_ats: Challenge timestamps already inside the send window.
         now: Current UTC time.
+        cooldown: Minimum gap between consecutive sends for this portal.
 
     Returns:
-        ``"cooldown"`` or ``"window"`` when a send must be refused, else None.
+        ``("cooldown", remaining_seconds)`` or ``("window", 0)`` when a send
+        must be refused, else None.
     """
     if not created_ats:
         return None
     latest = max(_aware(ts) for ts in created_ats)
-    if now - latest < SEND_COOLDOWN:
-        return "cooldown"
+    elapsed = now - latest
+    if elapsed < cooldown:
+        remaining = int((cooldown - elapsed).total_seconds())
+        return ("cooldown", max(1, remaining))
     recent = [ts for ts in created_ats if now - _aware(ts) < SEND_WINDOW]
     if len(recent) >= MAX_SENDS_PER_WINDOW:
-        return "window"
+        return ("window", 0)
     return None
 
 
@@ -361,8 +387,11 @@ async def _supersede_open(db: AsyncSession, user_id: UUID, now: datetime) -> lis
     return tokens
 
 
-def _send_block_error(reason: str) -> AdminLoginError:
-    detail = _SEND_COOLDOWN if reason == "cooldown" else _SEND_WINDOW_BLOCK
+def _send_block_error(block: tuple[str, int]) -> AdminLoginError:
+    reason, remaining = block
+    detail = (
+        cooldown_message(remaining) if reason == "cooldown" else _SEND_WINDOW_BLOCK
+    )
     return AdminLoginError(429, detail)
 
 

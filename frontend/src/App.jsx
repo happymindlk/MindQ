@@ -132,6 +132,10 @@ function App() {
 
           <Route path="/assessment" element={<AssessmentRedirect />} />
 
+          <Route path="/candidate/login" element={<PortalLayout />}>
+            <Route index element={<Login />} />
+          </Route>
+
           <Route path="/portal" element={<PortalLayout />}>
             <Route index element={<Login />} />
             <Route path="guidelines" element={<Guidelines />} />

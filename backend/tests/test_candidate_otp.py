@@ -67,11 +67,13 @@ def test_code_is_stored_only_as_hmac():
     assert not otp_matches(uuid4(), "123456", row.otp_hash)
 
 
-def test_three_invalid_codes_lock_and_burn_the_code():
+def test_five_invalid_codes_lock_and_burn_the_code():
     row, now = _challenge()
     assert apply_otp_attempt(row, "000001", now) == "rejected"
     assert apply_otp_attempt(row, "000002", now) == "rejected"
-    assert apply_otp_attempt(row, "000003", now) == "locked"
+    assert apply_otp_attempt(row, "000003", now) == "rejected"
+    assert apply_otp_attempt(row, "000004", now) == "rejected"
+    assert apply_otp_attempt(row, "000005", now) == "locked"
     assert row.otp_hash == ""
     assert apply_otp_attempt(row, "123456", now) == "locked"
 
@@ -118,9 +120,12 @@ def test_temp_token_rejects_wrong_type_and_expired_tokens():
 def test_send_block_reason_cooldown_and_window():
     now = datetime.now(timezone.utc)
     assert send_block_reason([], now) is None
-    assert send_block_reason([now], now) == "cooldown"
+    block = send_block_reason([now], now, cooldown=timedelta(seconds=60))
+    assert block is not None
+    assert block[0] == "cooldown"
+    assert block[1] == 60
     recent = [now - timedelta(minutes=5), now - timedelta(minutes=4), now - timedelta(minutes=3)]
-    assert send_block_reason(recent, now) == "window"
+    assert send_block_reason(recent, now, cooldown=timedelta(seconds=60)) == ("window", 0)
 
 
 class _FakeResult:

@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Search,
   Users,
+  X,
 } from 'lucide-react';
 import Input from '../../components/ui/Input';
 import EmptyState from '../../components/ui/EmptyState';
@@ -154,6 +155,8 @@ export default function AssessmentHistory() {
   const [deadlineTarget, setDeadlineTarget] = useState(null);
   const [resetTarget, setResetTarget] = useState(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const onDeadlineSaved = useCallback((updated) => {
     setPackagesByCompany((prev) => {
@@ -325,6 +328,30 @@ export default function AssessmentHistory() {
       setIsResetting(false);
     }
   }, [resetTarget, toast, loadCandidates]);
+
+  const confirmSoftDeleteCandidate = useCallback(async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      await adminApi.softDeleteCandidate(deleteTarget.id);
+      toast({
+        variant: 'success',
+        title: 'Candidate deleted',
+        description: `${deleteTarget.full_name || 'Candidate'} was removed from active lists.`,
+      });
+      const pkgId = deleteTarget.package_id;
+      setDeleteTarget(null);
+      if (pkgId) await loadCandidates(pkgId);
+    } catch (err) {
+      toast({
+        variant: 'error',
+        title: 'Delete failed',
+        description: err.message || 'Failed to delete candidate',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [deleteTarget, toast, loadCandidates]);
 
   return (
     <div className="space-y-4">
@@ -589,6 +616,21 @@ export default function AssessmentHistory() {
                                                 <RotateCcw className="w-3.5 h-3.5" />
                                               </button>
                                             )}
+                                            <button
+                                              type="button"
+                                              title="Delete candidate"
+                                              aria-label={`Delete ${cand.full_name}`}
+                                              onClick={() =>
+                                                setDeleteTarget({
+                                                  id: cand.id,
+                                                  full_name: cand.full_name,
+                                                  package_id: pkg.id,
+                                                })
+                                              }
+                                              className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10"
+                                            >
+                                              <X className="w-3.5 h-3.5" aria-hidden="true" />
+                                            </button>
                                           </span>
                                         </div>
                                       </li>
@@ -652,6 +694,42 @@ export default function AssessmentHistory() {
             {resetTarget?.full_name || 'this candidate'}
           </span>
           , allowing them to restart from the beginning. This action cannot be undone.
+        </p>
+      </Modal>
+
+      <Modal
+        isOpen={deleteTarget !== null}
+        onClose={() => !isDeleting && setDeleteTarget(null)}
+        title="Delete candidate?"
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setDeleteTarget(null)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              isLoading={isDeleting}
+              onClick={confirmSoftDeleteCandidate}
+            >
+              Confirm Delete
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-neutral-600 dark:text-neutral-300">
+          Are you sure you want to delete{' '}
+          <span className="font-semibold text-foreground">
+            {deleteTarget?.full_name || 'this candidate'}
+          </span>
+          ? They will be removed from active lists and exports. Historical records are preserved.
         </p>
       </Modal>
     </div>

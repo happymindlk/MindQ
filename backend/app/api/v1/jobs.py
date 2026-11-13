@@ -52,7 +52,12 @@ async def nudge_candidates_due(
             ).scalars().all()
         )
         candidates = (
-            await db.execute(select(Candidate).where(Candidate.package_id == pkg.id))
+            await db.execute(
+                select(Candidate).where(
+                    Candidate.package_id == pkg.id,
+                    Candidate.deleted_at.is_(None),
+                )
+            )
         ).scalars().all()
         for cand in candidates:
             progresses = (

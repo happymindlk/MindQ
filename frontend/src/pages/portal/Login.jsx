@@ -373,7 +373,7 @@ function CandidateLogin({ initialAccessCode }) {
                   className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-[#5e3cc4] transition-colors hover:underline focus-visible:ring-2 focus-visible:ring-[#7048E2] disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline"
                 >
                   <IconRefresh className="h-3.5 w-3.5" />
-                  {login.cooldown > 0 ? `Resend in ${login.cooldown}s` : 'Resend code'}
+                  {login.cooldown > 0 ? `Resend OTP in ${login.cooldown}s` : 'Resend OTP'}
                 </button>
               </div>
             </form>

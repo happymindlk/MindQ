@@ -14,8 +14,10 @@ class CandidateEvaluation(Base):
     """Cached Gemini MindQ Report synthesis. Written by FastAPI; HR is SELECT-only.
 
     ``jd_hash`` stores the synthesis cache key (prompt version + role brief +
-    completed scores). ``overall_fit`` is deprecated and always written as NULL;
-    it is kept only until the contract-phase migration drops the column.
+    completed scores). ``usage`` holds token counts and ``estimated_cost_usd``
+    for the Gemini call that wrote the row. ``overall_fit`` is deprecated and
+    always written as NULL; it is kept only until the contract-phase migration
+    drops the column.
     """
 
     __tablename__ = "candidate_evaluations"
@@ -34,6 +36,8 @@ class CandidateEvaluation(Base):
     model: Mapped[str] = mapped_column(String(100), nullable=False)
     overall_fit: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # Token counts + estimated_cost_usd from the Gemini call that produced this row.
+    usage: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # 'ok' rows carry a ReportNarrative payload; 'failed' rows carry last_error and an empty payload.
     status: Mapped[str] = mapped_column(Text, nullable=False, default="ok", server_default="ok")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)

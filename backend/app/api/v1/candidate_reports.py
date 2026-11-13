@@ -195,7 +195,12 @@ async def get_candidate_report_data(
     """
     enforce_user_rate_limit(report_view_limiter, hr.user_id, "report_data")
     candidate = (
-        await db.execute(select(Candidate).where(Candidate.id == candidate_id))
+        await db.execute(
+            select(Candidate).where(
+                Candidate.id == candidate_id,
+                Candidate.deleted_at.is_(None),
+            )
+        )
     ).scalar_one_or_none()
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")

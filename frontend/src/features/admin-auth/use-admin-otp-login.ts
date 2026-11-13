@@ -8,7 +8,7 @@ import {
 
 export const OTP_LENGTH = 6;
 export const OTP_TTL_SECONDS = 5 * 60;
-export const RESEND_COOLDOWN_SECONDS = 60;
+export const RESEND_COOLDOWN_SECONDS = 120;
 
 export type AdminLoginStep = 'credentials' | 'otp';
 

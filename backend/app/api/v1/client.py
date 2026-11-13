@@ -387,6 +387,7 @@ async def _tenant_candidate(
             select(Candidate).where(
                 Candidate.id == candidate_id,
                 Candidate.corporate_id == client.corporate_id,
+                Candidate.deleted_at.is_(None),
             )
         )
     ).scalar_one_or_none()

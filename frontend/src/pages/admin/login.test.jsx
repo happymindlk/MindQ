@@ -71,7 +71,7 @@ describe('AdminLogin OTP', () => {
 
     expect(await screen.findByText('Enter the 6-digit verification code sent to your registered email address.')).toBeInTheDocument();
     expect(screen.getByText(/Code expires in 05:00/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Resend code in 01:00/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Resend OTP in 02:00/ })).toBeDisabled();
     expect(screen.queryByText('t'.repeat(24))).not.toBeInTheDocument();
   });
 

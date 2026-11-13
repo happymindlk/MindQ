@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, MouseEvent, ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { AlarmClock, Check, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, WifiOff } from 'lucide-react';
+import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, WifiOff } from 'lucide-react';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import { MarkdownText } from '../assessment-builder/components/markdown-preview';
 import type { AnswerValue, ResponseSavePayload, ResponseSubmitPayload } from '../assessment-builder/types/telemetry';
@@ -92,8 +92,6 @@ export function AssessmentRunner({
   const lastAdvanceAtRef = useRef(0);
   const lastOpenConfirmAtRef = useRef(0);
   const lastConfirmSubmitAtRef = useRef(0);
-  const stepperRef = useRef<HTMLDivElement>(null);
-  const activeStepRef = useRef<HTMLButtonElement>(null);
 
   const allowAction = useCallback((stampRef: { current: number }) => {
     const now = performance.now();
@@ -282,13 +280,6 @@ export function AssessmentRunner({
     [answers, questions],
   );
 
-  useEffect(() => {
-    const el = activeStepRef.current;
-    if (el && typeof el.scrollIntoView === 'function') {
-      el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    }
-  }, [index]);
-
   if (!current) return null;
 
   const value = answers[current.id];
@@ -390,51 +381,6 @@ export function AssessmentRunner({
           <div className="h-full bg-primary transition-[width] duration-200 ease-out" style={{ width: `${progressPct}%` }} />
         </div>
       </div>
-
-      <nav aria-label="Question navigation" className="rounded-lg border border-border bg-surface px-2.5 py-2.5 sm:px-3">
-        <div
-          ref={stepperRef}
-          className="flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:thin]"
-        >
-          {questions.map((q, i) => {
-            const answered = hasContent(answers[q.id]);
-            const active = i === index;
-            let stateClass =
-              'border-border/60 bg-transparent text-muted/70 opacity-70 hover:opacity-100 hover:border-border hover:text-muted';
-            if (active) {
-              stateClass =
-                'border-[#7048E2] bg-[#7048E2] text-white ring-2 ring-[#7048E2]/60 ring-offset-2 ring-offset-canvas shadow-[0_0_12px_rgba(112,72,226,0.45)]';
-            } else if (answered) {
-              stateClass =
-                'border-primary/40 bg-primary/20 text-foreground hover:bg-primary/30';
-            }
-            return (
-              <button
-                key={q.id}
-                ref={active ? activeStepRef : undefined}
-                type="button"
-                onClick={() => {
-                  if (timeUp || submitting || i === index) return;
-                  if (!allowAction(lastAdvanceAtRef)) return;
-                  go(i);
-                }}
-                disabled={timeUp || submitting}
-                aria-current={active ? 'step' : undefined}
-                aria-label={`Question ${i + 1}${answered ? ', answered' : ', unanswered'}${active ? ', current' : ''}`}
-                className={`relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-xs font-semibold tabular-nums transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50 ${stateClass}`}
-              >
-                <span>{i + 1}</span>
-                {answered && !active && (
-                  <Check
-                    className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-surface text-primary"
-                    aria-hidden
-                  />
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
 
       <section
         className="flex min-h-[320px] flex-col rounded-lg border border-border bg-surface p-4 select-none sm:p-5"

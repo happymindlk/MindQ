@@ -49,7 +49,10 @@ async def public_package_track(
     candidates = (
         await db.execute(
             select(Candidate)
-            .where(Candidate.package_id == package.id)
+            .where(
+                Candidate.package_id == package.id,
+                Candidate.deleted_at.is_(None),
+            )
             .order_by(Candidate.created_at.desc())
         )
     ).scalars().all()

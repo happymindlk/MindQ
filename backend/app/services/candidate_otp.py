@@ -2,13 +2,13 @@
 
 Mirrors the admin OTP discipline without a withheld session: the code is
 never stored (HMAC-SHA256 keyed by SECRET_KEY and bound to the challenge),
-three wrong codes lock the sign-in for a configurable window, and a new request
+five wrong codes lock the sign-in for a configurable window, and a new request
 supersedes any open code subject to a per-email send cap.
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import jwt
@@ -25,6 +25,7 @@ from app.services.admin_otp import (
     OTP_TTL,
     SEND_WINDOW,
     apply_otp_attempt,
+    cooldown_message,
     generate_otp,
     hash_otp,
     locked_message,
@@ -37,12 +38,12 @@ logger = logging.getLogger("app.candidate_otp")
 
 CANDIDATE_OTP_AUDIENCE = "mindq-candidate-otp"
 CANDIDATE_OTP_TYPE = "candidate_otp"
+SEND_COOLDOWN = timedelta(seconds=60)
 
 _INVALID_TARGET = "Invalid access code or email"
 _INVALID_CODE = "Invalid or expired verification code"
 _INVALID_SESSION = "Invalid or expired verification session"
 _LOCKED = locked_message()
-_SEND_COOLDOWN = "A verification code was just sent. Wait a minute before requesting another."
 _SEND_WINDOW_BLOCK = "Too many verification codes were requested. Try again later."
 _MAIL_FAILED = "Could not send the verification email. Try again."
 
@@ -146,7 +147,8 @@ async def _validate_login_target(
         invited = (
             await db.execute(
                 select(Candidate).where(
-                    func.lower(Candidate.access_code) == access_code.lower()
+                    func.lower(Candidate.access_code) == access_code.lower(),
+                    Candidate.deleted_at.is_(None),
                 )
             )
         ).scalars().first()
@@ -163,6 +165,7 @@ async def _validate_login_target(
             select(Candidate).where(
                 func.lower(Candidate.email) == email,
                 Candidate.package_id == package.id,
+                Candidate.deleted_at.is_(None),
             )
         )
     ).scalars().first()
@@ -245,9 +248,16 @@ async def request_candidate_otp(
     if await _is_locked(db, normalized_email, now):
         raise CandidateOtpError(429, _LOCKED)
 
-    block = send_block_reason(await _recent_sends(db, normalized_email, now), now)
+    block = send_block_reason(
+        await _recent_sends(db, normalized_email, now),
+        now,
+        cooldown=SEND_COOLDOWN,
+    )
     if block is not None:
-        detail = _SEND_COOLDOWN if block == "cooldown" else _SEND_WINDOW_BLOCK
+        reason, remaining = block
+        detail = (
+            cooldown_message(remaining) if reason == "cooldown" else _SEND_WINDOW_BLOCK
+        )
         raise CandidateOtpError(429, detail)
 
     await _supersede_open(db, normalized_email, now)
@@ -338,5 +348,21 @@ async def verify_candidate_challenge(
         )
         return
     if verdict == "locked":
+        logger.warning(
+            "candidate_otp_locked",
+            extra={
+                "event": "candidate_otp_locked",
+                "email": row.email,
+                "attempt_count": int(row.attempt_count),
+            },
+        )
         raise CandidateOtpError(429, _LOCKED)
+    logger.info(
+        "candidate_otp_rejected",
+        extra={
+            "event": "candidate_otp_rejected",
+            "email": row.email,
+            "attempt_count": int(row.attempt_count),
+        },
+    )
     raise CandidateOtpError(401, _INVALID_CODE)
