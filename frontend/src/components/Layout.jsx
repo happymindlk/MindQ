@@ -6,7 +6,6 @@ import {
   Library,
   Layers,
   Users,
-  Shield,
   Menu,
   X,
 } from 'lucide-react';
@@ -34,7 +33,6 @@ const navigation = [
   { name: 'Standard Library', href: '/admin/library', icon: Library },
   { name: 'Suite Builder', href: '/admin/packages/create', icon: Layers },
   { name: 'Assessment History', href: '/admin/history', icon: Users },
-  { name: 'Team', href: '/admin/team', icon: Shield },
 ];
 
 const SETTINGS_HREF = '/admin/settings';
@@ -68,9 +66,6 @@ function prefetchForNavHref(href) {
 function resolveShellTitle(pathname) {
   if (pathname.startsWith(SETTINGS_HREF)) {
     return 'Account Settings';
-  }
-  if (pathname.startsWith('/admin/team')) {
-    return 'Team / Admins';
   }
   if (pathname.startsWith('/admin/candidates/')) {
     return 'Candidate Report';

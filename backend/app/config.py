@@ -92,11 +92,6 @@ class Settings(BaseSettings):
     # local "acme" test tenant (e.g. "dev@example.com,qa@example.com").
     # NoDecode: pydantic-settings otherwise JSON-parses list env values first.
     AUTO_APPROVE_EMAILS: Annotated[list[str], NoDecode] = []
-    # Emergency Super Admin bootstrap: comma-separated emails that always retain
-    # ops portal access even if ``hr_users`` is missing. Shown in Team UI as
-    # System / Env Managed (revoke disabled). Prefer granting via /admin/team.
-    # NoDecode: pydantic-settings otherwise JSON-parses list env values first.
-    OPS_ADMIN_EMAILS: Annotated[list[str], NoDecode] = []
     # Public origin of the React app (no trailing slash). Invite emails link to
     # `{FRONTEND_URL}/assessment?code=…`. Blank → request Origin → production.
     FRONTEND_URL: str = ""
@@ -180,10 +175,10 @@ class Settings(BaseSettings):
             return text
         return [str(value).strip()]
 
-    @field_validator("AUTO_APPROVE_EMAILS", "OPS_ADMIN_EMAILS", mode="before")
+    @field_validator("AUTO_APPROVE_EMAILS", mode="before")
     @classmethod
-    def _parse_email_csv_lists(cls, value: object) -> list[str]:
-        """Accept JSON lists or comma-separated env strings for email allowlists."""
+    def _parse_auto_approve_emails(cls, value: object) -> list[str]:
+        """Accept JSON lists or comma-separated env strings."""
         if value is None or value == "":
             return []
         if isinstance(value, list):
@@ -196,11 +191,6 @@ class Settings(BaseSettings):
     def auto_approve_email_set(self) -> set[str]:
         """Lowercased emails eligible for local auto-provisioning."""
         return set(self.AUTO_APPROVE_EMAILS)
-
-    @property
-    def ops_admin_email_set(self) -> set[str]:
-        """Lowercased Super Admin bootstrap emails from ``OPS_ADMIN_EMAILS``."""
-        return set(self.OPS_ADMIN_EMAILS)
 
     @property
     def is_production(self) -> bool:

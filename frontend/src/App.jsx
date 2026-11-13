@@ -21,7 +21,6 @@ import AssessmentHistory from './pages/admin/AssessmentHistory';
 import CandidateReport from './pages/admin/CandidateReport';
 import CandidateReportPreview from './pages/admin/CandidateReportPreview';
 import AccountSettings from './pages/admin/AccountSettings';
-import AdminTeam from './pages/admin/team';
 import PendingApproval from './pages/PendingApproval';
 
 import ClientLogin from './pages/client/login';
@@ -113,7 +112,6 @@ function App() {
             <Route path="candidates/:candidateId" element={<CandidateReport />} />
             <Route path="candidates/:candidateId/report" element={<CandidateReportPreview />} />
             <Route path="candidates" element={<Navigate to="/admin/history" replace />} />
-            <Route path="team" element={<AdminTeam />} />
             <Route path="settings" element={<AccountSettings />} />
           </Route>
 
