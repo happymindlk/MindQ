@@ -148,15 +148,19 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
 3. Deploy the FastAPI service **and** a dedicated ARQ worker (any container host).
    Run the worker as a separate process/service:
    `arq app.jobs.worker.WorkerSettings`. Set env:
-   - `DATABASE_URL` = the project's Postgres connection (use the pooler)
+   - `DATABASE_URL` = Supabase Supavisor **Transaction Mode** pooler on port
+     **`6543`** (not session mode `5432`). Example:
+     `postgresql+asyncpg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres`
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`
    - `SECRET_KEY` (strong random), `DEBUG=false`, `CORS_ORIGINS` = your frontend origin(s)
    - `REDIS_URL` = managed Redis reachable by both the API and the ARQ worker
-   - `WEB_CONCURRENCY` (default **2** in `backend/Dockerfile`): each worker opens
-     up to 50 SQLAlchemy sockets (`pool_size=15` + `max_overflow=35`). Cap is
-     `WEB_CONCURRENCY × 50` — keep that under your Supavisor client limit
-     (Nano/Micro ≈ 200; Small ≈ 400). Do not jump to 4 workers on Nano/Micro.
-     The ARQ process opens its own pool; count it toward the same client budget.
+   - `WEB_CONCURRENCY` (default **2** in `backend/Dockerfile`): each worker uses
+     `pool_size=15` + `max_overflow=35` (max **50** sockets/worker). With
+     `WEB_CONCURRENCY=2` across **2** load-balanced Lightsail nodes the ceiling is
+     `2 nodes × 2 workers × 50 = 200` pooler client connections — ensure the
+     Supabase compute tier supports at least **200** (Micro/Small+), or scale down
+     `pool_size` / `max_overflow` on Nano. The ARQ process opens its own pool;
+     count it toward the same client budget.
 4. Deploy the frontend to Cloudflare Pages with root directory `frontend/`
    (build `npm run build`, output `dist`). Set env:
    - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
