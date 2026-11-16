@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid as uuid_lib
 from collections.abc import Iterable
 from typing import Any
@@ -1092,26 +1093,105 @@ class CandidateService:
         return progress
 
     @staticmethod
-    async def autosave_response(session: AsyncSession, candidate: Candidate, save_data: ResponseSave):
-        """Persist one answer with a lean gate + single PostgreSQL upsert.
+    async def _gate_autosave(
+        session: AsyncSession,
+        candidate: Candidate,
+        assessment_id: UUID,
+        question_id: str,
+    ) -> tuple[Assessment, CandidateProgress]:
+        """Lock progress and validate the question in one query (no questions blob).
 
-        Skips reloading the questions JSONB bank (validated via containment)
-        and replaces SELECT-then-INSERT/UPDATE with ``ON CONFLICT`` so the
-        hot path is progress lock + question check + upsert + commit.
+        Uses an INNER JOIN on ``candidate_progress`` so ``FOR UPDATE`` is legal,
+        defers ``Assessment.questions``, and evaluates JSONB containment as a
+        selected boolean so unknown ids fail without a second round-trip on the
+        happy path.
+
+        Args:
+            session: Async database session.
+            candidate: Authenticated candidate.
+            assessment_id: Module being autosaved.
+            question_id: Candidate-supplied question id.
+
+        Returns:
+            ``(assessment, progress)`` with a locked progress row.
+
+        Raises:
+            AssessmentNotFoundError: Module is not in the candidate's package.
+            AssessmentAlreadySubmittedError: Module is already completed.
+            AssessmentNotStartedError: Module was never started via ``POST /start``.
+            AssessmentTimeExpiredError: Write deadline has passed.
+            PackageNotOpenError: Package has not opened yet.
+            PackageClosedError: Deadline passed and the module was never started.
+            UnknownQuestionError: ``question_id`` is not in the stored bank.
         """
-        assessment, progress = await CandidateService.require_writable_assessment(
-            session,
-            candidate,
-            save_data.assessment_id,
-            for_update=True,
-            include_questions=False,
+        qid = str(question_id)
+        question_ok = Assessment.questions.contains([{"id": qid}]).label("question_ok")
+        stmt = (
+            select(
+                Assessment,
+                CandidateProgress,
+                Package.open_time,
+                Package.close_time,
+                question_ok,
+            )
+            .join(Package, Package.id == Assessment.package_id)
+            .join(
+                CandidateProgress,
+                (CandidateProgress.candidate_id == candidate.id)
+                & (CandidateProgress.assessment_id == Assessment.id),
+            )
+            .where(
+                Assessment.id == assessment_id,
+                Assessment.package_id == candidate.package_id,
+            )
+            .options(defer(Assessment.questions))
+            .with_for_update(of=CandidateProgress)
         )
-        # Only POST /start may begin the clock; a save must never start a module implicitly.
-        if progress is None or progress.started_at is None:
+        row = (await session.execute(stmt)).first()
+        if row is None:
+            exists = (
+                await session.execute(
+                    select(Assessment.id).where(
+                        Assessment.id == assessment_id,
+                        Assessment.package_id == candidate.package_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if exists is None:
+                raise AssessmentNotFoundError()
+            raise AssessmentNotStartedError()
+
+        assessment, progress, open_time, close_time, in_bank = row
+        if not in_bank:
+            raise UnknownQuestionError()
+        ensure_not_submitted(progress)
+        ensure_module_launchable(
+            open_time,
+            close_time,
+            progress.started_at,
+            _utcnow(),
+        )
+        if progress.started_at is None:
             raise AssessmentNotStartedError()
         if is_strict_expired(assessment, progress, _utcnow()):
             raise AssessmentTimeExpiredError()
-        await ensure_question_in_bank(session, assessment.id, save_data.question_id)
+        return assessment, progress
+
+    @staticmethod
+    async def autosave_response(session: AsyncSession, candidate: Candidate, save_data: ResponseSave):
+        """Persist one answer with a lean gate + single PostgreSQL upsert.
+
+        Hot path is one locked join (progress + question containment, questions
+        JSONB deferred) plus ``INSERT ... ON CONFLICT DO UPDATE`` — no extra
+        SELECT round-trips and no full bank load.
+        """
+        started = time.perf_counter()
+        assessment, progress = await CandidateService._gate_autosave(
+            session,
+            candidate,
+            save_data.assessment_id,
+            str(save_data.question_id),
+        )
 
         elapsed = _elapsed_decimal(save_data.elapsed_seconds)
         saved_at = _utcnow()
@@ -1146,6 +1226,21 @@ class CandidateService:
         )
         response = (await session.scalars(stmt)).one()
         await session.commit()
+        duration_ms = (time.perf_counter() - started) * 1000
+        logger.debug(
+            "autosave_complete candidate_id=%s assessment_id=%s question_id=%s duration_ms=%.1f",
+            candidate.id,
+            assessment.id,
+            qid,
+            duration_ms,
+        )
+        if duration_ms > 150:
+            logger.warning(
+                "autosave_slow candidate_id=%s assessment_id=%s duration_ms=%.1f",
+                candidate.id,
+                assessment.id,
+                duration_ms,
+            )
         return response
 
     @staticmethod

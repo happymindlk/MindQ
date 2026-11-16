@@ -1,6 +1,7 @@
 from uuid import UUID
 from typing import NoReturn
 import logging
+import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -187,6 +188,7 @@ async def autosave(
     candidate: Candidate = Depends(get_current_candidate),
     db: AsyncSession = Depends(get_db),
 ):
+    started = time.perf_counter()
     try:
         resp = await CandidateService.autosave_response(db, candidate, save_data)
     except (
@@ -199,6 +201,13 @@ async def autosave(
         UnknownQuestionError,
     ) as exc:
         _raise_integrity(exc)
+    duration_ms = (time.perf_counter() - started) * 1000
+    logger.debug(
+        "autosave_http candidate_id=%s assessment_id=%s duration_ms=%.1f",
+        candidate.id,
+        save_data.assessment_id,
+        duration_ms,
+    )
     return {"id": str(resp.id), "saved_at": resp.saved_at}
 
 

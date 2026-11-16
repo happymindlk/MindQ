@@ -456,20 +456,107 @@ describe('AssessmentRunner timed hard-cut (flexible tag)', () => {
   });
 });
 
-describe('AssessmentRunner navigation flush autosave', () => {
-  it('does not hit the network on answer click — only local draft state', async () => {
+describe('AssessmentRunner debounced autosave', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('batches rapid MCQ clicks into one POST after 300ms with the latest answer', async () => {
+    vi.useFakeTimers();
     const transport = {
       autosave: vi.fn(async () => undefined),
       submit: vi.fn(async () => undefined),
     };
-    const user = userEvent.setup();
     renderRunner(twoQuestionTest(), transport, 'live');
-    await user.click(screen.getByRole('radio', { name: /Alpha/ }));
-    await user.click(screen.getByRole('radio', { name: /Beta/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Alpha/ }));
+    fireEvent.click(screen.getByRole('radio', { name: /Beta/ }));
     expect(transport.autosave).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(299);
+    });
+    expect(transport.autosave).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(1);
+    expect(transport.autosave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question_id: 'q1',
+        response: { answer: 'Beta' },
+      }),
+    );
   });
 
-  it('flushes dirty answers when the tab becomes hidden', async () => {
+  it('waits 800ms before autosaving free-text answers', async () => {
+    vi.useFakeTimers();
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    renderRunner(
+      test({ type: 'open', options: [], text: 'Essay prompt' }),
+      transport,
+      'live',
+    );
+    fireEvent.change(screen.getByRole('textbox', { name: /Open answer/i }), {
+      target: { value: 'draft one' },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(799);
+    });
+    expect(transport.autosave).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole('textbox', { name: /Open answer/i }), {
+      target: { value: 'draft two' },
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(1);
+    expect(transport.autosave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question_id: 'q1',
+        response: { answer: 'draft two' },
+      }),
+    );
+  });
+
+  it('does not show Saving… until an in-flight request exceeds 400ms', async () => {
+    vi.useFakeTimers();
+    let resolveSave: (() => void) | undefined;
+    const transport = {
+      autosave: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSave = resolve;
+          }),
+      ),
+      submit: vi.fn(async () => undefined),
+    };
+    renderRunner(twoQuestionTest(), transport, 'live');
+    fireEvent.click(screen.getByRole('radio', { name: /Alpha/ }));
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Saving…')).not.toBeInTheDocument();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(screen.getByText('Saving…')).toBeInTheDocument();
+
+    resolveSave?.();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText('Saved')).toBeInTheDocument();
+  });
+
+  it('flushes dirty answers when the tab becomes hidden without waiting for debounce', async () => {
     const transport = {
       autosave: vi.fn(async () => undefined),
       submit: vi.fn(async () => undefined),
