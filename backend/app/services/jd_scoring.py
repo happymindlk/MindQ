@@ -130,6 +130,22 @@ _BANNED_PATTERN = re.compile(
     + r")(?!\w)",
     re.IGNORECASE,
 )
+_SNIPPET_RADIUS = 60
+
+
+@dataclass(frozen=True)
+class BannedMatch:
+    """One banned-language hit with JSON path and local prose context.
+
+    Attributes:
+        field: JSON path of the string that matched (e.g. ``strengths[0]``).
+        match: Matched banned phrase (lowercase).
+        context: ~60 characters of surrounding text with newlines collapsed.
+    """
+
+    field: str
+    match: str
+    context: str
 
 
 class JdScoringUnavailable(GeminiUnavailable):
@@ -139,10 +155,14 @@ class JdScoringUnavailable(GeminiUnavailable):
 class BannedLanguageError(JdScoringUnavailable):
     """Synthesis prose contained banned wording after retry."""
 
-    def __init__(self, matches: list[str]) -> None:
-        self.matches = matches
-        super().__init__(f"{BANNED_LANGUAGE_ERROR}: {', '.join(matches)}")
-
+    def __init__(self, matches: list[BannedMatch] | list[str]) -> None:
+        if matches and isinstance(matches[0], BannedMatch):
+            self.details: list[BannedMatch] = list(matches)  # type: ignore[arg-type]
+            self.matches = [item.match for item in self.details]
+        else:
+            self.matches = [str(item) for item in matches]
+            self.details = []
+        super().__init__(f"{BANNED_LANGUAGE_ERROR}: {', '.join(self.matches)}")
 
 class ModelText(str):
     """Completion text tagged with the model and usage that served it."""
@@ -458,6 +478,62 @@ def parse_evaluation_json(raw: str) -> ReportNarrative:
     return ReportNarrative.model_validate_json(text)
 
 
+def _snippet_around(text: str, start: int, end: int) -> str:
+    """Return ~60 characters of surrounding context with newlines collapsed.
+
+    Args:
+        text: Full string that contained the match.
+        start: Match start index in ``text``.
+        end: Match end index in ``text``.
+
+    Returns:
+        Whitespace-normalized snippet centered on the match.
+    """
+    raw = text[max(0, start - _SNIPPET_RADIUS) : min(len(text), end + _SNIPPET_RADIUS)]
+    return " ".join(raw.split())
+
+
+def find_banned_matches(obj: Any, *, path: str = "") -> list[BannedMatch]:
+    """Scan every string in a nested payload for banned wording with paths.
+
+    Args:
+        obj: Parsed synthesis (model dump or nested structure).
+        path: Optional JSON-path prefix for nested walks.
+
+    Returns:
+        Deduplicated hits (first occurrence of each phrase) with field path
+        and surrounding snippet context.
+    """
+    found: list[BannedMatch] = []
+    seen: set[str] = set()
+
+    def _walk(value: Any, current: str) -> None:
+        if isinstance(value, str):
+            for match in _BANNED_PATTERN.finditer(value):
+                token = match.group(1).lower()
+                if token in seen:
+                    continue
+                seen.add(token)
+                found.append(
+                    BannedMatch(
+                        field=current or "<root>",
+                        match=token,
+                        context=_snippet_around(value, match.start(), match.end()),
+                    )
+                )
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                child_path = f"{current}.{key}" if current else str(key)
+                _walk(child, child_path)
+        elif isinstance(value, (list, tuple)):
+            for index, child in enumerate(value):
+                child_path = f"{current}[{index}]" if current else f"[{index}]"
+                _walk(child, child_path)
+
+    _walk(obj, path)
+    return found
+
+
 def find_banned_words(obj: Any) -> list[str]:
     """Scan every string in a nested payload for banned wording.
 
@@ -467,25 +543,7 @@ def find_banned_words(obj: Any) -> list[str]:
     Returns:
         Deduplicated list of matched banned phrases (lowercase).
     """
-    found: list[str] = []
-    seen: set[str] = set()
-
-    def _walk(value: Any) -> None:
-        if isinstance(value, str):
-            for match in _BANNED_PATTERN.finditer(value):
-                token = match.group(1).lower()
-                if token not in seen:
-                    seen.add(token)
-                    found.append(token)
-        elif isinstance(value, dict):
-            for child in value.values():
-                _walk(child)
-        elif isinstance(value, (list, tuple)):
-            for child in value:
-                _walk(child)
-
-    _walk(obj)
-    return found
+    return [hit.match for hit in find_banned_matches(obj)]
 
 
 def assert_no_banned_words(narrative: ReportNarrative) -> None:
@@ -497,10 +555,9 @@ def assert_no_banned_words(narrative: ReportNarrative) -> None:
     Raises:
         BannedLanguageError: When one or more banned phrases are present.
     """
-    matches = find_banned_words(narrative.model_dump())
-    if matches:
-        raise BannedLanguageError(matches)
-
+    details = find_banned_matches(narrative.model_dump())
+    if details:
+        raise BannedLanguageError(details)
 
 def validate_narrative_keys(
     narrative: ReportNarrative,
@@ -627,11 +684,23 @@ def score_against_jd_with_model(
             return synthesis, model, usage
         except (ValidationError, BannedLanguageError, JdScoringUnavailable, json.JSONDecodeError) as exc:
             last_error = exc
-            logger.warning(
-                "report_synthesis_attempt_failed attempt=%s error=%s",
-                attempt + 1,
-                exc,
-            )
+            if isinstance(exc, BannedLanguageError) and exc.details:
+                hit = exc.details[0]
+                logger.warning(
+                    "report_synthesis_attempt_failed attempt=%s error=%s "
+                    "field=%s match=%s context=%s",
+                    attempt + 1,
+                    exc,
+                    hit.field,
+                    hit.match,
+                    hit.context,
+                )
+            else:
+                logger.warning(
+                    "report_synthesis_attempt_failed attempt=%s error=%s",
+                    attempt + 1,
+                    exc,
+                )
             if attempt == 0:
                 continue
             break
@@ -820,9 +889,22 @@ class JdScoringService:
             return None, "failed"
         except Exception as exc:
             # Fail-soft for submit/report; the provider error is logged and persisted.
-            logger.exception(
-                "jd_scoring_failed candidate_id=%s error=%s", candidate.id, exc
-            )
+            # Never log candidate PII (name/email/phone)—only id and ban context.
+            if isinstance(exc, BannedLanguageError) and exc.details:
+                hit = exc.details[0]
+                logger.exception(
+                    "jd_scoring_failed candidate_id=%s error=%s "
+                    "field=%s match=%s context=%s",
+                    candidate.id,
+                    exc,
+                    hit.field,
+                    hit.match,
+                    hit.context,
+                )
+            else:
+                logger.exception(
+                    "jd_scoring_failed candidate_id=%s error=%s", candidate.id, exc
+                )
             await JdScoringService._record_failure(
                 session, candidate, existing, digest, f"{type(exc).__name__}: {exc}"
             )
