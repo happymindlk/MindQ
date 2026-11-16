@@ -290,6 +290,17 @@ class FakeSession:
     async def rollback(self) -> None:
         return None
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+
+def _patch_write_session(monkeypatch, session: FakeSession) -> FakeSession:
+    monkeypatch.setattr("app.services.jd_scoring.SessionLocal", lambda: session)
+    return session
+
 
 class _Result:
     def __init__(self, row):
@@ -338,8 +349,10 @@ def _scoring_kwargs(*, outcomes: list[ModuleOutcome] | None = None) -> dict[str,
 
 
 @pytest.mark.asyncio
-async def test_provider_outage_persists_manual_review_failed_row_not_broken_payload():
-    session = FakeSession()
+async def test_provider_outage_persists_manual_review_failed_row_not_broken_payload(
+    monkeypatch,
+):
+    session = _patch_write_session(monkeypatch, FakeSession())
 
     def complete(_prompt: str) -> str:
         raise RuntimeError("503 UNAVAILABLE. model is experiencing high demand")
@@ -357,8 +370,8 @@ async def test_provider_outage_persists_manual_review_failed_row_not_broken_payl
 
 
 @pytest.mark.asyncio
-async def test_successful_generation_persists_token_cost_usage():
-    session = FakeSession()
+async def test_successful_generation_persists_token_cost_usage(monkeypatch):
+    session = _patch_write_session(monkeypatch, FakeSession())
     usage = {
         "prompt_tokens": 1200,
         "candidates_tokens": 800,
@@ -384,8 +397,8 @@ async def test_successful_generation_persists_token_cost_usage():
 
 
 @pytest.mark.asyncio
-async def test_hard_list_persists_held_for_review_with_placeholder_summary():
-    session = FakeSession()
+async def test_hard_list_persists_held_for_review_with_placeholder_summary(monkeypatch):
+    session = _patch_write_session(monkeypatch, FakeSession())
     banned = {
         **VALID_SYNTHESIS,
         "areas_to_explore": [

@@ -1019,6 +1019,18 @@ class FakeSession:
     async def rollback(self):
         self.rollbacks += 1
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+
+def _patch_write_session(monkeypatch, session: FakeSession) -> FakeSession:
+    """Route evaluation writes through the same FakeSession used for reads."""
+    monkeypatch.setattr("app.services.jd_scoring.SessionLocal", lambda: session)
+    return session
+
 
 def _outcomes(score: float = 80.0):
     return [
@@ -1053,8 +1065,8 @@ def _provider_503(_prompt: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_get_or_evaluate_persists_failed_status_on_provider_error():
-    session = FakeSession()
+async def test_get_or_evaluate_persists_failed_status_on_provider_error(monkeypatch):
+    session = _patch_write_session(monkeypatch, FakeSession())
     evaluation, status = await JdScoringService.get_or_evaluate(
         session, complete=_provider_503, **_scoring_kwargs()
     )
@@ -1070,8 +1082,8 @@ async def test_get_or_evaluate_persists_failed_status_on_provider_error():
 
 
 @pytest.mark.asyncio
-async def test_get_or_evaluate_persists_failed_status_on_malformed_json():
-    session = FakeSession()
+async def test_get_or_evaluate_persists_failed_status_on_malformed_json(monkeypatch):
+    session = _patch_write_session(monkeypatch, FakeSession())
     _evaluation, status = await JdScoringService.get_or_evaluate(
         session, complete=lambda _p: "not-json", **_scoring_kwargs()
     )
@@ -1081,12 +1093,12 @@ async def test_get_or_evaluate_persists_failed_status_on_malformed_json():
 
 
 @pytest.mark.asyncio
-async def test_get_or_evaluate_failure_clears_stale_payload_for_changed_jd():
+async def test_get_or_evaluate_failure_clears_stale_payload_for_changed_jd(monkeypatch):
     stale = SimpleNamespace(
         jd_hash="old-jd", status=EVAL_STATUS_OK, payload=VALID_SYNTHESIS, overall_fit=72,
         last_error=None, model="m", generated_at=None,
     )
-    session = FakeSession(existing=stale)
+    session = _patch_write_session(monkeypatch, FakeSession(existing=stale))
     _evaluation, status = await JdScoringService.get_or_evaluate(
         session, complete=_provider_503, **_scoring_kwargs()
     )
@@ -1097,14 +1109,14 @@ async def test_get_or_evaluate_failure_clears_stale_payload_for_changed_jd():
 
 
 @pytest.mark.asyncio
-async def test_get_or_evaluate_retries_failed_row_and_records_served_model():
+async def test_get_or_evaluate_retries_failed_row_and_records_served_model(monkeypatch):
     kwargs = _scoring_kwargs()
     failed = SimpleNamespace(
         jd_hash=synthesis_cache_key(kwargs["package"].description, kwargs["outcomes"]),
         status=EVAL_STATUS_FAILED, payload={}, overall_fit=None,
         last_error="503", model="gemini-3.6-flash", generated_at=None,
     )
-    session = FakeSession(existing=failed)
+    session = _patch_write_session(monkeypatch, FakeSession(existing=failed))
     calls = {"n": 0}
 
     usage = {
@@ -1136,6 +1148,49 @@ async def test_get_or_evaluate_retries_failed_row_and_records_served_model():
 
 
 @pytest.mark.asyncio
+async def test_get_or_evaluate_releases_db_before_gemini_and_writes_on_fresh_session(
+    monkeypatch,
+):
+    """Gemini must not run while a DB transaction is still open on the read session."""
+    read_session = FakeSession()
+    write_session = FakeSession()
+    events: list[str] = []
+
+    async def tracked_rollback():
+        events.append("rollback")
+        read_session.rollbacks += 1
+
+    read_session.rollback = tracked_rollback  # type: ignore[method-assign]
+
+    class _WriteCM:
+        async def __aenter__(self):
+            events.append("write_enter")
+            return write_session
+
+        async def __aexit__(self, *_exc):
+            events.append("write_exit")
+            return False
+
+    monkeypatch.setattr("app.services.jd_scoring.SessionLocal", lambda: _WriteCM())
+
+    def complete(_prompt: str) -> str:
+        events.append("gemini")
+        assert "rollback" in events
+        assert "write_enter" not in events
+        return json.dumps(VALID_SYNTHESIS)
+
+    evaluation, status = await JdScoringService.get_or_evaluate(
+        read_session, complete=complete, **_scoring_kwargs()
+    )
+    assert status == "generated"
+    assert evaluation is not None
+    assert events == ["rollback", "gemini", "write_enter", "write_exit"]
+    assert read_session.commits == 0
+    assert write_session.commits == 1
+    assert write_session.added[0].status == EVAL_STATUS_OK
+
+
+@pytest.mark.asyncio
 async def test_get_or_evaluate_cache_hit_skips_provider():
     kwargs = _scoring_kwargs()
     ok_row = SimpleNamespace(
@@ -1154,13 +1209,14 @@ async def test_get_or_evaluate_cache_hit_skips_provider():
 
 
 @pytest.mark.asyncio
-async def test_score_change_invalidates_cached_synthesis():
+async def test_score_change_invalidates_cached_synthesis(monkeypatch):
     kwargs = _scoring_kwargs(outcomes=_outcomes(score=40.0))
     ok_row = SimpleNamespace(
         jd_hash=synthesis_cache_key(kwargs["package"].description, _outcomes(score=80.0)),
         status=EVAL_STATUS_OK, payload=VALID_SYNTHESIS, overall_fit=None,
         last_error=None, model="m", generated_at=None,
     )
+    session = _patch_write_session(monkeypatch, FakeSession(existing=ok_row))
     calls = {"n": 0}
 
     def complete(_prompt: str) -> str:
@@ -1168,22 +1224,23 @@ async def test_score_change_invalidates_cached_synthesis():
         return json.dumps(VALID_SYNTHESIS)
 
     _evaluation, status = await JdScoringService.get_or_evaluate(
-        FakeSession(existing=ok_row), complete=complete, **kwargs
+        session, complete=complete, **kwargs
     )
     assert status == "generated"
     assert calls["n"] == 1
 
 
 @pytest.mark.asyncio
-async def test_legacy_jd_fit_row_is_regenerated_not_served():
+async def test_legacy_jd_fit_row_is_regenerated_not_served(monkeypatch):
     kwargs = _scoring_kwargs()
     legacy = SimpleNamespace(
         jd_hash=synthesis_cache_key(kwargs["package"].description, kwargs["outcomes"]),
         status=EVAL_STATUS_OK, payload=LEGACY_FIT, overall_fit=72,
         last_error=None, model="m", generated_at=None,
     )
+    session = _patch_write_session(monkeypatch, FakeSession(existing=legacy))
     evaluation, status = await JdScoringService.get_or_evaluate(
-        FakeSession(existing=legacy),
+        session,
         complete=lambda _p: json.dumps(VALID_SYNTHESIS),
         **kwargs,
     )
@@ -1203,13 +1260,14 @@ def test_cache_key_changes_with_prompt_inputs():
 
 
 @pytest.mark.asyncio
-async def test_failure_record_error_does_not_raise_into_report_path():
-    session = FakeSession(fail_commit=True)
+async def test_failure_record_error_does_not_raise_into_report_path(monkeypatch):
+    session = _patch_write_session(monkeypatch, FakeSession(fail_commit=True))
     evaluation, status = await JdScoringService.get_or_evaluate(
         session, complete=_provider_503, **_scoring_kwargs()
     )
     assert (evaluation, status) == (None, "failed")
-    assert session.rollbacks == 1
+    # release-read rollback + commit-failure rollback on the write session
+    assert session.rollbacks >= 1
 
 
 def test_evaluation_is_ok_treats_legacy_rows_without_status_as_ok():

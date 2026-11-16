@@ -241,6 +241,8 @@ async def test_refresh_still_runs_synthesis_when_grading_fails(monkeypatch):
     await background.refresh_report_synthesis(candidate_id)
 
     session.rollback.assert_awaited_once()
+    # JD runs in a second SessionLocal block; the patched factory still yields
+    # the same mock session object.
     synthesis.assert_awaited_once_with(session, candidate)
     assert background.is_ai_job_inflight(candidate_id) is False
 

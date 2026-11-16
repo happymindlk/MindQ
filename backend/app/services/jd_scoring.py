@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
+from app.database import SessionLocal
 from app.models.assessment import Assessment
 from app.models.candidate import Candidate
 from app.models.candidate_evaluation import CandidateEvaluation
@@ -1144,17 +1145,28 @@ class JdScoringService:
                     return narrative, "held_for_review"
                 return narrative, "cached"
 
+        # Snapshot scalars before releasing the caller's transaction so lazy
+        # loads cannot touch a closed / rolled-back connection mid-Gemini.
+        candidate_name = candidate.full_name
+        package_title = package.title if package else ""
+        target_role = (getattr(package, "target_role", None) or "") if package else ""
+        evidence = build_evidence(assessments, progresses, responses)
+        assessment_scores = prompt_assessments(outcomes)
+
+        # Do not hold an open Supabase/pooler transaction across Gemini
+        # (often 40–60s with retries); idle-in-transaction kills the socket.
+        await JdScoringService._release_read_transaction(session)
+
         try:
-            evidence = build_evidence(assessments, progresses, responses)
             evaluation, model, usage = await asyncio.wait_for(
                 run_in_threadpool(
                     score_against_jd_with_model,
                     job_description=jd,
-                    candidate_name=candidate.full_name,
-                    package_title=package.title if package else "",
+                    candidate_name=candidate_name,
+                    package_title=package_title,
                     evidence=evidence,
-                    assessment_scores=prompt_assessments(outcomes),
-                    target_role=(getattr(package, "target_role", None) or "") if package else "",
+                    assessment_scores=assessment_scores,
+                    target_role=target_role,
                     complete=complete,
                 ),
                 timeout=overall_deadline_seconds(),
@@ -1165,7 +1177,7 @@ class JdScoringService:
                 "jd_scoring_timeout candidate_id=%s timeout_s=%s", candidate.id, deadline
             )
             await JdScoringService._record_failure(
-                session, candidate, existing, digest, f"timeout after {deadline:.0f}s"
+                candidate, digest, f"timeout after {deadline:.0f}s"
             )
             return None, "failed"
         except HeldForReviewError as exc:
@@ -1180,9 +1192,7 @@ class JdScoringService:
                 getattr(hit, "context", None),
             )
             await JdScoringService._record_held(
-                session,
                 candidate,
-                existing,
                 digest,
                 exc.narrative,
                 model=exc.model or settings.GEMINI_MODEL,
@@ -1209,38 +1219,13 @@ class JdScoringService:
                     "jd_scoring_failed candidate_id=%s error=%s", candidate.id, exc
                 )
             await JdScoringService._record_failure(
-                session, candidate, existing, digest, f"{type(exc).__name__}: {exc}"
+                candidate, digest, f"{type(exc).__name__}: {exc}"
             )
             return None, "failed"
 
-        payload = evaluation.model_dump()
-        now = datetime.now(timezone.utc)
-        if existing:
-            existing.jd_hash = digest
-            existing.model = model
-            existing.overall_fit = None
-            existing.payload = payload
-            existing.usage = usage
-            existing.status = EVAL_STATUS_OK
-            existing.last_error = None
-            existing.generated_at = now
-        else:
-            session.add(
-                CandidateEvaluation(
-                    corporate_id=candidate.corporate_id,
-                    candidate_id=candidate.id,
-                    package_id=candidate.package_id,
-                    jd_hash=digest,
-                    model=model,
-                    overall_fit=None,
-                    payload=payload,
-                    usage=usage,
-                    status=EVAL_STATUS_OK,
-                    last_error=None,
-                    generated_at=now,
-                )
-            )
-        await session.commit()
+        await JdScoringService._persist_ok(
+            candidate, digest, evaluation, model=model, usage=usage
+        )
         logger.info(
             "jd_scoring_generated candidate_id=%s model=%s assessments=%s "
             "prompt_tokens=%s output_tokens=%s estimated_cost_usd=%s",
@@ -1254,96 +1239,72 @@ class JdScoringService:
         return evaluation, "generated"
 
     @staticmethod
-    async def _record_failure(
-        session: AsyncSession,
-        candidate: Candidate,
-        existing: CandidateEvaluation | None,
-        digest: str,
-        error: str,
-    ) -> None:
-        """Persist a ``failed`` evaluation row without raising into the caller.
-
-        A failed row clears any payload scored against a different JD so readers
-        never show a stale fit next to a failure.
+    async def _release_read_transaction(session: AsyncSession) -> None:
+        """End any open DB transaction before awaiting a long external call.
 
         Args:
-            session: Async SQLAlchemy session.
-            candidate: Candidate being scored.
-            existing: Current evaluation row, if any.
-            digest: Hash of the JD the attempt used.
-            error: Human-readable failure reason.
+            session: Caller session that may still hold an idle-in-transaction
+                connection after the cache / input reads.
         """
-        message = error[:_ERROR_MAX_CHARS]
-        now = datetime.now(timezone.utc)
         try:
-            if existing:
-                existing.jd_hash = digest
-                existing.model = settings.GEMINI_MODEL
-                existing.overall_fit = None
-                existing.payload = {}
-                existing.usage = None
-                existing.status = EVAL_STATUS_FAILED
-                existing.last_error = message
-                existing.generated_at = now
-            else:
-                session.add(
-                    CandidateEvaluation(
-                        corporate_id=candidate.corporate_id,
-                        candidate_id=candidate.id,
-                        package_id=candidate.package_id,
-                        jd_hash=digest,
-                        model=settings.GEMINI_MODEL,
-                        overall_fit=None,
-                        payload={},
-                        usage=None,
-                        status=EVAL_STATUS_FAILED,
-                        last_error=message,
-                        generated_at=now,
-                    )
-                )
-            await session.commit()
-        except Exception:
-            logger.exception(
-                "jd_scoring_failure_record_failed candidate_id=%s", candidate.id
-            )
             await session.rollback()
+        except Exception:
+            logger.warning(
+                "jd_scoring_release_read_txn_failed",
+                exc_info=True,
+            )
 
     @staticmethod
-    async def _record_held(
-        session: AsyncSession,
+    async def _load_evaluation(
+        session: AsyncSession, candidate_id: UUID
+    ) -> CandidateEvaluation | None:
+        """Fetch the candidate's evaluation row on a short-lived write session.
+
+        Args:
+            session: Write session.
+            candidate_id: Candidate whose evaluation to load.
+
+        Returns:
+            Existing ``CandidateEvaluation`` or ``None``.
+        """
+        return (
+            await session.execute(
+                select(CandidateEvaluation).where(
+                    CandidateEvaluation.candidate_id == candidate_id
+                )
+            )
+        ).scalars().first()
+
+    @staticmethod
+    async def _persist_ok(
         candidate: Candidate,
-        existing: CandidateEvaluation | None,
         digest: str,
-        narrative: ReportNarrative,
+        evaluation: ReportNarrative,
         *,
         model: str,
         usage: dict[str, Any] | None,
-        error: str,
     ) -> None:
-        """Persist a held-for-review synthesis with payload kept.
+        """Persist a successful synthesis on a fresh short-lived DB session.
 
         Args:
-            session: Async SQLAlchemy session.
             candidate: Candidate being scored.
-            existing: Current evaluation row, if any.
             digest: Cache key for this attempt.
-            narrative: Narrative with placeholder executive summary.
+            evaluation: Validated narrative payload.
             model: Serving model id.
-            usage: Optional token/cost dict from the last attempt.
-            error: Human-readable hold reason.
+            usage: Optional token/cost dict from the provider.
         """
-        message = error[:_ERROR_MAX_CHARS]
-        payload = narrative.model_dump()
+        payload = evaluation.model_dump()
         now = datetime.now(timezone.utc)
-        try:
+        async with SessionLocal() as session:
+            existing = await JdScoringService._load_evaluation(session, candidate.id)
             if existing:
                 existing.jd_hash = digest
                 existing.model = model
                 existing.overall_fit = None
                 existing.payload = payload
                 existing.usage = usage
-                existing.status = EVAL_STATUS_HELD
-                existing.last_error = message
+                existing.status = EVAL_STATUS_OK
+                existing.last_error = None
                 existing.generated_at = now
             else:
                 session.add(
@@ -1356,14 +1317,127 @@ class JdScoringService:
                         overall_fit=None,
                         payload=payload,
                         usage=usage,
-                        status=EVAL_STATUS_HELD,
-                        last_error=message,
+                        status=EVAL_STATUS_OK,
+                        last_error=None,
                         generated_at=now,
                     )
                 )
             await session.commit()
+
+    @staticmethod
+    async def _record_failure(
+        candidate: Candidate,
+        digest: str,
+        error: str,
+    ) -> None:
+        """Persist a ``failed`` evaluation row without raising into the caller.
+
+        A failed row clears any payload scored against a different JD so readers
+        never show a stale fit next to a failure. Uses a fresh short-lived
+        session so the write never depends on the pre-Gemini read connection.
+
+        Args:
+            candidate: Candidate being scored.
+            digest: Hash of the JD the attempt used.
+            error: Human-readable failure reason.
+        """
+        message = error[:_ERROR_MAX_CHARS]
+        now = datetime.now(timezone.utc)
+        try:
+            async with SessionLocal() as session:
+                existing = await JdScoringService._load_evaluation(session, candidate.id)
+                if existing:
+                    existing.jd_hash = digest
+                    existing.model = settings.GEMINI_MODEL
+                    existing.overall_fit = None
+                    existing.payload = {}
+                    existing.usage = None
+                    existing.status = EVAL_STATUS_FAILED
+                    existing.last_error = message
+                    existing.generated_at = now
+                else:
+                    session.add(
+                        CandidateEvaluation(
+                            corporate_id=candidate.corporate_id,
+                            candidate_id=candidate.id,
+                            package_id=candidate.package_id,
+                            jd_hash=digest,
+                            model=settings.GEMINI_MODEL,
+                            overall_fit=None,
+                            payload={},
+                            usage=None,
+                            status=EVAL_STATUS_FAILED,
+                            last_error=message,
+                            generated_at=now,
+                        )
+                    )
+                try:
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
+        except Exception:
+            logger.exception(
+                "jd_scoring_failure_record_failed candidate_id=%s", candidate.id
+            )
+
+    @staticmethod
+    async def _record_held(
+        candidate: Candidate,
+        digest: str,
+        narrative: ReportNarrative,
+        *,
+        model: str,
+        usage: dict[str, Any] | None,
+        error: str,
+    ) -> None:
+        """Persist a held-for-review synthesis with payload kept.
+
+        Args:
+            candidate: Candidate being scored.
+            digest: Cache key for this attempt.
+            narrative: Narrative with placeholder executive summary.
+            model: Serving model id.
+            usage: Optional token/cost dict from the last attempt.
+            error: Human-readable hold reason.
+        """
+        message = error[:_ERROR_MAX_CHARS]
+        payload = narrative.model_dump()
+        now = datetime.now(timezone.utc)
+        try:
+            async with SessionLocal() as session:
+                existing = await JdScoringService._load_evaluation(session, candidate.id)
+                if existing:
+                    existing.jd_hash = digest
+                    existing.model = model
+                    existing.overall_fit = None
+                    existing.payload = payload
+                    existing.usage = usage
+                    existing.status = EVAL_STATUS_HELD
+                    existing.last_error = message
+                    existing.generated_at = now
+                else:
+                    session.add(
+                        CandidateEvaluation(
+                            corporate_id=candidate.corporate_id,
+                            candidate_id=candidate.id,
+                            package_id=candidate.package_id,
+                            jd_hash=digest,
+                            model=model,
+                            overall_fit=None,
+                            payload=payload,
+                            usage=usage,
+                            status=EVAL_STATUS_HELD,
+                            last_error=message,
+                            generated_at=now,
+                        )
+                    )
+                try:
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
         except Exception:
             logger.exception(
                 "jd_scoring_held_record_failed candidate_id=%s", candidate.id
             )
-            await session.rollback()

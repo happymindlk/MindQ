@@ -181,6 +181,12 @@ async def score_ai_for_candidate(
                     candidate_id,
                     assessment_id,
                 )
+        # Fresh session for JD synthesis so technical-eval does not leave an
+        # open pooler transaction idle across a long Gemini call.
+        async with SessionLocal() as session:
+            candidate = await CandidateService.get_candidate(session, candidate_id)
+            if not candidate:
+                return
             try:
                 await CandidateService.evaluate_jd_if_package_complete(session, candidate)
             except Exception:
@@ -253,6 +259,12 @@ async def refresh_report_synthesis(candidate_id: UUID) -> None:
                     "report_technical_backfill_failed candidate_id=%s", candidate_id
                 )
                 await session.rollback()
+        # Separate short-lived session for JD so grading work cannot leave a
+        # transaction open across Gemini synthesis.
+        async with SessionLocal() as session:
+            candidate = await CandidateService.get_candidate(session, candidate_id)
+            if not candidate:
+                return
             try:
                 await CandidateService.evaluate_jd_if_package_complete(session, candidate)
             except Exception:
