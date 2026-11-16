@@ -1,13 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { cachedQuery, DEFAULT_STALE_TIME_MS } from '../../lib/query-cache';
 
 const POLL_DELAYS_MS = [3000, 3000, 5000, 5000, 8000, 8000, 13000, 13000];
 const POLL_MAX_DELAY_MS = 15000;
+/** While narrative is generating, do not serve a stale poll result. */
+const GENERATING_STALE_TIME_MS = 0;
 /**
  * Stop polling after this much waiting. Kept below the backend's 5-minute
  * retry cooldown so a failed background run surfaces as `failed` instead of
  * re-queuing Gemini on every poll.
  */
 export const NARRATIVE_POLL_BUDGET_MS = 3 * 60 * 1000;
+
+/**
+ * Cache key for a MindQ Report JSON payload (client or admin preview).
+ *
+ * @param {string} candidateId
+ * @returns {string}
+ */
+export function reportDataCacheKey(candidateId) {
+  return `report:${candidateId}`;
+}
 
 /**
  * Backoff before the n-th narrative re-fetch (0-based).
@@ -17,6 +30,29 @@ export const NARRATIVE_POLL_BUDGET_MS = 3 * 60 * 1000;
  */
 export function narrativePollDelay(pollIndex) {
   return POLL_DELAYS_MS[pollIndex] ?? POLL_MAX_DELAY_MS;
+}
+
+/**
+ * Fetch report JSON through the shared SWR cache.
+ *
+ * Completed reports stay fresh for ``DEFAULT_STALE_TIME_MS`` so back-navigation
+ * paints instantly. Polls while ``synthesis_status === 'generating'`` force a
+ * network round-trip (staleTime 0).
+ *
+ * @param {string} candidateId
+ * @param {(candidateId: string) => Promise<Record<string, any>>} fetchReportData
+ * @param {{ force?: boolean }} [options]
+ * @returns {Promise<Record<string, any>>}
+ */
+function cachedReportFetch(candidateId, fetchReportData, { force = false } = {}) {
+  return cachedQuery(
+    reportDataCacheKey(candidateId),
+    () => fetchReportData(candidateId),
+    {
+      staleTime: force ? GENERATING_STALE_TIME_MS : DEFAULT_STALE_TIME_MS,
+      force,
+    },
+  );
 }
 
 /**
@@ -46,7 +82,7 @@ export function useReportData(candidateId, fetchReportData) {
     setPollStopped(false);
     setLoading(true);
     setError(null);
-    fetchReportData(candidateId)
+    cachedReportFetch(candidateId, fetchReportData, { force: attempt > 0 })
       .then((payload) => {
         if (!cancelled) setData(payload);
       })
@@ -79,7 +115,7 @@ export function useReportData(candidateId, fetchReportData) {
       }
       poll.count += 1;
       poll.waitedMs += delay;
-      fetchReportData(candidateId)
+      cachedReportFetch(candidateId, fetchReportData, { force: true })
         .then((payload) => {
           if (cancelled) return;
           setData(payload);

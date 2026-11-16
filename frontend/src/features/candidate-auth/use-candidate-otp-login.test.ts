@@ -136,6 +136,26 @@ describe('useCandidateOtpLogin', () => {
     expect(verifyCandidateOtp).toHaveBeenCalledWith(complete, '123456', 'temp-token-value');
     expect(persistCandidateSession).toHaveBeenCalledWith(session);
     expect(onAuthenticated).toHaveBeenCalledWith(session);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('clears loading even when onAuthenticated throws after a successful verify', async () => {
+    sendCandidateOtp.mockResolvedValue('temp-token-value');
+    const session = { token: 't', id: 'c1', firstName: 'Ada', fullName: 'Ada Lovelace', accessCode: 'HM-1' };
+    verifyCandidateOtp.mockResolvedValue(session);
+    const onAuthenticated = vi.fn(() => {
+      throw new Error('Navigation failed');
+    });
+    const { result } = renderHook(() => useCandidateOtpLogin('HM-1', onAuthenticated));
+    fill(result);
+    await act(() => result.current.sendCode());
+    act(() => result.current.setCode('123456'));
+    await act(() => result.current.verifyCode());
+
+    expect(persistCandidateSession).toHaveBeenCalledWith(session);
+    expect(onAuthenticated).toHaveBeenCalledWith(session);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBe('Navigation failed');
   });
 
   it('keeps the candidate on the code step with an error when verification fails', async () => {

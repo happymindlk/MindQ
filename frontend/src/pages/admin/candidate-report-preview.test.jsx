@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { invalidateQuery } from '../../lib/query-cache';
 import CandidateReportPreview from './CandidateReportPreview';
 
 const { getReportData, downloadReport, toast } = vi.hoisted(() => ({
@@ -56,6 +57,7 @@ function renderPreview() {
 }
 
 beforeEach(() => {
+  invalidateQuery();
   getReportData.mockReset();
   downloadReport.mockReset();
   toast.mockReset();

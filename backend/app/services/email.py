@@ -792,7 +792,7 @@ def render_admin_password_reset_html(reset_url: str) -> str:
     """
     safe_url = html.escape(reset_url, quote=True)
     body = f"""
-      <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#111827;">
+      <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#1F2937;">
         Reset your MindQ admin password
       </h1>
       <p style="margin:0 0 20px;font-size:14px;line-height:1.55;color:#4B5563;">
@@ -808,6 +808,43 @@ def render_admin_password_reset_html(reset_url: str) -> str:
       </p>
       <p style="margin:0;font-size:12px;line-height:1.5;color:#6B7280;">
         If you did not request this, you can ignore this email. Your password will stay the same.
+      </p>
+    """
+    return _light_email_shell(body)
+
+
+def render_beta_access_request_html(user_email: str, user_id: str) -> str:
+    """Build the HTML body notifying ops of a new HR beta access request.
+
+    Args:
+        user_email: Requester email from Supabase Auth.
+        user_id: Supabase Auth user UUID as a string.
+
+    Returns:
+        Full HTML document with the shared light-theme shell and company footer.
+    """
+    safe_email = html.escape(user_email)
+    safe_id = html.escape(user_id)
+    body = f"""
+      <h1 style="margin:0 0 12px;font-size:20px;font-weight:700;color:#1F2937;">
+        New beta access request
+      </h1>
+      <p style="margin:0 0 16px;font-size:14px;line-height:1.55;color:#4B5563;">
+        An HR user requested MindQ beta access. Provision their tenant via SQL using the values below.
+      </p>
+      <table style="border-collapse:collapse;font-size:14px;width:100%;">
+        <tr>
+          <td style="padding:8px 12px;border:1px solid #E5E7EB;background:#F9FAFB;font-weight:600;color:#374151;">Email</td>
+          <td style="padding:8px 12px;border:1px solid #E5E7EB;font-family:ui-monospace,Consolas,monospace;color:#1F2937;">{safe_email}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 12px;border:1px solid #E5E7EB;background:#F9FAFB;font-weight:600;color:#374151;">Supabase UUID</td>
+          <td style="padding:8px 12px;border:1px solid #E5E7EB;font-family:ui-monospace,Consolas,monospace;color:#1F2937;">{safe_id}</td>
+        </tr>
+      </table>
+      <p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#6B7280;">
+        Insert into <code>public.hr_users</code> (and create a <code>corporates</code> row if needed), then have the
+        user refresh their session so the custom access token hook injects <code>app_metadata.corporate_id</code>.
       </p>
     """
     return _light_email_shell(body)

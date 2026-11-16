@@ -39,6 +39,7 @@ export default function SessionLockModal({
     } catch (err) {
       setError(err?.message || 'Incorrect password. Try again.');
       setPassword('');
+    } finally {
       setSubmitting(false);
     }
   };

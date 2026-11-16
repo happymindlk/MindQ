@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Mail, RefreshCw } from 'lucide-react';
 import BrandLogo from '../../components/BrandLogo';
 import { clientApi } from '../../lib/clientApi';
+import { cachedQuery } from '../../lib/query-cache';
+import { CLIENT_DASHBOARD_KEY } from './use-client-dashboard';
 import { useClientSession } from './use-client-session';
 
 const CODE_LENGTH = 6;
@@ -98,13 +100,22 @@ export default function ClientLogin() {
     event.preventDefault();
     setError(null);
     setLoading(true);
+    let session = null;
     try {
-      const session = await clientApi.verifyOtp(email.trim().toLowerCase(), code, tempToken);
+      session = await clientApi.verifyOtp(email.trim().toLowerCase(), code, tempToken);
       signIn(session);
-      navigate(returnTo, { replace: true });
     } catch (err) {
       setError(err.message || 'Invalid code');
+      return;
+    } finally {
       setLoading(false);
+    }
+    try {
+      // Warm the dashboard cache before navigation so the first paint hits cache.
+      void cachedQuery(CLIENT_DASHBOARD_KEY, () => clientApi.getDashboard()).catch(() => undefined);
+      navigate(returnTo, { replace: true });
+    } catch (err) {
+      setError(err.message || 'Signed in, but the workspace could not be opened.');
     }
   };
 

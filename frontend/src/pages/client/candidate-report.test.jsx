@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { invalidateQuery } from '../../lib/query-cache';
 import ClientCandidateReport from './candidate-report';
 
 const { getReportData, downloadReport, toast, renderReportPdf } = vi.hoisted(() => ({
@@ -60,6 +61,7 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  invalidateQuery();
   getReportData.mockReset().mockResolvedValue(REPORT);
   downloadReport.mockReset().mockResolvedValue({ isHtml: false, synthesisStatus: 'ok', cacheState: 'HIT' });
   toast.mockReset();

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import BrandLogo from './BrandLogo';
@@ -9,14 +9,24 @@ import ThemeToggle from './ThemeToggle';
 import KeepAliveOutlet from './keep-alive-outlet';
 import { CLIENT_KEEP_PATTERNS } from './keep-alive-routes';
 import CorporateLogo from '../pages/admin/corporates/corporate-logo';
+import { CLIENT_DASHBOARD_KEY } from '../pages/client/use-client-dashboard';
 import { useClientSession } from '../pages/client/use-client-session';
 import { useIdleTimer } from '../hooks/use-idle-timer';
+import { clientApi } from '../lib/clientApi';
+import { cachedQuery } from '../lib/query-cache';
 
 export default function ClientLayout() {
   const navigate = useNavigate();
-  const { corporate, signOut, lock } = useClientSession();
+  const { corporate, signOut, lock, isAuthenticated } = useClientSession();
 
   useIdleTimer({ onIdle: lock });
+
+  // Warm the dashboard payload once at the shell so the dashboard mount hits cache.
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    void cachedQuery(CLIENT_DASHBOARD_KEY, () => clientApi.getDashboard()).catch(() => undefined);
+    return undefined;
+  }, [isAuthenticated]);
 
   const handleSignOut = () => {
     signOut();

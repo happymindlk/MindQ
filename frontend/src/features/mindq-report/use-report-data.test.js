@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { invalidateQuery } from '../../lib/query-cache';
 import { NARRATIVE_POLL_BUDGET_MS, narrativePollDelay, useReportData } from './use-report-data';
 
 const GENERATING = { synthesis_status: 'generating', executive_summary: '' };
@@ -24,11 +25,13 @@ function setHidden(hidden) {
 beforeEach(() => {
   vi.useFakeTimers();
   setHidden(false);
+  invalidateQuery();
 });
 
 afterEach(() => {
   vi.useRealTimers();
   setHidden(false);
+  invalidateQuery();
 });
 
 describe('useReportData narrative polling', () => {
