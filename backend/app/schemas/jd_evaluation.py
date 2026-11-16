@@ -189,7 +189,7 @@ class RoleAlignmentItem(BaseModel):
 
 
 class ReportNarrative(BaseModel):
-    """Narrative fields of the MindQ Report produced by Gemini (v5).
+    """Narrative fields of the MindQ Report produced by Gemini (v5.1).
 
     Deliberately has no fit score or hiring recommendation: MindQ does not make
     employment decisions, and the report disclaimer says so.

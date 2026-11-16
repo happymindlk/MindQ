@@ -19,7 +19,9 @@ ReportCategory = Literal["Cognitive", "Personality", "Behavioral", "Technical"]
 # ``pending``: package not finished, so scores are withheld and no narrative is due.
 # ``generating``: scores are final and a background job is writing the narrative;
 # clients should poll.
-SynthesisStatus = Literal["ok", "failed", "skipped", "pending", "generating"]
+SynthesisStatus = Literal[
+    "ok", "failed", "skipped", "pending", "generating", "held_for_review"
+]
 
 
 class SubscaleScore(BaseModel):

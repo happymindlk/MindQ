@@ -1,4 +1,4 @@
-"""Isolated Gemini prompt for the MindQ Report synthesis (v5).
+"""Isolated Gemini prompt for the MindQ Report synthesis (v5.1).
 
 Do not embed the JSON schema here: the model is constrained via
 ``response_json_schema``. Keep task instructions and data only.
@@ -9,7 +9,7 @@ it is part of the evaluation cache key, so stale syntheses regenerate.
 
 from app.prompts.boundaries import UNTRUSTED_DATA_RULES, fence_untrusted, new_nonce
 
-PROMPT_VERSION = "mindq-report-v5"
+PROMPT_VERSION = "mindq-report-v5.1"
 
 MAX_EVIDENCE_PROMPT_CHARS = 120_000
 MAX_NAME_PROMPT_CHARS = 120
@@ -38,7 +38,9 @@ CORE RULES
 9. Describe results, not the person. Alignment labels and every sentence describe what the results show and what the job asks, never what the candidate "is". No pass or fail wording of any kind.
 
 WORDING LIMITS (apply to every field)
-- Never use these words or close variants: moody, mood swings, anxious, anxiety, nervous, neurotic, unstable, fragile, emotional (as a judgement), dishonest, deceitful, untrustworthy, manipulative, arrogant, aggressive, cold, cold-hearted, lazy, immature, weak, unfit, fail, failed, red flag, high risk, disqualifying, poor performer.
+- Never use these words or close variants: moody, mood swings, anxious, neurotic, unstable, dishonest, deceitful, untrustworthy, manipulative, arrogant, lazy, immature, unfit, red flag, disqualifying, poor performer.
+- Do not describe the candidate with these words: emotional, emotionally, nervous, anxiety, fragile, weak, cold, aggressive, fail, failed, high risk. Use one of them only when it appears in the job description's own wording about the role (for example "cold calling" or "aggressive targets"). For the Big Five trait about reactivity to pressure, write "composure under pressure" or "reactivity to pressure" in plain words, never "emotional stability" or anything with "emotional".
+
 - Write each point to explore as a work tendency tied to the job, in "may" or "tends to" wording, for example "may prefer clear guidance when priorities shift" or "may take longer to commit when information is incomplete". Never describe a trait of the person, a mental state, or character.
 - Honesty-Humility and any result touching integrity: a lower result is only a topic to discuss. Never call it dishonesty or imply the candidate would act unethically.
 - Reactions to pressure, change or setbacks: describe preferred working conditions only, never feelings, moods or wellbeing.
