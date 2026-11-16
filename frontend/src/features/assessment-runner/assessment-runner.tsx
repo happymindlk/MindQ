@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ClipboardEvent, MouseEvent, ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Cloud, Info, WifiOff } from 'lucide-react';
+import { AlarmClock, CheckCircle2, ChevronLeft, ChevronRight, Info, WifiOff } from 'lucide-react';
 import type { RunnerTest } from '../assessment-builder/api/library-api';
 import { MarkdownText } from '../assessment-builder/components/markdown-preview';
 import type { AnswerValue, ResponseSavePayload, ResponseSubmitPayload } from '../assessment-builder/types/telemetry';
@@ -28,8 +28,6 @@ const NAV_DEBOUNCE_MS = 300;
 const CHOICE_AUTOSAVE_MS = 300;
 /** Free-text typing waits longer so keystrokes do not spam the network. */
 const TEXT_AUTOSAVE_MS = 800;
-/** Only surface "Saving…" when an HTTP request has been in flight this long. */
-const SAVING_FEEDBACK_MS = 400;
 
 const TEXT_QUESTION_TYPES = new Set(['crt', 'open', 'open_ended']);
 
@@ -47,8 +45,6 @@ export interface RunnerTransport {
   autosave: (payload: ResponseSavePayload) => Promise<void>;
   submit: (body: ResponseSubmitPayload) => Promise<void>;
 }
-
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 interface AssessmentRunnerProps {
   test: RunnerTest;
@@ -86,7 +82,7 @@ export function AssessmentRunner({
   const questions = test.questions;
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>(initialAnswers);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [saveError, setSaveError] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -106,7 +102,6 @@ export function AssessmentRunner({
   /** Bumped to drop pending / in-flight autosave work before auto-submit. */
   const autosaveEpochRef = useRef(0);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savingFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timerStopRef = useRef<(() => void) | null>(null);
   const lastAdvanceAtRef = useRef(0);
   const lastOpenConfirmAtRef = useRef(0);
@@ -119,19 +114,11 @@ export function AssessmentRunner({
     }
   }, []);
 
-  const clearSavingFeedbackTimer = useCallback(() => {
-    if (savingFeedbackTimerRef.current !== null) {
-      clearTimeout(savingFeedbackTimerRef.current);
-      savingFeedbackTimerRef.current = null;
-    }
-  }, []);
-
   const cancelPendingAutosave = useCallback(() => {
     autosaveEpochRef.current += 1;
     dirtyRef.current.clear();
     clearDebounceTimer();
-    clearSavingFeedbackTimer();
-  }, [clearDebounceTimer, clearSavingFeedbackTimer]);
+  }, [clearDebounceTimer]);
 
   const allowAction = useCallback((stampRef: { current: number }) => {
     const now = performance.now();
@@ -229,19 +216,6 @@ export function AssessmentRunner({
       }
       inFlightSaveRef.current.add(questionId);
       dirtyRef.current.delete(questionId);
-      // Debounce waiting must never show "Saving…"; only an in-flight HTTP
-      // request that lasts longer than SAVING_FEEDBACK_MS surfaces the badge.
-      clearSavingFeedbackTimer();
-      savingFeedbackTimerRef.current = setTimeout(() => {
-        savingFeedbackTimerRef.current = null;
-        if (
-          autosaveEpochRef.current === epoch &&
-          !submittedRef.current &&
-          inFlightSaveRef.current.has(questionId)
-        ) {
-          setSaveStatus('saving');
-        }
-      }, SAVING_FEEDBACK_MS);
       let failed = false;
       try {
         await transport.autosave({
@@ -251,14 +225,13 @@ export function AssessmentRunner({
           elapsed_seconds: telemetry.elapsedFor(questionId),
         });
         if (autosaveEpochRef.current !== epoch || submittedRef.current) return;
-        clearSavingFeedbackTimer();
-        setSaveStatus('saved');
+        // Successful save clears error-only feedback; routine saves stay silent.
+        setSaveError(false);
       } catch (err) {
         if (autosaveEpochRef.current !== epoch || submittedRef.current) return;
         failed = true;
         dirtyRef.current.add(questionId);
-        clearSavingFeedbackTimer();
-        setSaveStatus('error');
+        setSaveError(true);
         if (isTimeExpired(err)) {
           setTimeUp(true);
           void submit('expired');
@@ -277,7 +250,7 @@ export function AssessmentRunner({
         }
       }
     },
-    [clearSavingFeedbackTimer, onLocked, submit, telemetry, test.id, transport],
+    [onLocked, submit, telemetry, test.id, transport],
   );
 
   const flushDirty = useCallback(async () => {
@@ -328,14 +301,13 @@ export function AssessmentRunner({
     };
   }, [flushDirty, flushDirtyInBackground]);
 
-  // Only clear timers on unmount — not when flush callbacks change identity,
-  // or a pending debounce would be cancelled before it can fire.
+  // Only clear the debounce timer on unmount — not when flush callbacks change
+  // identity, or a pending debounce would be cancelled before it can fire.
   useEffect(
     () => () => {
       clearDebounceTimer();
-      clearSavingFeedbackTimer();
     },
-    [clearDebounceTimer, clearSavingFeedbackTimer],
+    [clearDebounceTimer],
   );
 
   const handleChange = (value: AnswerValue) => {
@@ -408,13 +380,13 @@ export function AssessmentRunner({
         </div>
       )}
 
-      {offline && (
+      {mode === 'live' && (offline || saveError) && (
         <div
           role="alert"
           className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground"
         >
           <WifiOff className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden />
-          <span>Offline: answers cached locally. Do not close tab</span>
+          <span>Connection issue — retrying save...</span>
         </div>
       )}
 
@@ -450,20 +422,7 @@ export function AssessmentRunner({
               <span className="sr-only"> hard cutoff</span>
             </span>
           )}
-          {mode === 'live' ? (
-            <span className="flex items-center gap-1.5 text-muted" aria-live="polite">
-              <Cloud className="h-3.5 w-3.5" aria-hidden />
-              {saveStatus === 'saving' ? (
-                <span className="text-warning">Saving…</span>
-              ) : saveStatus === 'saved' ? (
-                <span className="text-success">Saved</span>
-              ) : saveStatus === 'error' ? (
-                <span className="text-danger">Saved offline</span>
-              ) : (
-                <span>Ready</span>
-              )}
-            </span>
-          ) : (
+          {mode === 'preview' && (
             <span className="rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 font-semibold text-warning">
               Preview - nothing is saved
             </span>

@@ -523,16 +523,10 @@ describe('AssessmentRunner debounced autosave', () => {
     );
   });
 
-  it('does not show Saving… until an in-flight request exceeds 400ms', async () => {
+  it('keeps successful autosaves silent in the header', async () => {
     vi.useFakeTimers();
-    let resolveSave: (() => void) | undefined;
     const transport = {
-      autosave: vi.fn(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveSave = resolve;
-          }),
-      ),
+      autosave: vi.fn(async () => undefined),
       submit: vi.fn(async () => undefined),
     };
     renderRunner(twoQuestionTest(), transport, 'live');
@@ -541,19 +535,10 @@ describe('AssessmentRunner debounced autosave', () => {
       vi.advanceTimersByTime(300);
     });
     expect(transport.autosave).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText('Saving…')).not.toBeInTheDocument();
-    expect(screen.getByText('Ready')).toBeInTheDocument();
-
-    await act(async () => {
-      vi.advanceTimersByTime(400);
-    });
-    expect(screen.getByText('Saving…')).toBeInTheDocument();
-
-    resolveSave?.();
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(screen.getByText('Saved')).toBeInTheDocument();
+    expect(screen.queryByText(/Saving/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Saved$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Ready$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Connection issue/i)).not.toBeInTheDocument();
   });
 
   it('flushes dirty answers when the tab becomes hidden without waiting for debounce', async () => {
@@ -677,14 +662,17 @@ describe('AssessmentRunner submit freeze', () => {
     await user.click(screen.getByRole('button', { name: /Submit test/i }));
     await user.click(screen.getByRole('button', { name: /Confirm submit/i }));
     expect(transport.submit).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('status', { name: /Submitting your responses/i })).toBeInTheDocument();
+    // Dialog keeps aria-hidden on the page tree while open; query the overlay explicitly.
+    expect(
+      screen.getByRole('status', { name: /Submitting your responses/i, hidden: true }),
+    ).toBeInTheDocument();
     // Confirm button is disabled + relabeled while the idempotency lock holds.
     expect(screen.getByRole('button', { name: /Submitting your responses/i })).toBeDisabled();
 
     resolveSubmit?.();
     await waitFor(() =>
       expect(
-        screen.queryByRole('status', { name: /Submitting your responses/i }),
+        screen.queryByRole('status', { name: /Submitting your responses/i, hidden: true }),
       ).not.toBeInTheDocument(),
     );
   });
@@ -748,11 +736,16 @@ describe('AssessmentRunner optimistic navigation', () => {
     await user.click(screen.getByRole('radio', { name: /Alpha/ }));
     await user.click(screen.getByRole('button', { name: /Next question/ }));
     expect(screen.getByText('Second question')).toBeInTheDocument();
-    expect(await screen.findByText('Saved offline')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Connection issue — retrying save/i),
+    ).toBeInTheDocument();
     expect(transport.autosave).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole('button', { name: /Previous/ }));
     expect(screen.getByText('First question')).toBeInTheDocument();
     await waitFor(() => expect(transport.autosave).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByText(/Connection issue — retrying save/i)).not.toBeInTheDocument(),
+    );
   });
 });
