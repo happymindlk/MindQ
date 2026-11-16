@@ -106,8 +106,8 @@ async def test_autosave_never_starts_a_module_implicitly(monkeypatch, progress):
     assessment = _assessment()
     monkeypatch.setattr(
         CandidateService,
-        "require_writable_assessment",
-        AsyncMock(return_value=(assessment, progress)),
+        "_gate_autosave",
+        AsyncMock(side_effect=AssessmentNotStartedError()),
     )
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
     session = AsyncMock()
@@ -131,8 +131,8 @@ async def test_autosave_rejects_after_flexible_deadline(monkeypatch):
     progress = _progress(1000)
     monkeypatch.setattr(
         CandidateService,
-        "require_writable_assessment",
-        AsyncMock(return_value=(assessment, progress)),
+        "_gate_autosave",
+        AsyncMock(side_effect=AssessmentTimeExpiredError()),
     )
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
     session = AsyncMock()
@@ -153,8 +153,8 @@ async def test_autosave_rejects_after_strict_deadline(monkeypatch):
     progress = _progress(1000)
     monkeypatch.setattr(
         CandidateService,
-        "require_writable_assessment",
-        AsyncMock(return_value=(assessment, progress)),
+        "_gate_autosave",
+        AsyncMock(side_effect=AssessmentTimeExpiredError()),
     )
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
     session = AsyncMock()

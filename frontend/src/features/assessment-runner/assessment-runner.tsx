@@ -24,6 +24,20 @@ import { useQuestionTelemetry } from './use-question-telemetry';
 
 /** Leading-edge guard against rapid Next / confirm double-clicks. */
 const NAV_DEBOUNCE_MS = 300;
+/** Choice / Likert / SJT selections coalesce into one POST after this delay. */
+const CHOICE_AUTOSAVE_MS = 300;
+/** Free-text typing waits longer so keystrokes do not spam the network. */
+const TEXT_AUTOSAVE_MS = 800;
+/** Only surface "Saving…" when an HTTP request has been in flight this long. */
+const SAVING_FEEDBACK_MS = 400;
+
+const TEXT_QUESTION_TYPES = new Set(['crt', 'open', 'open_ended']);
+
+function autosaveDelayForType(questionType: string | undefined): number {
+  return questionType && TEXT_QUESTION_TYPES.has(questionType)
+    ? TEXT_AUTOSAVE_MS
+    : CHOICE_AUTOSAVE_MS;
+}
 
 function blockClipboard(event: ClipboardEvent | MouseEvent) {
   event.preventDefault();
@@ -91,15 +105,33 @@ export function AssessmentRunner({
   const submittedRef = useRef(false);
   /** Bumped to drop pending / in-flight autosave work before auto-submit. */
   const autosaveEpochRef = useRef(0);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savingFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timerStopRef = useRef<(() => void) | null>(null);
   const lastAdvanceAtRef = useRef(0);
   const lastOpenConfirmAtRef = useRef(0);
   const lastConfirmSubmitAtRef = useRef(0);
 
+  const clearDebounceTimer = useCallback(() => {
+    if (debounceTimerRef.current !== null) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+  }, []);
+
+  const clearSavingFeedbackTimer = useCallback(() => {
+    if (savingFeedbackTimerRef.current !== null) {
+      clearTimeout(savingFeedbackTimerRef.current);
+      savingFeedbackTimerRef.current = null;
+    }
+  }, []);
+
   const cancelPendingAutosave = useCallback(() => {
     autosaveEpochRef.current += 1;
     dirtyRef.current.clear();
-  }, []);
+    clearDebounceTimer();
+    clearSavingFeedbackTimer();
+  }, [clearDebounceTimer, clearSavingFeedbackTimer]);
 
   const allowAction = useCallback((stampRef: { current: number }) => {
     const now = performance.now();
@@ -197,7 +229,19 @@ export function AssessmentRunner({
       }
       inFlightSaveRef.current.add(questionId);
       dirtyRef.current.delete(questionId);
-      setSaveStatus('saving');
+      // Debounce waiting must never show "Saving…"; only an in-flight HTTP
+      // request that lasts longer than SAVING_FEEDBACK_MS surfaces the badge.
+      clearSavingFeedbackTimer();
+      savingFeedbackTimerRef.current = setTimeout(() => {
+        savingFeedbackTimerRef.current = null;
+        if (
+          autosaveEpochRef.current === epoch &&
+          !submittedRef.current &&
+          inFlightSaveRef.current.has(questionId)
+        ) {
+          setSaveStatus('saving');
+        }
+      }, SAVING_FEEDBACK_MS);
       let failed = false;
       try {
         await transport.autosave({
@@ -207,11 +251,13 @@ export function AssessmentRunner({
           elapsed_seconds: telemetry.elapsedFor(questionId),
         });
         if (autosaveEpochRef.current !== epoch || submittedRef.current) return;
+        clearSavingFeedbackTimer();
         setSaveStatus('saved');
       } catch (err) {
         if (autosaveEpochRef.current !== epoch || submittedRef.current) return;
         failed = true;
         dirtyRef.current.add(questionId);
+        clearSavingFeedbackTimer();
         setSaveStatus('error');
         if (isTimeExpired(err)) {
           setTimeUp(true);
@@ -231,21 +277,34 @@ export function AssessmentRunner({
         }
       }
     },
-    [onLocked, submit, telemetry, test.id, transport],
+    [clearSavingFeedbackTimer, onLocked, submit, telemetry, test.id, transport],
   );
 
   const flushDirty = useCallback(async () => {
     if (submittedRef.current) return;
+    clearDebounceTimer();
     // Draft lives in localStorage; a failed save must never block navigation.
     await Promise.allSettled(Array.from(dirtyRef.current).map((id) => saveQuestion(id)));
-  }, [saveQuestion]);
+  }, [clearDebounceTimer, saveQuestion]);
 
-  // Network writes only on Next/Prev, exit, tab hide/blur, reconnect, or final
-  // submit — never on every answer click. Advance locally and let autosave settle
-  // in the background; failures stay in dirtyRef for the next flush.
+  // Debounced answer writes + immediate flush on Next/Prev, exit, hide, reconnect.
+  // Rapid clicks reset one timer so the latest answer wins as a single payload.
   const flushDirtyInBackground = useCallback(() => {
     void flushDirty().catch(() => undefined);
   }, [flushDirty]);
+
+  const scheduleAutosave = useCallback(
+    (delayMs: number) => {
+      clearDebounceTimer();
+      const epoch = autosaveEpochRef.current;
+      debounceTimerRef.current = setTimeout(() => {
+        debounceTimerRef.current = null;
+        if (autosaveEpochRef.current !== epoch || submittedRef.current) return;
+        flushDirtyInBackground();
+      }, delayMs);
+    },
+    [clearDebounceTimer, flushDirtyInBackground],
+  );
 
   useEffect(() => {
     const onOffline = () => setOffline(true);
@@ -269,6 +328,16 @@ export function AssessmentRunner({
     };
   }, [flushDirty, flushDirtyInBackground]);
 
+  // Only clear timers on unmount — not when flush callbacks change identity,
+  // or a pending debounce would be cancelled before it can fire.
+  useEffect(
+    () => () => {
+      clearDebounceTimer();
+      clearSavingFeedbackTimer();
+    },
+    [clearDebounceTimer, clearSavingFeedbackTimer],
+  );
+
   const handleChange = (value: AnswerValue) => {
     if (!current || timeUp) return;
     const questionId = current.id;
@@ -277,8 +346,8 @@ export function AssessmentRunner({
       onAnswersChange?.(next);
       return next;
     });
-    // Mark dirty for the next navigation/exit/blur flush; do not hit the network here.
     dirtyRef.current.add(questionId);
+    scheduleAutosave(autosaveDelayForType(current.type));
   };
 
   const go = (nextIndex: number) => {

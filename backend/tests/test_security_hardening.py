@@ -126,13 +126,8 @@ def _progress():
 @pytest.mark.asyncio
 async def test_autosave_rejects_question_outside_bank_and_locks_row(monkeypatch):
     assessment = _assessment([{"id": "q1", "type": "mcq"}])
-    require = AsyncMock(return_value=(assessment, _progress()))
-    monkeypatch.setattr(CandidateService, "require_writable_assessment", require)
-    monkeypatch.setattr(
-        candidate_service,
-        "ensure_question_in_bank",
-        AsyncMock(side_effect=UnknownQuestionError()),
-    )
+    gate = AsyncMock(side_effect=UnknownQuestionError())
+    monkeypatch.setattr(CandidateService, "_gate_autosave", gate)
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
     session = AsyncMock()
     body = ResponseSave(assessment_id=assessment.id, question_id="ghost", response={"answer": "a"})
@@ -141,8 +136,9 @@ async def test_autosave_rejects_question_outside_bank_and_locks_row(monkeypatch)
         await CandidateService.autosave_response(session, SimpleNamespace(id=uuid.uuid4(), corporate_id=uuid.uuid4()), body)
 
     session.commit.assert_not_awaited()
-    assert require.await_args.kwargs.get("for_update") is True
-    assert require.await_args.kwargs.get("include_questions") is False
+    gate.assert_awaited_once()
+    assert gate.await_args.args[2] == assessment.id
+    assert gate.await_args.args[3] == "ghost"
 
 
 @pytest.mark.asyncio
