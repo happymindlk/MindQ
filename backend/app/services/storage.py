@@ -345,16 +345,38 @@ def store_cached_report(
         listing = client.list_objects_v2(
             Bucket=bucket, Prefix=_cached_report_prefix(corporate_id, candidate_id)
         )
-        stale = [
-            {"Key": item["Key"]}
+        stale_keys = [
+            item["Key"]
             for item in listing.get("Contents", [])
             if item.get("Key") and item["Key"] != key
         ]
-        if stale:
-            client.delete_objects(Bucket=bucket, Delete={"Objects": stale, "Quiet": True})
+        _delete_object_keys(client, bucket, stale_keys)
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - pruning is best-effort
         logger.warning("Cached report prune failed for %s: %s", key, exc)
     return key
+
+
+def _delete_object_keys(client: object, bucket: str, keys: list[str]) -> int:
+    """Delete object keys one-by-one (avoids batch DeleteObjects checksum issues).
+
+    Supabase's S3 gateway rejects some botocore ``delete_objects`` requests with
+    ``InvalidRequest: must have required property 'Body'`` when flexible
+    checksum headers are attached to the batch payload. Single ``delete_object``
+    calls do not hit that path.
+
+    Args:
+        client: boto3 S3 client.
+        bucket: Target bucket name.
+        keys: Object keys to delete.
+
+    Returns:
+        Number of delete requests issued.
+    """
+    deleted = 0
+    for object_key in keys:
+        client.delete_object(Bucket=bucket, Key=object_key)
+        deleted += 1
+    return deleted
 
 
 def purge_cached_reports(corporate_id: UUID, candidate_id: UUID) -> int:
@@ -379,14 +401,13 @@ def purge_cached_reports(corporate_id: UUID, candidate_id: UUID) -> int:
         client = _s3_client()
         listing = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
         keys = [
-            {"Key": item["Key"]}
+            item["Key"]
             for item in listing.get("Contents", [])
             if item.get("Key")
         ]
         if not keys:
             return 0
-        client.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
-        return len(keys)
+        return _delete_object_keys(client, bucket, keys)
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - purge is best-effort
         logger.warning("Cached report purge failed for %s: %s", prefix, exc)
         return 0
@@ -409,13 +430,12 @@ def purge_legacy_archived_reports(corporate_id: UUID, candidate_id: UUID) -> int
         return 0
     bucket = settings.R2_REPORTS_BUCKET_NAME.strip()
     keys = [
-        {"Key": _report_key(corporate_id, candidate_id, True)},
-        {"Key": _report_key(corporate_id, candidate_id, False)},
+        _report_key(corporate_id, candidate_id, True),
+        _report_key(corporate_id, candidate_id, False),
     ]
     try:
         client = _s3_client()
-        client.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
-        return len(keys)
+        return _delete_object_keys(client, bucket, keys)
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - purge is best-effort
         logger.warning(
             "Legacy report archive purge failed for %s/%s: %s",

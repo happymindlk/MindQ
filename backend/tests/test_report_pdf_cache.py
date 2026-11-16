@@ -179,8 +179,27 @@ def test_store_cached_report_prunes_older_versions_only(s3):
         "application/pdf",
     )
     assert s3.list_objects_v2.call_args.kwargs["Prefix"] == f"{CORP}/{CANDIDATE}/"
-    deleted = s3.delete_objects.call_args.kwargs["Delete"]["Objects"]
-    assert deleted == [{"Key": old_key}]
+    s3.delete_objects.assert_not_called()
+    s3.delete_object.assert_called_once_with(
+        Bucket="mindq-reports-private", Key=old_key
+    )
+
+
+def test_store_cached_report_prune_uses_single_object_deletes(s3):
+    """Batch DeleteObjects trips Supabase S3 checksum validation; prune one key at a time."""
+    new_key = f"{CORP}/{CANDIDATE}/{KEY}.pdf"
+    stale = [
+        f"{CORP}/{CANDIDATE}/{'b' * 64}.pdf",
+        f"{CORP}/{CANDIDATE}/{'c' * 64}.pdf",
+    ]
+    s3.list_objects_v2.return_value = {
+        "Contents": [{"Key": new_key}, *[{"Key": k} for k in stale]]
+    }
+    assert storage.store_cached_report(CORP, CANDIDATE, KEY, PDF) == new_key
+    assert s3.delete_object.call_count == 2
+    deleted_keys = [call.kwargs["Key"] for call in s3.delete_object.call_args_list]
+    assert deleted_keys == stale
+    s3.delete_objects.assert_not_called()
 
 
 def test_store_cached_report_prune_failure_keeps_upload(s3):

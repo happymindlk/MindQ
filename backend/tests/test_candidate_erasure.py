@@ -202,15 +202,14 @@ def test_purge_candidate_report_files_clears_cache_and_legacy(monkeypatch):
     deleted = storage_service.purge_candidate_report_files(corp, cand)
 
     assert deleted == 1 + 2  # one cached key + pdf/html legacy keys
-    assert client.delete_objects.call_count == 2
-    first_keys = {
-        item["Key"] for item in client.delete_objects.call_args_list[0].kwargs["Delete"]["Objects"]
+    client.delete_objects.assert_not_called()
+    assert client.delete_object.call_count == 3
+    deleted_keys = {call.kwargs["Key"] for call in client.delete_object.call_args_list}
+    assert deleted_keys == {
+        f"{corp}/{cand}/abc.pdf",
+        f"{corp}/{cand}.pdf",
+        f"{corp}/{cand}.html",
     }
-    second_keys = {
-        item["Key"] for item in client.delete_objects.call_args_list[1].kwargs["Delete"]["Objects"]
-    }
-    assert f"{corp}/{cand}/abc.pdf" in first_keys
-    assert {f"{corp}/{cand}.pdf", f"{corp}/{cand}.html"} == second_keys
 
 
 @pytest.mark.asyncio
