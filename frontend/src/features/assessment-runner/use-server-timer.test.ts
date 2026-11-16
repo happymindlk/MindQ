@@ -68,6 +68,44 @@ describe('useServerTimer', () => {
     expect(result.current.remainingSeconds).toBe(80);
   });
 
+  it('resyncs remaining time on window focus after sleep', () => {
+    const { result } = renderHook(() =>
+      useServerTimer({
+        expiresAt: '2026-11-13T12:02:00.000Z',
+        serverNow: '2026-11-13T12:00:00.000Z',
+      }),
+    );
+    expect(result.current.remainingSeconds).toBe(120);
+
+    act(() => {
+      vi.setSystemTime(new Date('2026-11-13T12:01:10.000Z'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(result.current.remainingSeconds).toBe(50);
+  });
+
+  it('keeps the calibrated clock offset when enabled re-arms after a failed submit', () => {
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useServerTimer({
+          expiresAt: '2026-11-13T12:01:00.000Z',
+          serverNow: '2026-11-13T12:00:00.000Z',
+          enabled,
+        }),
+      { initialProps: { enabled: true } },
+    );
+    expect(result.current.remainingSeconds).toBe(60);
+
+    act(() => {
+      result.current.stop();
+      vi.setSystemTime(new Date('2026-11-13T12:00:25.000Z'));
+    });
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+
+    expect(result.current.remainingSeconds).toBe(35);
+  });
+
   it('fires onExpire at write_expires_at (grace) after display hits zero', () => {
     const onExpire = vi.fn();
     const onDisplayExpire = vi.fn();

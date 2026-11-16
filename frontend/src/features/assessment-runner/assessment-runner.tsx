@@ -89,10 +89,17 @@ export function AssessmentRunner({
   const dirtyRef = useRef<Set<string>>(new Set());
   const inFlightSaveRef = useRef<Set<string>>(new Set());
   const submittedRef = useRef(false);
+  /** Bumped to drop pending / in-flight autosave work before auto-submit. */
+  const autosaveEpochRef = useRef(0);
   const timerStopRef = useRef<(() => void) | null>(null);
   const lastAdvanceAtRef = useRef(0);
   const lastOpenConfirmAtRef = useRef(0);
   const lastConfirmSubmitAtRef = useRef(0);
+
+  const cancelPendingAutosave = useCallback(() => {
+    autosaveEpochRef.current += 1;
+    dirtyRef.current.clear();
+  }, []);
 
   const allowAction = useCallback((stampRef: { current: number }) => {
     const now = performance.now();
@@ -106,6 +113,8 @@ export function AssessmentRunner({
       // Idempotency lock: reject concurrent autoSubmit while a submit is in flight.
       if (submittedRef.current) return;
       submittedRef.current = true;
+      // Drop any pending autosave so it cannot race the final submit.
+      cancelPendingAutosave();
       // Freeze the countdown immediately (before the network round-trip) so a
       // near-zero tick cannot race the in-flight manual submit.
       timerStopRef.current?.();
@@ -139,13 +148,15 @@ export function AssessmentRunner({
         setSubmitting(false);
       }
     },
-    [onLocked, onSubmitted, onTimeExpired, telemetry, test.id, transport],
+    [cancelPendingAutosave, onLocked, onSubmitted, onTimeExpired, telemetry, test.id, transport],
   );
 
   const onExpire = useCallback(() => {
+    // Cancel pending autosave first, then single-fire submit (submit() owns the lock).
+    cancelPendingAutosave();
     setTimeUp(true);
     void submit('expired');
-  }, [submit]);
+  }, [cancelPendingAutosave, submit]);
 
   const onDisplayExpire = useCallback(() => {
     setTimeUp(true);
@@ -173,13 +184,15 @@ export function AssessmentRunner({
 
   const saveQuestion = useCallback(
     async (questionId: string) => {
+      if (submittedRef.current) return;
+      const epoch = autosaveEpochRef.current;
       const answer = answersRef.current[questionId];
       if (!hasContent(answer)) return;
       // Concurrent navigation/blur flushes can race for the same question;
       // keep it dirty so the in-flight save's completion (or the next flush)
       // is the single writer instead of posting duplicates.
       if (inFlightSaveRef.current.has(questionId)) {
-        dirtyRef.current.add(questionId);
+        if (autosaveEpochRef.current === epoch) dirtyRef.current.add(questionId);
         return;
       }
       inFlightSaveRef.current.add(questionId);
@@ -193,8 +206,10 @@ export function AssessmentRunner({
           response: { answer },
           elapsed_seconds: telemetry.elapsedFor(questionId),
         });
+        if (autosaveEpochRef.current !== epoch || submittedRef.current) return;
         setSaveStatus('saved');
       } catch (err) {
+        if (autosaveEpochRef.current !== epoch || submittedRef.current) return;
         failed = true;
         dirtyRef.current.add(questionId);
         setSaveStatus('error');
@@ -206,7 +221,12 @@ export function AssessmentRunner({
         }
       } finally {
         inFlightSaveRef.current.delete(questionId);
-        if (!failed && dirtyRef.current.has(questionId)) {
+        if (
+          !failed &&
+          autosaveEpochRef.current === epoch &&
+          !submittedRef.current &&
+          dirtyRef.current.has(questionId)
+        ) {
           void saveQuestion(questionId);
         }
       }
@@ -215,6 +235,7 @@ export function AssessmentRunner({
   );
 
   const flushDirty = useCallback(async () => {
+    if (submittedRef.current) return;
     // Draft lives in localStorage; a failed save must never block navigation.
     await Promise.allSettled(Array.from(dirtyRef.current).map((id) => saveQuestion(id)));
   }, [saveQuestion]);

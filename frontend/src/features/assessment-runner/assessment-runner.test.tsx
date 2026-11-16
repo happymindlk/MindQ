@@ -284,6 +284,69 @@ describe('AssessmentRunner strict expiry', () => {
     expect(await screen.findByText(/Time is up/)).toBeInTheDocument();
   });
 
+  it('cancels pending autosave and submits once at 00:00 without double-fire', async () => {
+    vi.useFakeTimers();
+    let resolveSave: (() => void) | undefined;
+    const transport = {
+      autosave: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSave = resolve;
+          }),
+      ),
+      submit: vi.fn(async () => undefined),
+    };
+    const onTimeExpired = vi.fn();
+    try {
+      renderRunner(
+        {
+          ...twoQuestionTest('psychometric'),
+          duration_seconds: 60,
+          timer_mode: 'strict',
+          started_at: new Date().toISOString(),
+          remaining_seconds: 3,
+        },
+        transport,
+        'live',
+        { onTimeExpired },
+      );
+
+      fireEvent.click(screen.getByRole('radio', { name: /Alpha/ }));
+      const visibilityDesc = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      try {
+        document.dispatchEvent(new Event('visibilitychange'));
+        // autosave is invoked synchronously before its await; avoid waitFor under fake timers.
+        expect(transport.autosave).toHaveBeenCalledTimes(1);
+
+        await act(async () => {
+          vi.advanceTimersByTime(4_000);
+        });
+        expect(transport.submit).toHaveBeenCalledTimes(1);
+        expect(onTimeExpired).toHaveBeenCalledTimes(1);
+
+        // Completing the in-flight autosave after cancel must not post again.
+        resolveSave?.();
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(transport.autosave).toHaveBeenCalledTimes(1);
+        expect(transport.submit).toHaveBeenCalledTimes(1);
+      } finally {
+        if (visibilityDesc) {
+          Object.defineProperty(Document.prototype, 'visibilityState', visibilityDesc);
+        } else {
+          Reflect.deleteProperty(document, 'visibilityState');
+        }
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps the retry banner and does not navigate when the expiry submit fails', async () => {
     const transport = {
       autosave: vi.fn(async () => undefined),

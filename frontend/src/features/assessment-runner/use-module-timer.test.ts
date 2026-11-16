@@ -81,6 +81,26 @@ describe('useModuleTimer', () => {
     expect(onExpire).not.toHaveBeenCalled();
   });
 
+  it('resyncs from the monotonic deadline on visibilitychange and focus', () => {
+    const { result } = renderHook(() =>
+      useModuleTimer({ remainingSeconds: 120, now: clock }),
+    );
+    expect(result.current.remainingSeconds).toBe(120);
+
+    act(() => {
+      vi.advanceTimersByTime(40_000);
+      // Interval is throttled in background tabs; force a wake recalculation.
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(result.current.remainingSeconds).toBe(80);
+
+    act(() => {
+      vi.advanceTimersByTime(20_000);
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(result.current.remainingSeconds).toBe(60);
+  });
+
   it('fires onExpire immediately when the server reports zero remaining', () => {
     const onExpire = vi.fn();
     const { result } = renderHook(() =>

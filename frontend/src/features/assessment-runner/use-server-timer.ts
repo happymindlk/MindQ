@@ -49,29 +49,32 @@ export function computeServerOffsetMs(
 /**
  * Whole seconds remaining until an absolute UTC deadline.
  *
+ * Uses ``Math.max(0, Math.ceil((expiresAtMs - (Date.now() + clockOffsetMs)) / 1000))``
+ * so a skewed local system clock cannot inflate or shrink the countdown.
+ *
  * @param expiresAt - ISO deadline.
- * @param offsetMs - Server clock offset.
+ * @param clockOffsetMs - Server clock offset from calibration.
  * @param clientNowMs - Local wall clock.
  * @returns Clamped remaining seconds, or null when untimed / unparseable.
  */
 export function remainingFromDeadline(
   expiresAt: string | null | undefined,
-  offsetMs: number,
+  clockOffsetMs: number,
   clientNowMs: number = Date.now(),
 ): number | null {
   if (!expiresAt) return null;
-  const deadlineMs = Date.parse(expiresAt);
-  if (!Number.isFinite(deadlineMs)) return null;
-  return Math.max(0, Math.ceil((deadlineMs - (clientNowMs + offsetMs)) / 1000));
+  const expiresAtMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresAtMs)) return null;
+  return Math.max(0, Math.ceil((expiresAtMs - (clientNowMs + clockOffsetMs)) / 1000));
 }
 
 /**
  * Wall-clock assessment timer driven by immutable ``expires_at`` + ``server_now``.
  *
- * Recalculates from the wall clock on every tick, on ``visibilitychange``, and
- * on window ``focus`` so navigating away / backgrounding never pauses the
- * countdown. Falls back to a null timer when deadlines are absent (untimed /
- * preview).
+ * Calibrates ``clockOffsetMs = server_now - Date.now()`` once when the payload
+ * arrives and keeps that offset across pause/resume. Recalculates remaining
+ * time from the wall clock on every tick, on ``visibilitychange``, and on
+ * window ``focus`` so background tabs / sleep never pause the countdown.
  *
  * @param options - Absolute deadlines and expiry callbacks.
  * @returns Remaining seconds (clamped) plus an expiry flag.
@@ -95,12 +98,21 @@ export function useServerTimer({
   const displayFiredRef = useRef(false);
   const pausedRef = useRef(false);
   const intervalRef = useRef<number | null>(null);
+  // Calibrate once per payload; do not recompute when `enabled` flips after a
+  // failed submit — that would treat a stale server_now as "now" and inflate remaining.
+  const clockOffsetMsRef = useRef(0);
+  const calibratedForRef = useRef<string | null>(null);
 
-  const offsetMs = computeServerOffsetMs(serverNow, nowRef.current());
   const writeAt = writeExpiresAt === undefined ? expiresAt : writeExpiresAt;
+  const calibrationKey = `${expiresAt ?? ''}|${writeAt ?? ''}|${serverNow ?? ''}`;
+
+  if (calibratedForRef.current !== calibrationKey) {
+    calibratedForRef.current = calibrationKey;
+    clockOffsetMsRef.current = computeServerOffsetMs(serverNow, nowRef.current());
+  }
 
   const [remaining, setRemaining] = useState<number | null>(() =>
-    remainingFromDeadline(expiresAt, offsetMs, nowRef.current()),
+    remainingFromDeadline(expiresAt, clockOffsetMsRef.current, nowRef.current()),
   );
 
   const clearTicker = useCallback(() => {
@@ -127,12 +139,12 @@ export function useServerTimer({
       return undefined;
     }
     pausedRef.current = false;
-    const offset = computeServerOffsetMs(serverNow, nowRef.current());
+    const clockOffsetMs = clockOffsetMsRef.current;
 
     const tick = () => {
       if (pausedRef.current) return;
       const clientNow = nowRef.current();
-      const displayRaw = remainingFromDeadline(expiresAt, offset, clientNow);
+      const displayRaw = remainingFromDeadline(expiresAt, clockOffsetMs, clientNow);
       if (displayRaw === null) {
         setRemaining(null);
       } else {
@@ -142,7 +154,7 @@ export function useServerTimer({
           onDisplayExpireRef.current?.();
         }
       }
-      const expireRaw = remainingFromDeadline(writeAt, offset, clientNow);
+      const expireRaw = remainingFromDeadline(writeAt, clockOffsetMs, clientNow);
       if (expireRaw !== null && expireRaw <= 0 && !expireFiredRef.current) {
         expireFiredRef.current = true;
         onExpireRef.current?.();
@@ -152,16 +164,17 @@ export function useServerTimer({
     tick();
     intervalRef.current = window.setInterval(tick, 1000);
 
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') tick();
+    const onVisibility = () => {
+      // Recalculate immediately when the tab wakes; also harmless on hide.
+      tick();
     };
     const onFocus = () => tick();
-    document.addEventListener('visibilitychange', onVisible);
+    document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('focus', onFocus);
 
     return () => {
       clearTicker();
-      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', onFocus);
     };
   }, [clearTicker, enabled, expiresAt, writeAt, serverNow]);

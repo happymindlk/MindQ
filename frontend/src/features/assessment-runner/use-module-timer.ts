@@ -53,7 +53,8 @@ function seedDeadline(
  * The client never diffs `started_at` against its own wall clock, so device
  * clock skew or timezone parsing cannot shorten or extend an attempt. A
  * monotonic local deadline (rather than decrementing per interval) keeps the
- * display accurate when background tabs throttle `setInterval`.
+ * display accurate when background tabs throttle `setInterval`. Visibility
+ * and focus listeners force an immediate recalculation when the tab wakes.
  *
  * Display clamps at 00:00 from ``remainingSeconds``. Auto-submit fires from
  * ``expireRemainingSeconds`` (duration + grace) so resume during the server
@@ -136,7 +137,17 @@ export function useModuleTimer({
     };
     tick();
     intervalRef.current = window.setInterval(tick, 1000);
-    return () => clearTicker();
+
+    const onVisibility = () => tick();
+    const onFocus = () => tick();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearTicker();
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [clearTicker, displayDeadline, enabled, expireDeadline]);
 
   return {
