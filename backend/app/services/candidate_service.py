@@ -1,41 +1,18 @@
 import logging
+import uuid as uuid_lib
 from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 from datetime import datetime, timezone
+from decimal import Decimal
+
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
-from app.database import run_db_op_with_retry
-from app.models.candidate import Candidate
-from app.models.corporate import Corporate
-from app.models.package import Package
-from app.models.assessment import Assessment
-from app.models.candidate_evaluation import CandidateEvaluation
-from app.models.candidate_progress import CandidateProgress
-from app.models.candidate_response import CandidateResponse
-from app.models.support_ticket import SupportTicket
-from app.services.audit_log import log_candidate_erased
-from app.schemas.candidate import CandidateAuthOtpVerifyRequest
-from decimal import Decimal
 
-from app.schemas.response import ResponseSave
-from app.services.package_generator import _mint_access_code
-from app.services.package_window import (
-    ensure_module_launchable,
-    ensure_package_open,
-    window_state,
-)
-from app.services.runner_payload import (
-    display_expires_at,
-    effective_duration_seconds,
-    strict_deadline,
-)
-from app.services.psychometric_catalog import catalog_duration_seconds
-from app.services.instrument_results import SCORING_VERSION, build_score_details
-from app.services.profiles import ItemResult, ProfileInputs, resolve_profile
-from app.services.scoring import ScoreResult, _extract_answer, score_assessment_detailed
+from app.database import run_db_op_with_retry
 from app.exceptions import (
     AssessmentAlreadySubmittedError,
     AssessmentNotFoundError,
@@ -43,6 +20,32 @@ from app.exceptions import (
     AssessmentTimeExpiredError,
     UnknownQuestionError,
 )
+from app.models.assessment import Assessment
+from app.models.candidate import Candidate
+from app.models.candidate_evaluation import CandidateEvaluation
+from app.models.candidate_progress import CandidateProgress
+from app.models.candidate_response import CandidateResponse
+from app.models.corporate import Corporate
+from app.models.package import Package
+from app.models.support_ticket import SupportTicket
+from app.schemas.candidate import CandidateAuthOtpVerifyRequest
+from app.schemas.response import ResponseSave
+from app.services.audit_log import log_candidate_erased
+from app.services.instrument_results import SCORING_VERSION, build_score_details
+from app.services.package_generator import _mint_access_code
+from app.services.package_window import (
+    ensure_module_launchable,
+    ensure_package_open,
+    window_state,
+)
+from app.services.profiles import ItemResult, ProfileInputs, resolve_profile
+from app.services.psychometric_catalog import catalog_duration_seconds
+from app.services.runner_payload import (
+    display_expires_at,
+    effective_duration_seconds,
+    strict_deadline,
+)
+from app.services.scoring import ScoreResult, _extract_answer, score_assessment_detailed
 
 logger = logging.getLogger(__name__)
 
@@ -265,13 +268,38 @@ def ensure_known_question(assessment: Assessment, question_id: str) -> None:
     """Reject answers for ids outside the bank (row spam / evidence injection).
 
     Args:
-        assessment: Target assessment.
+        assessment: Target assessment (questions already loaded).
         question_id: Candidate-supplied question id.
 
     Raises:
         UnknownQuestionError: When the id is not in the stored bank.
     """
     if str(question_id) not in question_ids(assessment):
+        raise UnknownQuestionError()
+
+
+async def ensure_question_in_bank(
+    session: AsyncSession, assessment_id: UUID, question_id: str
+) -> None:
+    """Validate ``question_id`` via JSONB containment without shipping the bank.
+
+    Args:
+        session: Async database session.
+        assessment_id: Assessment whose ``questions`` JSONB is authoritative.
+        question_id: Candidate-supplied question id.
+
+    Raises:
+        UnknownQuestionError: When the id is not present in the bank.
+    """
+    found = (
+        await session.execute(
+            select(Assessment.id).where(
+                Assessment.id == assessment_id,
+                Assessment.questions.contains([{"id": str(question_id)}]),
+            )
+        )
+    ).scalar_one_or_none()
+    if found is None:
         raise UnknownQuestionError()
 
 
@@ -1065,41 +1093,58 @@ class CandidateService:
 
     @staticmethod
     async def autosave_response(session: AsyncSession, candidate: Candidate, save_data: ResponseSave):
+        """Persist one answer with a lean gate + single PostgreSQL upsert.
+
+        Skips reloading the questions JSONB bank (validated via containment)
+        and replaces SELECT-then-INSERT/UPDATE with ``ON CONFLICT`` so the
+        hot path is progress lock + question check + upsert + commit.
+        """
         assessment, progress = await CandidateService.require_writable_assessment(
-            session, candidate, save_data.assessment_id, for_update=True
+            session,
+            candidate,
+            save_data.assessment_id,
+            for_update=True,
+            include_questions=False,
         )
         # Only POST /start may begin the clock; a save must never start a module implicitly.
         if progress is None or progress.started_at is None:
             raise AssessmentNotStartedError()
         if is_strict_expired(assessment, progress, _utcnow()):
             raise AssessmentTimeExpiredError()
-        ensure_known_question(assessment, save_data.question_id)
+        await ensure_question_in_bank(session, assessment.id, save_data.question_id)
 
-        response = (
-            await session.execute(
-                select(CandidateResponse).where(
-                    CandidateResponse.candidate_id == candidate.id,
-                    CandidateResponse.assessment_id == assessment.id,
-                    CandidateResponse.question_id == save_data.question_id,
-                )
-            )
-        ).scalars().first()
         elapsed = _elapsed_decimal(save_data.elapsed_seconds)
-        if response:
-            response.response = save_data.response
-            if elapsed is not None:
-                response.elapsed_seconds = elapsed
-        else:
-            response = CandidateResponse(
-                corporate_id=candidate.corporate_id,
-                candidate_id=candidate.id,
-                assessment_id=assessment.id,
-                question_id=save_data.question_id,
-                response=save_data.response,
-                elapsed_seconds=elapsed,
-            )
-            session.add(response)
+        saved_at = _utcnow()
+        qid = str(save_data.question_id)
+        values: dict[str, Any] = {
+            "id": uuid_lib.uuid4(),
+            "corporate_id": candidate.corporate_id,
+            "candidate_id": candidate.id,
+            "assessment_id": assessment.id,
+            "question_id": qid,
+            "response": save_data.response,
+            "elapsed_seconds": elapsed,
+            "saved_at": saved_at,
+        }
+        update_set: dict[str, Any] = {
+            "response": save_data.response,
+            "saved_at": saved_at,
+        }
+        if elapsed is not None:
+            update_set["elapsed_seconds"] = elapsed
 
+        stmt = (
+            pg_insert(CandidateResponse)
+            .values(**values)
+            .on_conflict_do_update(
+                # Matches UNIQUE (candidate_id, assessment_id, question_id);
+                # index_elements avoids depending on the auto-generated constraint name.
+                index_elements=["candidate_id", "assessment_id", "question_id"],
+                set_=update_set,
+            )
+            .returning(CandidateResponse)
+        )
+        response = (await session.scalars(stmt)).one()
         await session.commit()
         return response
 
@@ -1163,10 +1208,15 @@ class CandidateService:
                 pass ``expires_at``); defaults to UTC now.
 
         Returns:
-            Tuple of (progress row, package_complete flag).
+            Tuple of (progress row, package_complete flag, company_name).
         """
+        # Skip the questions JSONB bank unless we may accept pending answers.
         assessment, progress = await CandidateService.require_writable_assessment(
-            session, candidate, assessment_id, for_update=True
+            session,
+            candidate,
+            assessment_id,
+            for_update=True,
+            include_questions=bool(pending_responses),
         )
         now = _utcnow()
         accept_pending = not is_strict_expired(assessment, progress, now)
@@ -1206,8 +1256,10 @@ class CandidateService:
             await session.rollback()
             raise AssessmentAlreadySubmittedError() from exc
 
-        package_complete = await CandidateService.is_package_complete(session, candidate)
-        return progress, package_complete
+        package_complete, company_name = await CandidateService.get_submit_meta(
+            session, candidate
+        )
+        return progress, package_complete, company_name
 
     @staticmethod
     async def _upsert_pending_responses(
@@ -1333,20 +1385,60 @@ class CandidateService:
     @staticmethod
     async def is_package_complete(session: AsyncSession, candidate: Candidate) -> bool:
         """True when every assessment in the candidate's package is COMPLETED."""
-        assessments = (
-            await session.execute(
-                select(Assessment.id).where(Assessment.package_id == candidate.package_id)
+        package_complete, _company = await CandidateService.get_submit_meta(
+            session, candidate
+        )
+        return package_complete
+
+    @staticmethod
+    async def get_submit_meta(
+        session: AsyncSession, candidate: Candidate
+    ) -> tuple[bool, str]:
+        """Resolve package-complete + company name in one round trip.
+
+        Args:
+            session: Async database session.
+            candidate: Candidate whose package was just submitted.
+
+        Returns:
+            ``(package_complete, company_name)``.
+        """
+        assessment_count = (
+            select(func.count())
+            .select_from(Assessment)
+            .where(Assessment.package_id == candidate.package_id)
+            .scalar_subquery()
+        )
+        completed_count = (
+            select(func.count())
+            .select_from(CandidateProgress)
+            .where(
+                CandidateProgress.candidate_id == candidate.id,
+                CandidateProgress.status == COMPLETED_STATUS,
+                CandidateProgress.assessment_id.in_(
+                    select(Assessment.id).where(
+                        Assessment.package_id == candidate.package_id
+                    )
+                ),
             )
-        ).scalars().all()
-        if not assessments:
-            return False
-        progresses = (
+            .scalar_subquery()
+        )
+        row = (
             await session.execute(
-                select(CandidateProgress).where(CandidateProgress.candidate_id == candidate.id)
+                select(Corporate.name, assessment_count, completed_count).where(
+                    Corporate.id == candidate.corporate_id
+                )
             )
-        ).scalars().all()
-        completed_ids = {p.assessment_id for p in progresses if p.status == COMPLETED_STATUS}
-        return all(aid in completed_ids for aid in assessments)
+        ).one_or_none()
+        if row is None:
+            # Corporate row missing — still compute completion without the name.
+            counts = (
+                await session.execute(select(assessment_count, completed_count))
+            ).one()
+            total, done = int(counts[0] or 0), int(counts[1] or 0)
+            return (total > 0 and total == done), ""
+        company, total, done = row[0] or "", int(row[1] or 0), int(row[2] or 0)
+        return (total > 0 and total == done), company
 
     @staticmethod
     async def evaluate_technical_if_needed(

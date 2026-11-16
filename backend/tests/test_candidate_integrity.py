@@ -450,14 +450,9 @@ async def test_submit_passes_pending_responses_atomically(candidate_client, monk
             score=100.0,
             completed_at=SimpleNamespace(isoformat=lambda: "2026-09-17T12:00:00+00:00"),
         )
-        return progress, False
+        return progress, False, "Acme Corp"
 
     monkeypatch.setattr(CandidateService, "submit_test", submit)
-
-    async def company_name(session, candidate):
-        return "Acme Corp"
-
-    monkeypatch.setattr(CandidateService, "get_company_name", company_name)
 
     async def _noop_score(*_a, **_k):
         return None

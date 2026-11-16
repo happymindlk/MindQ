@@ -1,7 +1,9 @@
 """API-facing helpers that enqueue ARQ jobs (with inline fallback)."""
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -18,6 +20,33 @@ from app.jobs.tasks import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Keep strong refs to fire-and-forget inline tasks so they are not GC'd mid-run.
+_inline_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_inline(factory: Callable[[], Awaitable[Any]], *, task_name: str) -> asyncio.Task[Any]:
+    """Schedule ``factory`` on the running loop without awaiting it.
+
+    Args:
+        factory: Zero-arg async callable that performs the work.
+        task_name: Label for logs / the Task name.
+
+    Returns:
+        The scheduled ``asyncio.Task``.
+    """
+
+    async def _runner() -> Any:
+        try:
+            return await factory()
+        except Exception:
+            logger.exception("arq_inline_spawn_failed task=%s", task_name)
+            return None
+
+    task = asyncio.create_task(_runner(), name=f"arq-inline:{task_name}")
+    _inline_tasks.add(task)
+    task.add_done_callback(_inline_tasks.discard)
+    return task
 
 
 def _job_id_finalize(candidate_id: UUID, assessment_id: UUID) -> str:
@@ -62,8 +91,9 @@ async def _enqueue_or_run(
     job_id: str | None = None,
     args: tuple[Any, ...] = (),
     kwargs: dict[str, Any] | None = None,
+    await_inline: bool = True,
 ) -> Any:
-    """Enqueue on Redis when a pool exists; otherwise await the work inline.
+    """Enqueue on Redis when a pool exists; otherwise run (or spawn) inline.
 
     Args:
         task_name: Registered ARQ function name.
@@ -71,20 +101,27 @@ async def _enqueue_or_run(
         job_id: Optional deterministic ARQ ``_job_id`` for deduplication.
         args: Positional args for ``enqueue_job`` (after the function name).
         kwargs: Keyword args for ``enqueue_job``.
+        await_inline: When True (default), missing Redis awaits the work on
+            this call. When False, missing Redis / enqueue failures spawn a
+            background task so HTTP handlers stay fast.
 
     Returns:
-        The ARQ ``Job`` when enqueued, ``None`` on dedup conflict, or the inline
-        result when Redis is unavailable.
+        The ARQ ``Job`` when enqueued, ``None`` on dedup conflict, the inline
+        result when ``await_inline`` is True, or the spawned ``Task`` when
+        ``await_inline`` is False.
     """
     kwargs = dict(kwargs or {})
     pool = get_arq_pool()
     if pool is None:
         logger.debug(
-            "arq_inline_fallback task=%s job_id=%s",
+            "arq_inline_fallback task=%s job_id=%s await_inline=%s",
             task_name,
             job_id,
+            await_inline,
         )
-        return await coroutine_factory()
+        if await_inline:
+            return await coroutine_factory()
+        return _spawn_inline(coroutine_factory, task_name=task_name)
 
     enqueue_kwargs: dict[str, Any] = dict(kwargs)
     if job_id:
@@ -93,12 +130,15 @@ async def _enqueue_or_run(
         job = await pool.enqueue_job(task_name, *args, **enqueue_kwargs)
     except Exception:
         logger.exception(
-            "arq_enqueue_failed task=%s job_id=%s",
+            "arq_enqueue_failed task=%s job_id=%s await_inline=%s",
             task_name,
             job_id,
+            await_inline,
         )
         # Prefer durability of side-effects over dropping work when Redis blips.
-        return await coroutine_factory()
+        if await_inline:
+            return await coroutine_factory()
+        return _spawn_inline(coroutine_factory, task_name=task_name)
 
     if job is None:
         logger.info(
@@ -118,15 +158,20 @@ async def _enqueue_or_run(
 async def enqueue_finalize_and_score_ai(
     candidate_id: UUID,
     assessment_id: UUID,
+    *,
+    await_inline: bool = True,
 ) -> Any:
     """Queue post-submit scoring + AI + PDF prewarm for one assessment.
 
     Args:
         candidate_id: Candidate who submitted.
         assessment_id: Assessment that was submitted.
+        await_inline: When False, never block the caller on Gemini / PDF / HR
+            email — spawn a task if Redis is unavailable. Submit HTTP uses
+            ``await_inline=False`` so the response stays under ~300ms.
 
     Returns:
-        ARQ job, ``None`` when deduped, or inline result.
+        ARQ job, ``None`` when deduped, inline result, or spawned Task.
     """
 
     async def _run() -> None:
@@ -137,6 +182,7 @@ async def enqueue_finalize_and_score_ai(
         coroutine_factory=_run,
         job_id=_job_id_finalize(candidate_id, assessment_id),
         args=(str(candidate_id), str(assessment_id)),
+        await_inline=await_inline,
     )
 
 
