@@ -205,6 +205,16 @@
             box-sizing: border-box;
         }
         .mq-card { margin-bottom: 16px; }
+        .mq-responsible-use {
+            background: #f9fafb;
+            border-color: #d1d5db;
+        }
+        .mq-responsible-use-text {
+            margin: 0;
+            color: #374151;
+            font-size: 12px;
+            line-height: 1.5;
+        }
         .mq-section { margin-bottom: 16px; }
         .mq-card h2, .mq-sr-col h2, .mq-section-title {
             margin-bottom: 8px;
@@ -565,6 +575,9 @@
             <p class="mq-fallback">The executive summary is not available yet. Scoring may still be in progress; reopen this report shortly.</p>
             {% endif %}
         </section>
+        <section class="mq-card mq-responsible-use avoid-break" aria-label="Responsible use">
+            <p class="mq-responsible-use-text">This report is one input to be considered alongside the candidate's CV, interviews and references. It contains no hiring recommendation, fit score or ranking. Results reflect self-description and short tasks completed at one point in time, and they do not predict future behaviour. Candidates who need adjustments to take the assessments should be accommodated.</p>
+        </section>
     </div>
 
     <section class="mq-section competency-section" aria-label="Competency Breakdown">
@@ -736,10 +749,10 @@
                 </td>
                 <td>
                     <p class="mq-footer-text">
-                        This is an auto-generated MindQ report. This document cannot be reproduced, edited, or redistributed without the written consent of <span class="entity mq-entity">MindQ (Pvt.) Ltd.</span>
+                        This is an auto-generated MindQ report. It is confidential and prepared for the named client only. It cannot be reproduced, edited or redistributed without the written consent of <span class="entity mq-entity">MindQ (Pvt.) Ltd.</span> It must not be entered into other automated tools to make decisions about candidates.
                     </p>
                     <p class="mq-footer-text mq-footer-disclaimer">
-                        This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.
+                        This assessment is not an indication of whether the candidate is a good fit. This report is merely an analysis of assessment results. You need to conduct the necessary interviews to decide whether the candidate is the ideal candidate.
                     </p>
                 </td>
             </tr>

@@ -348,8 +348,13 @@ async def _resolve_synthesis_status(
         or was just queued, otherwise ``failed``.
     """
     wants_refresh = cached.needs_refresh or missing_open_evals
-    if cached.state in ("ok", "skipped"):
-        if queue_refresh and missing_open_evals and claim_report_refresh(candidate_id):
+    if cached.state in ("ok", "skipped", "held_for_review"):
+        if (
+            cached.state != "held_for_review"
+            and queue_refresh
+            and missing_open_evals
+            and claim_report_refresh(candidate_id)
+        ):
             await enqueue_refresh_report_synthesis(candidate_id)
         return cached.state
     if is_ai_job_inflight(candidate_id):

@@ -5,7 +5,9 @@ import {
   FIT_DISCLAIMER,
   FOOTER_ENTITY,
   FOOTER_NOTICE_PREFIX,
+  FOOTER_NOTICE_SUFFIX,
   REPORT_TITLE,
+  RESPONSIBLE_USE_STATEMENT,
 } from './report-copy';
 import { REPORT_FONT_FACE_CSS } from './report-fonts';
 import { safeLogoUrl } from './report-logo';
@@ -416,6 +418,10 @@ export default function MindQReport({ data, logoSrc, narrativeLoading = false })
                 <SynthesisFallback status={vm.synthesisStatus} />
               )}
             </section>
+
+            <section className="mq-card mq-responsible-use" aria-label="Responsible use">
+              <p className="mq-responsible-use-text">{RESPONSIBLE_USE_STATEMENT}</p>
+            </section>
           </div>
 
           <section className="mq-section competency-section" aria-label="Competency Breakdown">
@@ -547,6 +553,7 @@ export default function MindQReport({ data, logoSrc, narrativeLoading = false })
           <p className="mq-footer-text">
             {FOOTER_NOTICE_PREFIX}
             <span className="mq-entity">{FOOTER_ENTITY}</span>
+            {FOOTER_NOTICE_SUFFIX}
           </p>
           <p className="mq-footer-text mq-footer-disclaimer">{FIT_DISCLAIMER}</p>
         </div>

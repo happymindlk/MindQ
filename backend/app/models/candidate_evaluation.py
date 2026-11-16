@@ -24,13 +24,13 @@ class CandidateEvaluation(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     corporate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     package_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("packages.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("packages.id", ondelete="CASCADE"), nullable=False, index=True
     )
     jd_hash: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -38,12 +38,16 @@ class CandidateEvaluation(Base):
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     # Token counts + estimated_cost_usd from the Gemini call that produced this row.
     usage: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    # 'ok' rows carry a ReportNarrative payload; 'failed' rows carry last_error and an empty payload.
+    # 'ok' / 'held_for_review' rows carry a ReportNarrative payload; 'failed' rows
+    # carry last_error and an empty payload.
     status: Mapped[str] = mapped_column(Text, nullable=False, default="ok", server_default="ok")
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     __table_args__ = (
         UniqueConstraint("candidate_id", name="uq_evaluation_candidate"),
-        CheckConstraint("status in ('ok', 'failed')", name="candidate_evaluations_status_check"),
+        CheckConstraint(
+            "status in ('ok', 'failed', 'held_for_review')",
+            name="candidate_evaluations_status_check",
+        ),
     )

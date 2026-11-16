@@ -22,8 +22,9 @@ from app.services.gemini_client import (
 from app.services.jd_scoring import (
     BANNED_LANGUAGE_ERROR,
     EVAL_STATUS_FAILED,
+    EVAL_STATUS_HELD,
     EVAL_STATUS_OK,
-    BannedLanguageError,
+    HeldForReviewError,
     ModelText,
     JdScoringService,
     find_banned_words,
@@ -239,7 +240,7 @@ def test_banned_language_retries_then_manual_review_flag():
         calls["n"] += 1
         return json.dumps(banned)
 
-    with pytest.raises(BannedLanguageError) as info:
+    with pytest.raises(HeldForReviewError) as info:
         score_against_jd_with_model(
             job_description="Role",
             candidate_name="Pat",
@@ -255,8 +256,11 @@ def test_banned_language_retries_then_manual_review_flag():
             ],
             complete=complete,
         )
-    assert calls["n"] == 2
+    assert calls["n"] == 3
     assert BANNED_LANGUAGE_ERROR in str(info.value)
+    assert info.value.narrative.executive_summary == (
+        "This summary is being prepared by the MindQ team"
+    )
 
 
 def test_cache_key_includes_prompt_version(monkeypatch):
@@ -265,7 +269,7 @@ def test_cache_key_includes_prompt_version(monkeypatch):
     monkeypatch.setattr("app.services.jd_scoring.PROMPT_VERSION", "mindq-report-v6-test")
     key_v6 = synthesis_cache_key("Role brief", outcomes)
     assert key_v5 != key_v6
-    assert PROMPT_VERSION == "mindq-report-v5"
+    assert PROMPT_VERSION == "mindq-report-v5.1"
 
 
 class FakeSession:
@@ -377,3 +381,35 @@ async def test_successful_generation_persists_token_cost_usage():
     assert row.usage == usage
     assert row.usage["estimated_cost_usd"] == 0.009
     assert "overall_fit" not in row.payload
+
+
+@pytest.mark.asyncio
+async def test_hard_list_persists_held_for_review_with_placeholder_summary():
+    session = FakeSession()
+    banned = {
+        **VALID_SYNTHESIS,
+        "areas_to_explore": [
+            "This is a red flag for shifting priorities.",
+            "May prefer clearer guidance when priorities shift.",
+            "May take longer to commit when information is incomplete.",
+        ],
+    }
+
+    def complete(_prompt: str) -> str:
+        return json.dumps(banned)
+
+    evaluation, status = await JdScoringService.get_or_evaluate(
+        session, complete=complete, **_scoring_kwargs()
+    )
+    assert status == "held_for_review"
+    assert evaluation is not None
+    assert evaluation.executive_summary == (
+        "This summary is being prepared by the MindQ team"
+    )
+    assert evaluation.strengths == VALID_SYNTHESIS["strengths"]
+    row = session.added[0]
+    assert row.status == EVAL_STATUS_HELD
+    assert row.payload["executive_summary"] == (
+        "This summary is being prepared by the MindQ team"
+    )
+    assert BANNED_LANGUAGE_ERROR in (row.last_error or "")

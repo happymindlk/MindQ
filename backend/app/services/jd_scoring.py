@@ -1,4 +1,4 @@
-"""MindQ Report synthesis (Gemini): narrative sections for the v5 report.
+"""MindQ Report synthesis (Gemini): narrative sections for the v5.1 report.
 
 Generated only in background tasks: after the last test is submitted, and when
 a report view finds the cache missing, stale, or failed past its cooldown.
@@ -8,8 +8,9 @@ The cache key covers the prompt version, the role brief, and the completed
 scores, so a prompt change or a re-graded assessment regenerates the synthesis.
 
 Outcomes are persisted on ``candidate_evaluations.status``: ``ok`` rows carry the
-payload; ``failed`` rows carry ``last_error`` and are retried on the next call.
-Banned-language matches after one retry are held for manual review (``failed``).
+payload; ``failed`` rows carry ``last_error`` and are retried on the next call;
+``held_for_review`` keeps the payload with a placeholder executive summary and
+does not auto-retry on reopen.
 """
 from __future__ import annotations
 
@@ -67,14 +68,18 @@ CompleteFn = Callable[[str], str]
 
 EVAL_STATUS_OK = "ok"
 EVAL_STATUS_FAILED = "failed"
+EVAL_STATUS_HELD = "held_for_review"
 BANNED_LANGUAGE_ERROR = "banned_language_held_for_review"
+HELD_EXECUTIVE_SUMMARY = "This summary is being prepared by the MindQ team"
 _ERROR_MAX_CHARS = 1000
+_HARD_WORD_RETRIES = 2
+_WATCH_WORD_RETRIES = 1
 # Report polling re-reads the cache every few seconds; a failed synthesis is
 # only re-queued after this cooldown so a persistent provider outage cannot
-# turn each poll into a paid Gemini call.
+# turn each poll into a paid Gemini call. held_for_review never auto-retries.
 FAILED_RETRY_COOLDOWN = timedelta(minutes=5)
 
-CacheState = Literal["ok", "skipped", "missing", "stale", "failed"]
+CacheState = Literal["ok", "skipped", "missing", "stale", "failed", "held_for_review"]
 
 
 @dataclass(frozen=True)
@@ -82,10 +87,11 @@ class CachedSynthesis:
     """Result of a read-only synthesis cache lookup.
 
     Attributes:
-        narrative: Stored synthesis when ``state == "ok"``.
-        state: ``ok`` (usable), ``skipped`` (no role brief or outcomes),
-            ``missing`` (never generated), ``stale`` (scores, role, or prompt
-            changed), or ``failed`` (last attempt failed for these inputs).
+        narrative: Stored synthesis when ``state`` is ``ok`` or ``held_for_review``.
+        state: ``ok`` (usable), ``held_for_review`` (payload kept, no auto-retry),
+            ``skipped`` (no role brief or outcomes), ``missing`` (never generated),
+            ``stale`` (scores, role, or prompt changed), or ``failed`` (last
+            attempt failed for these inputs).
         needs_refresh: True when a background regeneration should be queued.
     """
 
@@ -93,59 +99,95 @@ class CachedSynthesis:
     state: CacheState
     needs_refresh: bool
 
-# Longest phrases first so "mood swings" / "cold-hearted" match before singles.
-_BANNED_PHRASES: tuple[str, ...] = (
+
+# Echoed / structural fields Gemini must copy; never scan these for wording.
+_SKIP_WORDING_KEYS = frozenset(
+    {
+        "assessment_key",
+        "assessment_name",
+        "capability_key",
+        "capability_label",
+        "importance",
+        "alignment",
+        "confidence",
+        "category",
+        "subscale_key",
+    }
+)
+
+# Hard list: reject after targeted retries. Longest phrases first.
+_HARD_PHRASES: tuple[str, ...] = (
     "mood swings",
-    "cold-hearted",
-    "cold hearted",
     "red flag",
-    "high risk",
     "poor performer",
     "moody",
     "anxious",
-    "anxiety",
-    "nervous",
     "neurotic",
     "unstable",
-    "fragile",
-    "emotional",
     "dishonest",
     "deceitful",
     "untrustworthy",
     "manipulative",
     "arrogant",
-    "aggressive",
-    "cold",
     "lazy",
     "immature",
-    "weak",
     "unfit",
-    "failed",
-    "fail",
     "disqualifying",
 )
-_BANNED_PATTERN = re.compile(
-    r"(?<!\w)("
-    + "|".join(re.escape(p).replace(r"\ ", r"[\s\-]+") for p in _BANNED_PHRASES)
-    + r")(?!\w)",
-    re.IGNORECASE,
+# Watch list: retry once, then accept and log. Skip if the word is in the JD.
+_WATCH_PHRASES: tuple[str, ...] = (
+    "high risk",
+    "emotional",
+    "emotionally",
+    "nervous",
+    "anxiety",
+    "fragile",
+    "weak",
+    "cold",
+    "aggressive",
+    "failed",
+    "fail",
 )
+
+
+def _compile_word_pattern(phrases: tuple[str, ...]) -> re.Pattern[str]:
+    """Build a whole-word, case-insensitive matcher for a phrase list.
+
+    Args:
+        phrases: Phrases ordered longest-first when overlaps matter.
+
+    Returns:
+        Compiled regex that matches any phrase as a whole word.
+    """
+    return re.compile(
+        r"(?<!\w)("
+        + "|".join(re.escape(p).replace(r"\ ", r"[\s\-]+") for p in phrases)
+        + r")(?!\w)",
+        re.IGNORECASE,
+    )
+
+
+_HARD_PATTERN = _compile_word_pattern(_HARD_PHRASES)
+_WATCH_PATTERN = _compile_word_pattern(_WATCH_PHRASES)
 _SNIPPET_RADIUS = 60
+Severity = Literal["hard", "watch"]
 
 
 @dataclass(frozen=True)
 class BannedMatch:
-    """One banned-language hit with JSON path and local prose context.
+    """One wording hit with JSON path, local prose context, and severity.
 
     Attributes:
         field: JSON path of the string that matched (e.g. ``strengths[0]``).
-        match: Matched banned phrase (lowercase).
+        match: Matched phrase (lowercase).
         context: ~60 characters of surrounding text with newlines collapsed.
+        severity: ``hard`` (hold after retries) or ``watch`` (retry then accept).
     """
 
     field: str
     match: str
     context: str
+    severity: Severity = "hard"
 
 
 class JdScoringUnavailable(GeminiUnavailable):
@@ -153,7 +195,7 @@ class JdScoringUnavailable(GeminiUnavailable):
 
 
 class BannedLanguageError(JdScoringUnavailable):
-    """Synthesis prose contained banned wording after retry."""
+    """Hard-list wording remained after targeted retries (legacy raise path)."""
 
     def __init__(self, matches: list[BannedMatch] | list[str]) -> None:
         if matches and isinstance(matches[0], BannedMatch):
@@ -162,6 +204,25 @@ class BannedLanguageError(JdScoringUnavailable):
         else:
             self.matches = [str(item) for item in matches]
             self.details = []
+        super().__init__(f"{BANNED_LANGUAGE_ERROR}: {', '.join(self.matches)}")
+
+
+class HeldForReviewError(Exception):
+    """Hard-list wording after retries; payload kept with a placeholder summary."""
+
+    def __init__(
+        self,
+        narrative: ReportNarrative,
+        matches: list[BannedMatch],
+        *,
+        model: str | None = None,
+        usage: dict[str, Any] | None = None,
+    ) -> None:
+        self.narrative = narrative
+        self.details = list(matches)
+        self.matches = [item.match for item in self.details]
+        self.model = model
+        self.usage = usage
         super().__init__(f"{BANNED_LANGUAGE_ERROR}: {', '.join(self.matches)}")
 
 class ModelText(str):
@@ -194,13 +255,13 @@ class ModelText(str):
 
 
 def evaluation_is_ok(row: CandidateEvaluation | None) -> bool:
-    """True when a stored evaluation row holds a usable payload.
+    """True when a stored evaluation row is a clean ``ok`` synthesis.
 
     Args:
         row: ``candidate_evaluations`` row (may be None).
 
     Returns:
-        Whether readers should render ``row.payload``.
+        Whether readers should treat the row as a successful synthesis.
     """
     return bool(
         row is not None
@@ -208,6 +269,23 @@ def evaluation_is_ok(row: CandidateEvaluation | None) -> bool:
         and isinstance(row.payload, dict)
         and row.payload
     )
+
+
+def evaluation_is_readable(row: CandidateEvaluation | None) -> bool:
+    """True when a stored row has a payload that may be shown on the report.
+
+    Includes ``held_for_review`` (placeholder executive summary, rest intact).
+
+    Args:
+        row: ``candidate_evaluations`` row (may be None).
+
+    Returns:
+        Whether ``row.payload`` is safe to render.
+    """
+    if row is None or not isinstance(row.payload, dict) or not row.payload:
+        return False
+    status = getattr(row, "status", None) or EVAL_STATUS_OK
+    return status in {EVAL_STATUS_OK, EVAL_STATUS_HELD}
 
 
 def hash_job_description(job_description: str) -> str:
@@ -493,36 +571,73 @@ def _snippet_around(text: str, start: int, end: int) -> str:
     return " ".join(raw.split())
 
 
-def find_banned_matches(obj: Any, *, path: str = "") -> list[BannedMatch]:
-    """Scan every string in a nested payload for banned wording with paths.
+def _jd_contains_word(job_description: str, word: str) -> bool:
+    """True when ``word`` appears as a whole word in the job description.
+
+    Args:
+        job_description: HR-supplied job description text.
+        word: Matched watch-list phrase.
+
+    Returns:
+        Whether the job description itself uses the word.
+    """
+    pattern = re.compile(
+        r"(?<!\w)" + re.escape(word).replace(r"\ ", r"[\s\-]+") + r"(?!\w)",
+        re.IGNORECASE,
+    )
+    return bool(pattern.search(job_description or ""))
+
+
+def find_wording_matches(
+    obj: Any,
+    *,
+    job_description: str = "",
+    path: str = "",
+) -> list[BannedMatch]:
+    """Scan free-text narrative fields for hard- and watch-list wording.
+
+    Skips echoed structural fields (``assessment_name``, ``capability_label``,
+    etc.). Watch-list hits that also appear in ``job_description`` are ignored.
 
     Args:
         obj: Parsed synthesis (model dump or nested structure).
+        job_description: HR job description; watch words present here are allowed.
         path: Optional JSON-path prefix for nested walks.
 
     Returns:
-        Deduplicated hits (first occurrence of each phrase) with field path
-        and surrounding snippet context.
+        Deduplicated hits (hard first, then watch) with field path and snippet.
     """
     found: list[BannedMatch] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
+
+    def _record(
+        value: str, current: str, pattern: re.Pattern[str], severity: Severity
+    ) -> None:
+        for match in pattern.finditer(value):
+            token = match.group(1).lower()
+            key = (severity, token)
+            if key in seen:
+                continue
+            if severity == "watch" and _jd_contains_word(job_description, token):
+                continue
+            seen.add(key)
+            found.append(
+                BannedMatch(
+                    field=current or "<root>",
+                    match=token,
+                    context=_snippet_around(value, match.start(), match.end()),
+                    severity=severity,
+                )
+            )
 
     def _walk(value: Any, current: str) -> None:
         if isinstance(value, str):
-            for match in _BANNED_PATTERN.finditer(value):
-                token = match.group(1).lower()
-                if token in seen:
-                    continue
-                seen.add(token)
-                found.append(
-                    BannedMatch(
-                        field=current or "<root>",
-                        match=token,
-                        context=_snippet_around(value, match.start(), match.end()),
-                    )
-                )
+            _record(value, current, _HARD_PATTERN, "hard")
+            _record(value, current, _WATCH_PATTERN, "watch")
         elif isinstance(value, dict):
             for key, child in value.items():
+                if key in _SKIP_WORDING_KEYS:
+                    continue
                 child_path = f"{current}.{key}" if current else str(key)
                 _walk(child, child_path)
         elif isinstance(value, (list, tuple)):
@@ -534,30 +649,71 @@ def find_banned_matches(obj: Any, *, path: str = "") -> list[BannedMatch]:
     return found
 
 
+def find_banned_matches(
+    obj: Any, *, path: str = "", job_description: str = ""
+) -> list[BannedMatch]:
+    """Scan free-text fields for hard-list wording (watch list excluded).
+
+    Args:
+        obj: Parsed synthesis (model dump or nested structure).
+        path: Optional JSON-path prefix for nested walks.
+        job_description: Unused for hard list; kept for call-site compatibility.
+
+    Returns:
+        Hard-list hits only.
+    """
+    del job_description
+    return [
+        hit
+        for hit in find_wording_matches(obj, path=path)
+        if hit.severity == "hard"
+    ]
+
+
 def find_banned_words(obj: Any) -> list[str]:
-    """Scan every string in a nested payload for banned wording.
+    """Scan free-text fields for hard-list wording.
 
     Args:
         obj: Parsed synthesis (model dump or nested structure).
 
     Returns:
-        Deduplicated list of matched banned phrases (lowercase).
+        Deduplicated list of matched hard-list phrases (lowercase).
     """
     return [hit.match for hit in find_banned_matches(obj)]
 
 
-def assert_no_banned_words(narrative: ReportNarrative) -> None:
-    """Raise when any banned word appears in the narrative.
+def assert_no_banned_words(
+    narrative: ReportNarrative, *, job_description: str = ""
+) -> None:
+    """Raise when any hard-list word appears in free-text narrative fields.
 
     Args:
         narrative: Validated Gemini synthesis.
+        job_description: Unused for hard list; kept for call-site compatibility.
 
     Raises:
-        BannedLanguageError: When one or more banned phrases are present.
+        BannedLanguageError: When one or more hard-list phrases are present.
     """
+    del job_description
     details = find_banned_matches(narrative.model_dump())
     if details:
         raise BannedLanguageError(details)
+
+
+def _wording_retry_suffix(hit: BannedMatch) -> str:
+    """Build the targeted rewrite instruction for a wording retry.
+
+    Args:
+        hit: The match that triggered the retry.
+
+    Returns:
+        Prompt suffix asking Gemini to rewrite without that word.
+    """
+    return (
+        f'\n\nYour previous output used the word "{hit.match}" in {hit.field}. '
+        "Rewrite the report without it, using plain work-related wording, "
+        "and keep everything else the same."
+    )
 
 def validate_narrative_keys(
     narrative: ReportNarrative,
@@ -627,10 +783,39 @@ def _parse_and_validate(
     raw: str,
     assessment_scores: list[dict[str, Any]] | None,
 ) -> ReportNarrative:
+    """Parse Gemini JSON and validate assessment/capability keys.
+
+    Word checks run separately so hard/watch retries can reuse a valid parse.
+
+    Args:
+        raw: Model completion text.
+        assessment_scores: Server-computed score table sent to Gemini.
+
+    Returns:
+        Validated narrative (wording not yet checked).
+    """
     narrative = parse_evaluation_json(raw)
     validate_narrative_keys(narrative, assessment_scores)
-    assert_no_banned_words(narrative)
     return narrative
+
+
+def _complete_once(
+    completer: CompleteFn, prompt: str
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Run one completion and extract model/usage metadata.
+
+    Args:
+        completer: Gemini completer or test stub.
+        prompt: Full user prompt for this attempt.
+
+    Returns:
+        Raw text, serving model id, and optional usage dict.
+    """
+    raw = completer(prompt)
+    model = getattr(raw, "model", None) or settings.GEMINI_MODEL
+    raw_usage = getattr(raw, "usage", None)
+    usage = raw_usage if isinstance(raw_usage, dict) else None
+    return str(raw), model, usage
 
 
 def score_against_jd_with_model(
@@ -645,9 +830,11 @@ def score_against_jd_with_model(
 ) -> tuple[ReportNarrative, str, dict[str, Any] | None]:
     """Generate the report synthesis and report which model produced it.
 
-    Retries once on parse, key, or banned-word failure. Persistent banned
-    language raises ``BannedLanguageError`` so the caller can hold the report
-    for manual review.
+    Retries once on parse/key failure. Hard-list wording retries up to twice
+    with a targeted rewrite instruction, then raises ``HeldForReviewError``
+    carrying the narrative with a placeholder executive summary. Watch-list
+    wording retries once (skipped when the word appears in the job
+    description); a remaining watch hit is accepted and logged.
 
     Args:
         job_description: JD text (or synthesized role brief).
@@ -660,9 +847,13 @@ def score_against_jd_with_model(
 
     Returns:
         Parsed synthesis, serving model name, and optional usage/cost dict.
+
+    Raises:
+        HeldForReviewError: Hard-list wording after retries (payload kept).
+        JdScoringUnavailable: Persistent parse/key/provider failure.
     """
     assert_no_answer_key_fields(evidence)
-    prompt = build_user_prompt(
+    base_prompt = build_user_prompt(
         target_role=target_role,
         job_description=job_description,
         candidate_name=candidate_name,
@@ -674,42 +865,122 @@ def score_against_jd_with_model(
     last_error: Exception | None = None
     model = settings.GEMINI_MODEL
     usage: dict[str, Any] | None = None
+    narrative: ReportNarrative | None = None
+
     for attempt in range(2):
         try:
-            raw = completer(prompt)
-            model = getattr(raw, "model", None) or settings.GEMINI_MODEL
-            raw_usage = getattr(raw, "usage", None)
-            usage = raw_usage if isinstance(raw_usage, dict) else None
-            synthesis = _parse_and_validate(raw, assessment_scores)
-            return synthesis, model, usage
-        except (ValidationError, BannedLanguageError, JdScoringUnavailable, json.JSONDecodeError) as exc:
+            raw, model, usage = _complete_once(completer, base_prompt)
+            narrative = _parse_and_validate(raw, assessment_scores)
+            last_error = None
+            break
+        except (ValidationError, JdScoringUnavailable, json.JSONDecodeError) as exc:
             last_error = exc
-            if isinstance(exc, BannedLanguageError) and exc.details:
-                hit = exc.details[0]
-                logger.warning(
-                    "report_synthesis_attempt_failed attempt=%s error=%s "
-                    "field=%s match=%s context=%s",
-                    attempt + 1,
-                    exc,
-                    hit.field,
-                    hit.match,
-                    hit.context,
-                )
-            else:
-                logger.warning(
-                    "report_synthesis_attempt_failed attempt=%s error=%s",
-                    attempt + 1,
-                    exc,
-                )
+            logger.warning(
+                "report_synthesis_attempt_failed attempt=%s error=%s",
+                attempt + 1,
+                exc,
+            )
             if attempt == 0:
                 continue
             break
-    assert last_error is not None
-    if isinstance(last_error, BannedLanguageError):
+    if narrative is None:
+        assert last_error is not None
+        if isinstance(last_error, ValidationError):
+            raise JdScoringUnavailable(
+                f"invalid_synthesis_json: {last_error}"
+            ) from last_error
         raise last_error
-    if isinstance(last_error, ValidationError):
-        raise JdScoringUnavailable(f"invalid_synthesis_json: {last_error}") from last_error
-    raise last_error
+
+    hard_retries = 0
+    watch_retries = 0
+    while True:
+        hits = find_wording_matches(
+            narrative.model_dump(), job_description=job_description
+        )
+        hard_hits = [hit for hit in hits if hit.severity == "hard"]
+        watch_hits = [hit for hit in hits if hit.severity == "watch"]
+
+        if hard_hits:
+            hit = hard_hits[0]
+            logger.warning(
+                "report_synthesis_attempt_failed attempt=%s error=%s "
+                "field=%s match=%s context=%s",
+                hard_retries + 1,
+                BANNED_LANGUAGE_ERROR,
+                hit.field,
+                hit.match,
+                hit.context,
+            )
+            if hard_retries < _HARD_WORD_RETRIES:
+                hard_retries += 1
+                try:
+                    raw, model, usage = _complete_once(
+                        completer, base_prompt + _wording_retry_suffix(hit)
+                    )
+                    narrative = _parse_and_validate(raw, assessment_scores)
+                except (
+                    ValidationError,
+                    JdScoringUnavailable,
+                    json.JSONDecodeError,
+                ) as exc:
+                    logger.warning(
+                        "report_synthesis_attempt_failed attempt=%s error=%s",
+                        hard_retries + 1,
+                        exc,
+                    )
+                    last_error = exc
+                continue
+            held = narrative.model_copy(
+                update={"executive_summary": HELD_EXECUTIVE_SUMMARY}
+            )
+            raise HeldForReviewError(
+                held, hard_hits, model=model, usage=usage
+            )
+
+        if watch_hits:
+            hit = watch_hits[0]
+            logger.warning(
+                "report_synthesis_watch_word field=%s match=%s context=%s",
+                hit.field,
+                hit.match,
+                hit.context,
+            )
+            if watch_retries < _WATCH_WORD_RETRIES:
+                watch_retries += 1
+                try:
+                    raw, model, usage = _complete_once(
+                        completer, base_prompt + _wording_retry_suffix(hit)
+                    )
+                    narrative = _parse_and_validate(raw, assessment_scores)
+                except (
+                    ValidationError,
+                    JdScoringUnavailable,
+                    json.JSONDecodeError,
+                ) as exc:
+                    logger.warning(
+                        "report_synthesis_attempt_failed attempt=%s error=%s",
+                        watch_retries + 1,
+                        exc,
+                    )
+                    logger.warning(
+                        "report_synthesis_watch_word_accepted field=%s match=%s "
+                        "context=%s",
+                        hit.field,
+                        hit.match,
+                        hit.context,
+                    )
+                    # Keep the prior narrative rather than failing the report.
+                    return narrative, model, usage
+                continue
+            logger.warning(
+                "report_synthesis_watch_word_accepted field=%s match=%s context=%s",
+                hit.field,
+                hit.match,
+                hit.context,
+            )
+            return narrative, model, usage
+
+        return narrative, model, usage
 
 
 def score_against_jd(
@@ -789,14 +1060,18 @@ class JdScoringService:
             return CachedSynthesis(None, "missing", needs_refresh=True)
         if row.jd_hash != digest:
             return CachedSynthesis(None, "stale", needs_refresh=True)
-        if evaluation_is_ok(row):
+        if evaluation_is_readable(row):
             try:
-                return CachedSynthesis(
-                    ReportNarrative.model_validate(row.payload), "ok", needs_refresh=False
-                )
+                narrative = ReportNarrative.model_validate(row.payload)
             except ValidationError:
                 logger.warning("jd_scoring_cache_invalid candidate_id=%s", candidate.id)
                 return CachedSynthesis(None, "stale", needs_refresh=True)
+            status = getattr(row, "status", None) or EVAL_STATUS_OK
+            if status == EVAL_STATUS_HELD:
+                # Do not auto-retry held reports on reopen; only regenerate when
+                # the cache key changes (prompt version, JD, or scores).
+                return CachedSynthesis(narrative, "held_for_review", needs_refresh=False)
+            return CachedSynthesis(narrative, "ok", needs_refresh=False)
 
         generated_at = getattr(row, "generated_at", None)
         current = now or datetime.now(timezone.utc)
@@ -817,11 +1092,12 @@ class JdScoringService:
     ) -> tuple[ReportNarrative | None, str]:
         """Return the cached or freshly generated report synthesis.
 
-        Status is one of: cached, generated, skipped, failed. Failures never raise
-        to the report download path; they are persisted as ``status='failed'``
-        rows (with ``last_error``) so HR and ops can see them, and retried on
-        the next call. Banned language after retry is recorded as
-        ``banned_language_held_for_review``.
+        Status is one of: cached, generated, skipped, failed, held_for_review.
+        Failures never raise to the report download path; they are persisted as
+        ``status='failed'`` rows (with ``last_error``) so HR and ops can see
+        them, and retried on the next call after cooldown. Hard-list wording
+        after retries is persisted as ``held_for_review`` with the payload kept
+        and does not auto-retry on reopen.
 
         Args:
             session: Async SQLAlchemy session.
@@ -855,13 +1131,18 @@ class JdScoringService:
                 )
             )
         ).scalars().first()
-        if existing and existing.jd_hash == digest and evaluation_is_ok(existing):
+        if existing and existing.jd_hash == digest and evaluation_is_readable(existing):
             try:
-                return ReportNarrative.model_validate(existing.payload), "cached"
+                narrative = ReportNarrative.model_validate(existing.payload)
             except ValidationError:
                 logger.warning(
                     "jd_scoring_cache_invalid candidate_id=%s", candidate.id
                 )
+            else:
+                status = getattr(existing, "status", None) or EVAL_STATUS_OK
+                if status == EVAL_STATUS_HELD:
+                    return narrative, "held_for_review"
+                return narrative, "cached"
 
         try:
             evidence = build_evidence(assessments, progresses, responses)
@@ -887,6 +1168,28 @@ class JdScoringService:
                 session, candidate, existing, digest, f"timeout after {deadline:.0f}s"
             )
             return None, "failed"
+        except HeldForReviewError as exc:
+            hit = exc.details[0] if exc.details else None
+            logger.error(
+                "report_synthesis_held_for_review candidate_id=%s error=%s "
+                "field=%s match=%s context=%s",
+                candidate.id,
+                exc,
+                getattr(hit, "field", None),
+                getattr(hit, "match", None),
+                getattr(hit, "context", None),
+            )
+            await JdScoringService._record_held(
+                session,
+                candidate,
+                existing,
+                digest,
+                exc.narrative,
+                model=exc.model or settings.GEMINI_MODEL,
+                usage=exc.usage,
+                error=str(exc),
+            )
+            return exc.narrative, "held_for_review"
         except Exception as exc:
             # Fail-soft for submit/report; the provider error is logged and persisted.
             # Never log candidate PII (name/email/phone)—only id and ban context.
@@ -1002,5 +1305,65 @@ class JdScoringService:
         except Exception:
             logger.exception(
                 "jd_scoring_failure_record_failed candidate_id=%s", candidate.id
+            )
+            await session.rollback()
+
+    @staticmethod
+    async def _record_held(
+        session: AsyncSession,
+        candidate: Candidate,
+        existing: CandidateEvaluation | None,
+        digest: str,
+        narrative: ReportNarrative,
+        *,
+        model: str,
+        usage: dict[str, Any] | None,
+        error: str,
+    ) -> None:
+        """Persist a held-for-review synthesis with payload kept.
+
+        Args:
+            session: Async SQLAlchemy session.
+            candidate: Candidate being scored.
+            existing: Current evaluation row, if any.
+            digest: Cache key for this attempt.
+            narrative: Narrative with placeholder executive summary.
+            model: Serving model id.
+            usage: Optional token/cost dict from the last attempt.
+            error: Human-readable hold reason.
+        """
+        message = error[:_ERROR_MAX_CHARS]
+        payload = narrative.model_dump()
+        now = datetime.now(timezone.utc)
+        try:
+            if existing:
+                existing.jd_hash = digest
+                existing.model = model
+                existing.overall_fit = None
+                existing.payload = payload
+                existing.usage = usage
+                existing.status = EVAL_STATUS_HELD
+                existing.last_error = message
+                existing.generated_at = now
+            else:
+                session.add(
+                    CandidateEvaluation(
+                        corporate_id=candidate.corporate_id,
+                        candidate_id=candidate.id,
+                        package_id=candidate.package_id,
+                        jd_hash=digest,
+                        model=model,
+                        overall_fit=None,
+                        payload=payload,
+                        usage=usage,
+                        status=EVAL_STATUS_HELD,
+                        last_error=message,
+                        generated_at=now,
+                    )
+                )
+            await session.commit()
+        except Exception:
+            logger.exception(
+                "jd_scoring_held_record_failed candidate_id=%s", candidate.id
             )
             await session.rollback()

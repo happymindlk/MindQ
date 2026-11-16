@@ -64,6 +64,16 @@ export const REPORT_CSS = `
   border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; background: #ffffff;
 }
 .mq-card { margin-bottom: 16px; }
+.mq-responsible-use {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+.mq-responsible-use-text {
+  margin: 0;
+  color: #374151;
+  font-size: 12px;
+  line-height: 1.5;
+}
 .mq-section { margin-bottom: 16px; }
 .mq-card h2, .mq-sr-col h2, .mq-section-title {
   margin-bottom: 8px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;

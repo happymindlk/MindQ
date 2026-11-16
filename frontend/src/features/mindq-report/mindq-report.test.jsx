@@ -7,14 +7,16 @@ import {
   FOOTER_ENTITY,
   FOOTER_NOTICE,
   FOOTER_NOTICE_PREFIX,
+  FOOTER_NOTICE_SUFFIX,
   REPORT_TITLE,
+  RESPONSIBLE_USE_STATEMENT,
 } from './report-copy';
 
 const SPEC_FOOTER =
-  'This is an auto-generated MindQ report. This document cannot be reproduced, edited, or redistributed without the written consent of MindQ (Pvt.) Ltd.';
+  'This is an auto-generated MindQ report. It is confidential and prepared for the named client only. It cannot be reproduced, edited or redistributed without the written consent of MindQ (Pvt.) Ltd. It must not be entered into other automated tools to make decisions about candidates.';
 
 const SPEC_FIT_DISCLAIMER =
-  'This assessment is not an indication of whether the candidate is a good fit. This is merely an analysis of an assessment. You need to do necessary interviews to decide whether the candidate is the ideal candidate.';
+  'This assessment is not an indication of whether the candidate is a good fit. This report is merely an analysis of assessment results. You need to conduct the necessary interviews to decide whether the candidate is the ideal candidate.';
 
 const row = (category, name, score) => ({
   category,
@@ -53,9 +55,10 @@ const BASE = {
 describe('report copy', () => {
   it('matches the contractual footer and disclaimer text exactly', () => {
     expect(FOOTER_ENTITY).toBe('MindQ (Pvt.) Ltd.');
-    expect(`${FOOTER_NOTICE_PREFIX}${FOOTER_ENTITY}`).toBe(SPEC_FOOTER);
+    expect(`${FOOTER_NOTICE_PREFIX}${FOOTER_ENTITY}${FOOTER_NOTICE_SUFFIX}`).toBe(SPEC_FOOTER);
     expect(FOOTER_NOTICE).toBe(SPEC_FOOTER);
     expect(FIT_DISCLAIMER).toBe(SPEC_FIT_DISCLAIMER);
+    expect(RESPONSIBLE_USE_STATEMENT).toContain('no hiring recommendation, fit score or ranking');
   });
 });
 
