@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -17,6 +18,7 @@ from app.services.jd_scoring import (
     build_evidence,
     crt_reasoning,
     evaluation_is_ok,
+    find_banned_matches,
     find_banned_words,
     hash_job_description,
     parse_evaluation_json,
@@ -370,6 +372,25 @@ def test_find_banned_words_detects_phrases():
     assert find_banned_words({"headline": "Results partly align with priorities."}) == []
 
 
+def test_find_banned_matches_includes_field_and_snippet():
+    prose = (
+        "The candidate demonstrates strong emotional intelligence when handling "
+        "stakeholder conflict under pressure."
+    )
+    hits = find_banned_matches({"executive_summary": prose})
+    assert len(hits) == 1
+    assert hits[0].field == "executive_summary"
+    assert hits[0].match == "emotional"
+    assert "demonstrates strong emotional intelligence when handling" in hits[0].context
+    assert len(hits[0].context) <= len(prose)
+
+    list_hits = find_banned_matches(
+        {"strengths": ["Solid analytical depth.", "Shows a red flag under ambiguity."]}
+    )
+    assert list_hits[0].field == "strengths[1]"
+    assert list_hits[0].match == "red flag"
+
+
 def test_banned_language_retries_once_then_holds():
     calls = {"n": 0}
     banned = {
@@ -403,6 +424,45 @@ def test_banned_language_retries_once_then_holds():
         )
     assert calls["n"] == 2
     assert BANNED_LANGUAGE_ERROR in str(exc.value)
+
+
+def test_report_synthesis_attempt_failed_logs_field_and_context(caplog):
+    prose = (
+        "The candidate demonstrates strong emotional intelligence when handling "
+        "stakeholder conflict under pressure."
+    )
+    banned = {**VALID_SYNTHESIS, "executive_summary": prose}
+    candidate_name = "Ada Lovelace"
+    candidate_email = "ada@example.com"
+
+    def complete(_prompt: str) -> str:
+        return json.dumps(banned)
+
+    with caplog.at_level(logging.WARNING, logger="app.services.jd_scoring"):
+        with pytest.raises(BannedLanguageError):
+            score_against_jd_with_model(
+                job_description="Role",
+                candidate_name=candidate_name,
+                package_title="Pkg",
+                evidence=[],
+                assessment_scores=[
+                    {
+                        "assessment_key": "A1",
+                        "assessment_name": "Math",
+                        "category": "Cognitive",
+                        "score": 80.0,
+                    }
+                ],
+                complete=complete,
+            )
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert "report_synthesis_attempt_failed" in logged
+    assert "field=executive_summary" in logged
+    assert "match=emotional" in logged
+    assert "demonstrates strong emotional intelligence when handling" in logged
+    assert candidate_name not in logged
+    assert candidate_email not in logged
 
 
 @pytest.mark.asyncio
