@@ -127,6 +127,7 @@ async def test_finalize_expired_transitions_and_enqueues_scoring(monkeypatch):
                 completed_at=progress.expires_at,
             ),
             False,
+            "",
         )
     )
     enqueue = AsyncMock()
@@ -170,6 +171,7 @@ async def test_finalize_expired_assessment_scoped_to_candidate(monkeypatch):
         return_value=(
             SimpleNamespace(status="COMPLETED", assessment_id=assessment.id),
             False,
+            "",
         )
     )
     enqueue = AsyncMock()
@@ -282,6 +284,7 @@ async def test_concurrent_finalize_calls_remain_idempotent(monkeypatch):
             (
                 SimpleNamespace(status="COMPLETED", assessment_id=assessment.id),
                 False,
+                "",
             ),
             AssessmentAlreadySubmittedError(),
         ]

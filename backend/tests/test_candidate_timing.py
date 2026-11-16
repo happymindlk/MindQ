@@ -181,7 +181,9 @@ async def test_submit_after_deadline_discards_pending_and_flags_overtime(monkeyp
         "require_writable_assessment",
         AsyncMock(return_value=(assessment, progress)),
     )
-    monkeypatch.setattr(CandidateService, "is_package_complete", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        CandidateService, "get_submit_meta", AsyncMock(return_value=(False, ""))
+    )
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
     session = AsyncMock()
     session.add = MagicMock()
@@ -189,7 +191,7 @@ async def test_submit_after_deadline_discards_pending_and_flags_overtime(monkeyp
     session.execute = AsyncMock(return_value=_empty_result())
     pending = [ResponseSave(assessment_id=assessment.id, question_id="late", response={"answer": "x"})]
 
-    result, package_complete = await CandidateService.submit_test(
+    result, package_complete, _company = await CandidateService.submit_test(
         session,
         SimpleNamespace(id=uuid4(), corporate_id=uuid4()),
         assessment.id,
@@ -220,7 +222,9 @@ async def test_submit_in_time_stores_elapsed_without_scoring(monkeypatch):
         "require_writable_assessment",
         AsyncMock(return_value=(assessment, progress)),
     )
-    monkeypatch.setattr(CandidateService, "is_package_complete", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        CandidateService, "get_submit_meta", AsyncMock(return_value=(True, "Acme"))
+    )
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
 
     added: list = []
@@ -232,7 +236,7 @@ async def test_submit_in_time_stores_elapsed_without_scoring(monkeypatch):
         ResponseSave(assessment_id=assessment.id, question_id="l1", response={"answer": 2}, elapsed_seconds=7.456)
     ]
 
-    result, complete = await CandidateService.submit_test(
+    result, complete, _company = await CandidateService.submit_test(
         session,
         candidate,
         assessment.id,

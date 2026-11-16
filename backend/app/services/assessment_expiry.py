@@ -99,7 +99,7 @@ async def finalize_one_expired(
         ``False`` when another worker already finalized it.
     """
     try:
-        progress, _package_complete = await CandidateService.submit_test(
+        progress, _package_complete, _company = await CandidateService.submit_test(
             session,
             candidate,
             assessment_id,

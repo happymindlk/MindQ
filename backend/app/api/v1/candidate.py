@@ -210,7 +210,7 @@ async def submit_test(
     body: ResponseSubmit | None = None,
 ):
     try:
-        progress, package_complete = await CandidateService.submit_test(
+        progress, package_complete, company_name = await CandidateService.submit_test(
             db,
             candidate,
             assessment_id,
@@ -225,19 +225,10 @@ async def submit_test(
     ) as exc:
         _raise_integrity(exc)
     # Module COMPLETED is already committed in submit_test. Scoring / Gemini /
-    # PDF work is durable on ARQ so failures cannot revert completion.
-    # #region agent log
-    try:
-        import json as _json, time as _time
-        with open(r"d:\happy-mind-psychometrics\.cursor\debug-f04232.log", "a", encoding="utf-8") as _f:
-            _f.write(_json.dumps({"sessionId": "f04232", "runId": "post-fix", "hypothesisId": "H5", "location": "candidate.py:submit_test", "message": "queue_finalize_after_commit", "data": {"candidate_id": str(candidate.id), "assessment_id": str(assessment_id), "package_complete": package_complete, "progress_status": progress.status}, "timestamp": int(_time.time() * 1000)}) + "\n")
-    except Exception:
-        pass
-    # #endregion
-    await enqueue_finalize_and_score_ai(candidate.id, assessment_id)
-    # Always resolve company_name: clients and tests treat it as part of the
-    # submit contract even when the package is still incomplete.
-    company_name = await CandidateService.get_company_name(db, candidate)
+    # PDF / HR email must never block this response — enqueue (or spawn) only.
+    await enqueue_finalize_and_score_ai(
+        candidate.id, assessment_id, await_inline=False
+    )
     # Scores stay server-side: echoing them lets candidates calibrate answers
     # across modules or share keyed results.
     return {

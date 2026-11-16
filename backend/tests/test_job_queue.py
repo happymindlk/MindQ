@@ -1,6 +1,7 @@
 """ARQ enqueue helpers and task wrappers (durable job queue)."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -102,6 +103,30 @@ async def test_enqueue_inline_fallback_runs_task_when_pool_missing():
 
 
 @pytest.mark.asyncio
+async def test_enqueue_finalize_spawns_when_await_inline_false():
+    candidate_id = uuid4()
+    assessment_id = uuid4()
+    set_arq_pool_for_tests(None)
+    started = asyncio.Event()
+
+    async def _slow(*_a, **_k):
+        started.set()
+        await asyncio.Event().wait()
+
+    with patch.object(
+        enqueue_mod, "task_finalize_and_score_ai", new=AsyncMock(side_effect=_slow)
+    ):
+        result = await enqueue_finalize_and_score_ai(
+            candidate_id, assessment_id, await_inline=False
+        )
+        assert isinstance(result, asyncio.Task)
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        result.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await result
+
+
+@pytest.mark.asyncio
 async def test_task_wrappers_delegate_to_background_and_email():
     candidate_id = uuid4()
     assessment_id = uuid4()
@@ -155,16 +180,12 @@ async def test_submit_route_enqueues_finalize_not_background_tasks(monkeypatch):
     enqueued: list[tuple] = []
 
     async def _submit(*_a, **_k):
-        return progress, False
+        return progress, False, "Acme"
 
-    async def _company(*_a, **_k):
-        return "Acme"
-
-    async def _enqueue(cid, aid):
-        enqueued.append((cid, aid))
+    async def _enqueue(cid, aid, *, await_inline=True):
+        enqueued.append((cid, aid, await_inline))
 
     monkeypatch.setattr(candidate_api.CandidateService, "submit_test", _submit)
-    monkeypatch.setattr(candidate_api.CandidateService, "get_company_name", _company)
     monkeypatch.setattr(candidate_api, "enqueue_finalize_and_score_ai", _enqueue)
 
     app = FastAPI()
@@ -181,8 +202,10 @@ async def test_submit_route_enqueues_finalize_not_background_tasks(monkeypatch):
 
     res = TestClient(app).post(f"/api/v1/candidate/test/{assessment_id}/submit", json={})
     assert res.status_code == 200
-    assert res.json()["jd_scoring_queued"] is True
-    assert enqueued == [(candidate.id, assessment_id)]
+    body = res.json()
+    assert body["jd_scoring_queued"] is True
+    assert body["company_name"] == "Acme"
+    assert enqueued == [(candidate.id, assessment_id, False)]
 
 
 def test_invite_route_enqueues_with_invite_job_id(monkeypatch):
