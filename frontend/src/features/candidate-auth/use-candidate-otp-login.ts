@@ -98,13 +98,20 @@ export function useCandidateOtpLogin(
     if (code.length < OTP_MIN_LENGTH || !tempToken || !termsAccepted || loading) return;
     setLoading(true);
     setError(null);
+    let session: CandidateSession | null = null;
     try {
-      const session = await verifyCandidateOtp(identity, code, tempToken);
+      session = await verifyCandidateOtp(identity, code, tempToken);
       persistCandidateSession(session);
-      onAuthenticated(session);
     } catch (err) {
       setError(message(err, 'Invalid or expired code'));
+      return;
+    } finally {
       setLoading(false);
+    }
+    try {
+      onAuthenticated(session);
+    } catch (err) {
+      setError(message(err, 'Signed in, but the workspace could not be opened.'));
     }
   }, [code, identity, tempToken, termsAccepted, loading, onAuthenticated]);
 

@@ -1,7 +1,6 @@
 """Gated beta / waitlist access requests for unprovisioned HR users."""
 from __future__ import annotations
 
-import html
 import logging
 import uuid
 
@@ -15,7 +14,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.corporate import Corporate
 from app.models.hr_user import HRUser
-from app.services.email import send_transactional_email
+from app.services.email import render_beta_access_request_html, send_transactional_email
 
 logger = logging.getLogger("app.beta_access")
 
@@ -23,32 +22,6 @@ router = APIRouter()
 
 _DEFAULT_TEST_SLUG = "acme"
 _DEFAULT_TEST_NAME = "Acme"
-
-
-def _beta_request_html(user_email: str, user_id: str) -> str:
-    safe_email = html.escape(user_email)
-    safe_id = html.escape(user_id)
-    return f"""<!DOCTYPE html>
-<html>
-<body style="font-family:Segoe UI,system-ui,sans-serif;line-height:1.5;color:#111827;">
-  <h2 style="margin:0 0 12px;">New beta access request</h2>
-  <p style="margin:0 0 16px;">An HR user requested MindQ beta access. Provision their tenant via SQL using the values below.</p>
-  <table style="border-collapse:collapse;font-size:14px;">
-    <tr>
-      <td style="padding:8px 12px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Email</td>
-      <td style="padding:8px 12px;border:1px solid #e5e7eb;font-family:ui-monospace,monospace;">{safe_email}</td>
-    </tr>
-    <tr>
-      <td style="padding:8px 12px;border:1px solid #e5e7eb;background:#f9fafb;font-weight:600;">Supabase UUID</td>
-      <td style="padding:8px 12px;border:1px solid #e5e7eb;font-family:ui-monospace,monospace;">{safe_id}</td>
-    </tr>
-  </table>
-  <p style="margin:16px 0 0;font-size:13px;color:#6b7280;">
-    Insert into <code>public.hr_users</code> (and create a <code>corporates</code> row if needed), then have the
-    user refresh their session so the custom access token hook injects <code>app_metadata.corporate_id</code>.
-  </p>
-</body>
-</html>"""
 
 
 async def _ensure_test_corporate(db: AsyncSession) -> uuid.UUID:
@@ -168,7 +141,7 @@ async def request_beta_access(
         result = send_transactional_email(
             admin_to,
             subject,
-            _beta_request_html(email, str(user.user_id)),
+            render_beta_access_request_html(email, str(user.user_id)),
             raise_on_error=True,
         )
     except RuntimeError as exc:

@@ -10,6 +10,8 @@ from app.services.email import (
     clean_recipient_email,
     format_deadline_timestamp,
     format_package_label,
+    render_admin_password_reset_html,
+    render_beta_access_request_html,
     render_candidate_invite_html,
     render_candidate_nudge_html,
     render_hr_completion_html,
@@ -346,6 +348,13 @@ async def test_candidate_invite_logs_dispatch_even_when_ses_fails(monkeypatch, c
 DARK_MARKERS = ("#0B0F17", "#111827", "ASSESS PULSE", "#6B4CE8")
 
 
+COMPANY_FOOTER_MARKERS = (
+    "MindQ (Pvt) Ltd",
+    "Level 35, West Tower, World Trade Center,",
+    "Colombo 01, Sri Lanka.",
+)
+
+
 def _all_templates() -> dict[str, str]:
     return {
         "invite": render_candidate_invite_html(
@@ -375,6 +384,13 @@ def _all_templates() -> dict[str, str]:
         ),
         "admin_otp": render_universal_otp_html("Admin Portal", "123456"),
         "candidate_otp": render_universal_otp_html("Candidate Portal", "654321"),
+        "admin_password_reset": render_admin_password_reset_html(
+            "https://qa.example.test/reset?token=abc"
+        ),
+        "beta_access": render_beta_access_request_html(
+            "hr@example.com",
+            "11111111-2222-3333-4444-555555555555",
+        ),
     }
 
 
@@ -386,6 +402,12 @@ def test_all_email_templates_use_the_light_theme():
         assert 'alt="MindQ"' in html_content, name
         for marker in DARK_MARKERS:
             assert marker not in html_content, (name, marker)
+
+
+def test_all_transactional_emails_include_company_footer():
+    for name, html_content in _all_templates().items():
+        for marker in COMPANY_FOOTER_MARKERS:
+            assert marker in html_content, (name, marker)
 
 
 def test_template_buttons_use_brand_indigo():

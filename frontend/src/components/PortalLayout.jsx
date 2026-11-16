@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import BrandLogo from './BrandLogo';
 import PortalFooter from './PortalFooter';
@@ -8,6 +8,9 @@ import RouteErrorBoundary from './route-error-boundary';
 import ThemeToggle from './ThemeToggle';
 import KeepAliveOutlet from './keep-alive-outlet';
 import { PORTAL_KEEP_PATTERNS } from './keep-alive-routes';
+import { api } from '../api/client';
+import { CANDIDATE_DASHBOARD_KEY } from '../features/candidate-dashboard/module-status';
+import { cachedQuery } from '../lib/query-cache';
 
 /**
  * Candidate assessment shell. Shares Design System tokens with admin Operate surfaces.
@@ -16,6 +19,15 @@ export default function PortalLayout() {
   const hasSession =
     typeof window !== 'undefined' && Boolean(localStorage.getItem('candidateToken'));
   const brandTo = hasSession ? '/portal/dashboard' : '/portal';
+
+  // Warm the candidate dashboard once at the shell so remounts hit cache.
+  useEffect(() => {
+    if (!hasSession) return undefined;
+    void cachedQuery(CANDIDATE_DASHBOARD_KEY, () => api.candidate.getDashboard()).catch(
+      () => undefined,
+    );
+    return undefined;
+  }, [hasSession]);
 
   return (
     <ToastProvider>
