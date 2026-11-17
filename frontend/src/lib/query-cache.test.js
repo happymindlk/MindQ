@@ -48,6 +48,6 @@ describe('query-cache', () => {
   it('can write a stale entry that still paints from peek', () => {
     setQuery('stale-paint', { ok: true }, { fresh: false });
     expect(peekQuery('stale-paint')).toEqual({ ok: true });
-    expect(isQueryFresh('stale-paint', 30_000)).toBe(false);
+    expect(isQueryFresh('stale-paint', 30000)).toBe(false);
   });
 });

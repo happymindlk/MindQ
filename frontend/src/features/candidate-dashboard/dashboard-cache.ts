@@ -2,7 +2,7 @@ import { peekQuery, setQuery } from '../../lib/query-cache';
 import { CANDIDATE_DASHBOARD_KEY, type ModuleStatus } from './module-status';
 
 /** Dashboard list stays warm for 30s; remounts paint cache then revalidate. */
-export const CANDIDATE_DASHBOARD_STALE_MS = 30_000;
+export const CANDIDATE_DASHBOARD_STALE_MS = 30000;
 
 export interface DashboardModulePatch {
   status: ModuleStatus;
