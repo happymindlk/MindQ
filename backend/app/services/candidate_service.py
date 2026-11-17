@@ -702,10 +702,13 @@ class CandidateService:
                 )
             ).scalar_one_or_none() or ""
 
+            # Dashboard only needs roster metadata — defer the questions JSONB
+            # bank so every candidate page load does not ship multi-MB blobs.
             assessments = (
                 await session.execute(
                     select(Assessment)
                     .where(Assessment.package_id == candidate.package_id)
+                    .options(defer(Assessment.questions))
                     .order_by(Assessment.position)
                 )
             ).scalars().all()
