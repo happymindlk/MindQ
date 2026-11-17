@@ -25,6 +25,7 @@ from app.models.assessment import Assessment
 from app.models.candidate import Candidate
 from app.models.candidate_evaluation import CandidateEvaluation
 from app.models.candidate_progress import CandidateProgress
+from app.models.candidate_report import CandidateReport
 from app.models.candidate_response import CandidateResponse
 from app.models.corporate import Corporate
 from app.models.package import Package
@@ -568,10 +569,11 @@ class CandidateService:
 
     @staticmethod
     async def reset_assessment(session: AsyncSession, candidate: Candidate) -> Candidate:
-        """Wipe responses, progress, and evaluations so the candidate can retake.
+        """Wipe responses, progress, reports, and evaluations so the candidate can retake.
 
-        Clears module answers, attempt timers/scores, cached JD narrative, and
-        ``logged_in_at``. Invite identity (email, access_code, package) is kept.
+        Clears module answers, attempt timers (including ``expires_at``), scores,
+        cached report snapshots / JD narrative, and ``logged_in_at``. Invite
+        identity (email, access_code, package) is kept.
 
         Args:
             session: Open async SQLAlchemy session.
@@ -591,6 +593,7 @@ class CandidateService:
             .values(
                 status=NOT_STARTED_STATUS,
                 started_at=None,
+                expires_at=None,
                 completed_at=None,
                 score=None,
                 client_duration_seconds=None,
@@ -601,6 +604,9 @@ class CandidateService:
                 score_details=None,
                 scoring_version=None,
             )
+        )
+        await session.execute(
+            delete(CandidateReport).where(CandidateReport.candidate_id == candidate_id)
         )
         await session.execute(
             delete(CandidateEvaluation).where(CandidateEvaluation.candidate_id == candidate_id)

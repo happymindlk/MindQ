@@ -246,6 +246,68 @@ describe('AssessmentRunner timer tone', () => {
   });
 });
 
+describe('AssessmentRunner untimed mount', () => {
+  it('never auto-submits when duration and expires_at are null', async () => {
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    const onTimeExpired = vi.fn();
+    renderRunner(
+      {
+        ...twoQuestionTest('psychometric'),
+        duration_seconds: null,
+        timer_mode: 'flexible',
+        started_at: new Date().toISOString(),
+        expires_at: null,
+        write_expires_at: null,
+        remaining_seconds: null,
+        write_remaining_seconds: null,
+        server_now: new Date().toISOString(),
+      },
+      transport,
+      'live',
+      { onTimeExpired },
+    );
+
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(transport.submit).not.toHaveBeenCalled();
+    expect(onTimeExpired).not.toHaveBeenCalled();
+  });
+
+  it('never auto-submits on remaining_seconds 0 when expires_at is missing (live)', async () => {
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    const onTimeExpired = vi.fn();
+    renderRunner(
+      {
+        ...twoQuestionTest('psychometric'),
+        duration_seconds: 60,
+        timer_mode: 'strict',
+        started_at: new Date(Date.now() - 61_000).toISOString(),
+        expires_at: null,
+        write_expires_at: null,
+        remaining_seconds: 0,
+        write_remaining_seconds: 0,
+      },
+      transport,
+      'live',
+      { onTimeExpired },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(transport.submit).not.toHaveBeenCalled();
+    expect(onTimeExpired).not.toHaveBeenCalled();
+  });
+});
+
 describe('AssessmentRunner leave / re-enter resume', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -337,12 +399,20 @@ describe('AssessmentRunner leave / re-enter resume', () => {
 
 describe('AssessmentRunner strict expiry', () => {
   function expiredTest(): RunnerTest {
+    const now = Date.now();
+    const started = new Date(now - 61_000);
+    const expires = new Date(started.getTime() + 60_000); // 1s in the past
     return {
       ...twoQuestionTest('psychometric'),
       duration_seconds: 60,
       timer_mode: 'strict',
-      started_at: new Date(Date.now() - 61_000).toISOString(),
+      started_at: started.toISOString(),
+      expires_at: expires.toISOString(),
+      // Write lock also elapsed so auto-submit arms immediately.
+      write_expires_at: expires.toISOString(),
+      server_now: new Date(now).toISOString(),
       remaining_seconds: 0,
+      write_remaining_seconds: 0,
     };
   }
 
@@ -387,13 +457,19 @@ describe('AssessmentRunner strict expiry', () => {
     };
     const onTimeExpired = vi.fn();
     try {
+      const startedAt = new Date();
+      const expiresAt = new Date(startedAt.getTime() + 3_000);
       renderRunner(
         {
           ...twoQuestionTest('psychometric'),
           duration_seconds: 60,
           timer_mode: 'strict',
-          started_at: new Date().toISOString(),
+          started_at: startedAt.toISOString(),
+          expires_at: expiresAt.toISOString(),
+          write_expires_at: expiresAt.toISOString(),
+          server_now: startedAt.toISOString(),
           remaining_seconds: 3,
+          write_remaining_seconds: 3,
         },
         transport,
         'live',
@@ -477,12 +553,19 @@ describe('AssessmentRunner grace resume', () => {
       submit: vi.fn(async () => undefined),
     };
     const onTimeExpired = vi.fn();
+    const now = Date.now();
+    const startedAt = new Date(now - 61_000);
+    const expiresAt = new Date(now - 1_000);
+    const writeExpiresAt = new Date(now + 15_000);
     renderRunner(
       {
         ...twoQuestionTest('psychometric'),
         duration_seconds: 60,
         timer_mode: 'strict',
-        started_at: new Date(Date.now() - 61_000).toISOString(),
+        started_at: startedAt.toISOString(),
+        expires_at: expiresAt.toISOString(),
+        write_expires_at: writeExpiresAt.toISOString(),
+        server_now: new Date(now).toISOString(),
         remaining_seconds: 0,
         write_remaining_seconds: 15,
       },
@@ -525,13 +608,19 @@ describe('AssessmentRunner timed hard-cut (flexible tag)', () => {
     };
     const onSubmitted = vi.fn();
     const onTimeExpired = vi.fn();
+    const started = new Date(Date.now() - 61_000);
+    const expires = new Date(started.getTime() + 60_000);
     renderRunner(
       {
         ...twoQuestionTest('psychometric'),
         duration_seconds: 60,
         timer_mode: 'flexible',
-        started_at: new Date(Date.now() - 61_000).toISOString(),
+        started_at: started.toISOString(),
+        expires_at: expires.toISOString(),
+        write_expires_at: expires.toISOString(),
+        server_now: new Date().toISOString(),
         remaining_seconds: 0,
+        write_remaining_seconds: 0,
       },
       transport,
       'live',

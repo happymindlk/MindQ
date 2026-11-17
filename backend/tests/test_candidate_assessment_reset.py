@@ -114,13 +114,22 @@ async def test_reset_assessment_clears_child_rows_and_login():
 
     assert result is candidate
     assert candidate.logged_in_at is None
-    assert session.execute.await_count == 3
+    # responses DELETE, progress UPDATE, reports DELETE, evaluations DELETE
+    assert session.execute.await_count == 4
     session.commit.assert_awaited_once()
     session.refresh.assert_awaited_once_with(candidate)
 
-    # Progress UPDATE must reset to NOT_STARTED (compile values for sanity).
+    # Progress UPDATE must reset to NOT_STARTED and clear the attempt deadline.
     progress_stmt = session.execute.await_args_list[1].args[0]
     compiled = progress_stmt.compile()
-    assert compiled.params.get("status") == NOT_STARTED_STATUS or NOT_STARTED_STATUS in str(
-        progress_stmt
-    )
+    params = compiled.params
+    assert params.get("status") == NOT_STARTED_STATUS or NOT_STARTED_STATUS in str(progress_stmt)
+    assert "expires_at" in params
+    assert params.get("expires_at") is None
+    assert params.get("started_at") is None
+    assert params.get("completed_at") is None
+
+    report_sql = str(session.execute.await_args_list[2].args[0])
+    evaluation_sql = str(session.execute.await_args_list[3].args[0])
+    assert "candidate_reports" in report_sql
+    assert "candidate_evaluations" in evaluation_sql

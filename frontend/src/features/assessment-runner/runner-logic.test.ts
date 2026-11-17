@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RunnerQuestion } from '../assessment-builder/api/library-api';
 import {
   buildResponses,
+  hasAbsoluteDeadline,
   hasContent,
   isAnswered,
   isAttemptLocked,
@@ -10,6 +11,22 @@ import {
   resolveTopDisclaimer,
   resolveWriteRemainingSeconds,
 } from './runner-logic';
+
+describe('hasAbsoluteDeadline', () => {
+  it('is false when both deadline fields are missing', () => {
+    expect(hasAbsoluteDeadline({ expires_at: null, write_expires_at: null })).toBe(false);
+    expect(hasAbsoluteDeadline({})).toBe(false);
+  });
+
+  it('is true when expires_at or write_expires_at is a non-empty string', () => {
+    expect(
+      hasAbsoluteDeadline({ expires_at: '2026-11-13T12:00:00.000Z', write_expires_at: null }),
+    ).toBe(true);
+    expect(
+      hasAbsoluteDeadline({ expires_at: null, write_expires_at: '2026-11-13T12:00:15.000Z' }),
+    ).toBe(true);
+  });
+});
 
 describe('resolveRemainingSeconds', () => {
   it('prefers the server integer over the full duration', () => {
