@@ -35,6 +35,9 @@ const tests = [
     status: 'in_progress',
     launchable: true,
     duration_seconds: 240,
+    expires_at: '2099-01-01T12:04:00.000Z',
+    server_now: '2099-01-01T12:00:00.000Z',
+    remaining_seconds: 240,
   },
   {
     id: 't3',
@@ -42,6 +45,14 @@ const tests = [
     description: null,
     status: 'completed',
     launchable: false,
+  },
+  {
+    id: 't4',
+    title: 'IPIP Interpersonal Circumplex (IPIP-IPC)',
+    description: null,
+    status: 'not_started',
+    launchable: true,
+    duration_seconds: 270,
   },
 ];
 
@@ -76,8 +87,10 @@ describe('TestDashboard deadline', () => {
     expect(screen.queryByText('Assessment Closed')).not.toBeInTheDocument();
 
     expect(screen.getByText('3 mins')).toBeInTheDocument();
-    expect(screen.getByText('4 mins')).toBeInTheDocument();
-    expect(screen.getByText('Not started')).toBeInTheDocument();
+    expect(screen.getByText('4m 30s')).toBeInTheDocument();
+    expect(screen.getByRole('timer')).toHaveTextContent(/Time remaining:/i);
+    expect(screen.queryByText('4 mins')).not.toBeInTheDocument();
+    expect(screen.getAllByText('Not started').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('In Progress')).toBeInTheDocument();
     expect(screen.getAllByText('Completed').length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByRole('button', { name: /sql/i })).not.toBeInTheDocument();
@@ -104,7 +117,7 @@ describe('TestDashboard deadline', () => {
     const user = userEvent.setup();
     await user.click(screen.getByText('Cognitive Reflection Test'));
     expect(navigate).not.toHaveBeenCalled();
-    expect(screen.getByText('Assessment closed')).toBeInTheDocument();
+    expect(screen.getAllByText('Assessment closed').length).toBeGreaterThanOrEqual(1);
 
     await user.click(screen.getByRole('button', { name: /mini-ipip/i }));
     expect(navigate).toHaveBeenCalledWith('/portal/test/t2');
@@ -123,7 +136,7 @@ describe('TestDashboard deadline', () => {
 
     const greeting = await screen.findByText(/hello, ada lovelace/i);
     const beforeYouBegin = screen.getByText('Before You Begin');
-    const counter = screen.getByText(/you have 2 tests remaining in your assessment suite\./i);
+    const counter = screen.getByText(/you have 3 tests remaining in your assessment suite\./i);
     const firstTest = screen.getByText('Cognitive Reflection Test');
 
     expect(greeting.compareDocumentPosition(beforeYouBegin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

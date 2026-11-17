@@ -125,13 +125,20 @@ export function formatDuration(seconds: number | null): string {
 /**
  * Compact duration badge for candidate overview / runner chrome.
  *
+ * Formats ``duration_seconds`` precisely — never round 270s up to 5 minutes.
+ * Whole minutes keep the ``mins`` label; mixed durations use ``Nm Ns``.
+ *
  * @param seconds - Duration in seconds (`duration_seconds` / `time_limit_seconds`).
- * @returns e.g. `"⏱ 4 mins"`, or null when untimed.
+ * @returns e.g. `"⏱ 10 mins"`, `"⏱ 4m 30s"`, or null when untimed.
  */
 export function formatDurationBadge(seconds: number | null | undefined): string | null {
   if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return null;
-  const mins = Math.max(1, Math.round(seconds / 60));
-  return `⏱ ${mins} min${mins === 1 ? '' : 's'}`;
+  const total = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  if (minutes === 0) return `⏱ ${rest}s`;
+  if (rest === 0) return `⏱ ${minutes} min${minutes === 1 ? '' : 's'}`;
+  return `⏱ ${minutes}m ${rest}s`;
 }
 
 export function statusLabel(module: Pick<AssessmentModule, 'status' | 'version' | 'isLocked'>): string {
