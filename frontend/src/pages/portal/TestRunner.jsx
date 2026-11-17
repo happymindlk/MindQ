@@ -201,7 +201,13 @@ export default function TestRunner() {
 
   if (isLoading && !test) {
     return (
-      <div className="w-full max-w-2xl mx-auto py-6 space-y-4" role="status" aria-label="Loading test">
+      <div
+        className="w-full max-w-2xl mx-auto py-6 space-y-4"
+        role="status"
+        aria-label="Opening assessment"
+        aria-busy="true"
+      >
+        <p className="text-sm font-medium text-muted">Opening assessment…</p>
         <Skeleton className="h-4 w-40 animate-pulse" />
         <Skeleton className="h-2 w-full animate-pulse" />
         <Skeleton className="h-64 w-full animate-pulse" />
