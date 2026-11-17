@@ -143,7 +143,7 @@ export function useModuleTimer({
 
   useEffect(() => {
     // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cb1f3d'},body:JSON.stringify({sessionId:'cb1f3d',runId:'pre-fix',hypothesisId:'A,C,E',location:'use-module-timer.ts:effect',message:'module timer effect arm',data:{remainingSeconds,expireRemainingSeconds:expireRemainingSeconds??null,expireSeed,displayDeadline,expireDeadline,enabled,seedKey:nextSeedKey},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cb1f3d'},body:JSON.stringify({sessionId:'cb1f3d',runId:'post-fix',hypothesisId:'A,C,E',location:'use-module-timer.ts:effect',message:'module timer effect arm',data:{displayDeadline,expireDeadline,enabled},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
     if ((displayDeadline === null && expireDeadline === null) || !enabled) {
       clearTicker();
@@ -170,7 +170,7 @@ export function useModuleTimer({
         expireDeadline === null ? null : computeRemaining(expireDeadline, nowMs);
       // #region agent log
       if (expireRaw !== null && expireRaw <= 0) {
-        fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cb1f3d'},body:JSON.stringify({sessionId:'cb1f3d',runId:'post-fix',hypothesisId:'A,E',location:'use-module-timer.ts:tick-expire',message:'module timer expire gate',data:{remainingSeconds,expireSeed,expireDeadline,displayRaw,expireRaw,expireFired:expireFiredRef.current,willFire:!expireFiredRef.current&&expireDeadline!==null},timestamp:Date.now()})}).catch(()=>{});
+        fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cb1f3d'},body:JSON.stringify({sessionId:'cb1f3d',runId:'post-fix',hypothesisId:'A,E',location:'use-module-timer.ts:tick-expire',message:'module timer expire gate',data:{displayDeadline,expireDeadline,displayRaw,expireRaw,expireFired:expireFiredRef.current,willFire:!expireFiredRef.current&&expireDeadline!==null},timestamp:Date.now()})}).catch(()=>{});
       }
       // #endregion
       if (expireDeadline !== null && expireRaw !== null && expireRaw <= 0 && !expireFiredRef.current) {
