@@ -88,7 +88,7 @@ describe('StatusTile live countdown', () => {
     expect(screen.getByText(/Continue test/i)).toBeInTheDocument();
 
     act(() => {
-      vi.advanceTimersByTime(5_000);
+      vi.advanceTimersByTime(5000);
     });
 
     expect(screen.getByRole('timer')).toHaveTextContent('0:00');
@@ -99,7 +99,7 @@ describe('StatusTile live countdown', () => {
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
 
     act(() => {
-      vi.advanceTimersByTime(3_000);
+      vi.advanceTimersByTime(3000);
     });
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
   });
