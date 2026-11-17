@@ -146,17 +146,26 @@ export default function TestDashboard() {
                 serverNow={test.server_now ?? dashboardData.server_now ?? null}
                 remainingSeconds={test.remaining_seconds ?? null}
                 onTimerExpired={() => {
+                  // Optimistic Finalizing… is already on the tile; refresh to COMPLETED.
                   void loadDashboard();
                 }}
                 onPrefetch={() => {
                   // Prefetch is safe: GET /test no longer marks IN_PROGRESS.
+                  // In-progress uses force so a hover-warmed GET can be shared with
+                  // the runner mount (same in-flight promise) for zero click lag.
                   void cachedQuery(
                     candidateTestKey(test.id),
                     () => api.candidate.getTest(test.id),
-                    { staleTime: TEST_PREFETCH_STALE_MS },
+                    status === 'in_progress'
+                      ? { force: true }
+                      : { staleTime: TEST_PREFETCH_STALE_MS },
                   ).catch(() => undefined);
                 }}
-                onClick={() => navigate(`/portal/test/${test.id}`)}
+                onClick={() => {
+                  // Navigate immediately — never await network before routing.
+                  // The runner mounts a skeleton and loads/initializes itself.
+                  navigate(`/portal/test/${test.id}`);
+                }}
               />
             );
           })}

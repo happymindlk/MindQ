@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Badge from './Badge';
-import { ArrowRight, CheckCircle, Clock, FileText, Lock } from 'lucide-react';
+import { ArrowRight, CheckCircle, Clock, FileText, Lock, Loader2 } from 'lucide-react';
 import { normalizeModuleStatus } from '../../features/candidate-dashboard/module-status';
 import {
   computeServerOffsetMs,
@@ -61,60 +61,75 @@ export default function StatusTile({
     }
 
     let expiredNotified = false;
-    const notifyExpired = () => {
-      if (expiredNotified || typeof onTimerExpired !== 'function') return;
-      expiredNotified = true;
-      onTimerExpired();
+    /** @type {number | null} */
+    let intervalId = null;
+    // Calibrate once per payload (same as useServerTimer) — never recompute
+    // offset each tick or the countdown freezes against a stale server_now.
+    const clockOffsetMs = computeServerOffsetMs(serverNow);
+    const deadlineMs =
+      !expiresAt && typeof remainingSeconds === 'number' && Number.isFinite(remainingSeconds)
+        ? Date.now() + Math.max(0, remainingSeconds) * 1000
+        : null;
+
+    if (!expiresAt && deadlineMs === null) {
+      setLiveRemaining(null);
+      return undefined;
+    }
+
+    const stopTicker = () => {
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
     };
 
-    if (expiresAt) {
-      const offset = computeServerOffsetMs(serverNow);
-      const tick = () => {
-        const left = remainingFromDeadline(expiresAt, offset);
-        setLiveRemaining(left);
-        if (left !== null && left <= 0) notifyExpired();
-      };
-      tick();
-      const id = window.setInterval(tick, 1000);
-      const onVisible = () => {
-        if (document.visibilityState === 'visible') tick();
-      };
+    const notifyExpired = () => {
+      if (expiredNotified) return;
+      expiredNotified = true;
+      stopTicker();
+      if (typeof onTimerExpired === 'function') onTimerExpired();
+    };
+
+    const tick = () => {
+      let left = null;
+      if (expiresAt) {
+        // Math.max(0, ceil((expiresAt - (now + offset)) / 1000))
+        left = remainingFromDeadline(expiresAt, clockOffsetMs);
+      } else if (deadlineMs !== null) {
+        left = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
+      }
+      if (left === null) {
+        setLiveRemaining(null);
+        return;
+      }
+      const clamped = Math.max(0, left);
+      setLiveRemaining(clamped);
+      if (clamped <= 0) notifyExpired();
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+
+    tick();
+    // Do not arm a new interval once already at zero.
+    if (!expiredNotified) {
+      intervalId = window.setInterval(tick, 1000);
       document.addEventListener('visibilitychange', onVisible);
       window.addEventListener('focus', tick);
-      return () => {
-        window.clearInterval(id);
-        document.removeEventListener('visibilitychange', onVisible);
-        window.removeEventListener('focus', tick);
-      };
     }
 
-    if (typeof remainingSeconds === 'number' && Number.isFinite(remainingSeconds)) {
-      const deadlineMs = Date.now() + Math.max(0, remainingSeconds) * 1000;
-      const tick = () => {
-        const left = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
-        setLiveRemaining(left);
-        if (left <= 0) notifyExpired();
-      };
-      tick();
-      const id = window.setInterval(tick, 1000);
-      const onVisible = () => {
-        if (document.visibilityState === 'visible') tick();
-      };
-      document.addEventListener('visibilitychange', onVisible);
-      window.addEventListener('focus', tick);
-      return () => {
-        window.clearInterval(id);
-        document.removeEventListener('visibilitychange', onVisible);
-        window.removeEventListener('focus', tick);
-      };
-    }
-
-    setLiveRemaining(null);
-    return undefined;
+    return () => {
+      stopTicker();
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', tick);
+    };
   }, [isInProgress, expiresAt, serverNow, remainingSeconds, onTimerExpired]);
 
-  const icon = isCompleted || timedOut ? (
+  const icon = isCompleted ? (
     <CheckCircle className="h-5 w-5 text-emerald-500" />
+  ) : timedOut ? (
+    <Loader2 className="h-5 w-5 animate-spin text-blue-400" aria-hidden />
   ) : isLocked ? (
     <Lock className="h-5 w-5" />
   ) : isInProgress ? (
@@ -128,8 +143,8 @@ export default function StatusTile({
       Completed
     </Badge>
   ) : timedOut ? (
-    <Badge variant="completed" showDot>
-      Time Up
+    <Badge variant="active" showDot>
+      Finalizing…
     </Badge>
   ) : isInProgress ? (
     <Badge variant="active" showDot>
@@ -161,7 +176,8 @@ export default function StatusTile({
       className={`
         flex min-h-[9.5rem] flex-col rounded-lg border border-slate-200 bg-surface p-3 dark:border-neutral-800
         ${isInProgress && !isLocked && !timedOut ? 'border-blue-500/40' : ''}
-        ${isCompleted || timedOut ? 'border-emerald-500/20' : ''}
+        ${isCompleted ? 'border-emerald-500/20' : ''}
+        ${timedOut ? 'border-blue-500/30' : ''}
         ${isLocked ? 'opacity-70' : ''}
         ${
           interactive
@@ -181,7 +197,7 @@ export default function StatusTile({
             aria-label="Time remaining"
             className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 font-mono text-xs font-semibold tabular-nums ${
               timedOut
-                ? 'border-danger/40 bg-danger/10 text-danger'
+                ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300'
                 : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300'
             }`}
           >
@@ -212,7 +228,7 @@ export default function StatusTile({
           )}
           {timedOut && (
             <span className="cursor-not-allowed text-xs font-medium text-slate-400 dark:text-slate-500">
-              Time Up — answers locked
+              Finalizing results…
             </span>
           )}
           {interactive && (

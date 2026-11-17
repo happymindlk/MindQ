@@ -69,7 +69,7 @@ describe('StatusTile live countdown', () => {
     expect(screen.queryByText('4 mins')).not.toBeInTheDocument();
   });
 
-  it('ticks down, locks Resume at 0:00, and fires onTimerExpired once', () => {
+  it('ticks down, clamps at 0:00, shows Finalizing, and fires onTimerExpired once', () => {
     const onClick = vi.fn();
     const onTimerExpired = vi.fn();
     render(
@@ -92,15 +92,36 @@ describe('StatusTile live countdown', () => {
     });
 
     expect(screen.getByRole('timer')).toHaveTextContent('0:00');
-    expect(screen.getByText('Time Up')).toBeInTheDocument();
-    expect(screen.getByText(/Time Up — answers locked/i)).toBeInTheDocument();
+    expect(screen.getByText('Finalizing…')).toBeInTheDocument();
+    expect(screen.getByText(/Finalizing results/i)).toBeInTheDocument();
     expect(screen.queryByText(/Continue test/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
 
+    // Interval must stop — further advances must not re-fire or go negative.
     act(() => {
       vi.advanceTimersByTime(3000);
     });
+    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(onTimerExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('never displays a negative countdown when expires_at is already past', () => {
+    const onTimerExpired = vi.fn();
+    render(
+      <StatusTile
+        title="Mini-IPIP"
+        status="in_progress"
+        expiresAt="2026-11-13T11:59:00.000Z"
+        serverNow="2026-11-13T12:00:00.000Z"
+        remainingSeconds={0}
+        onClick={() => undefined}
+        onTimerExpired={onTimerExpired}
+      />,
+    );
+
+    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(screen.getByText('Finalizing…')).toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
   });
 });
