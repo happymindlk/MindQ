@@ -10,6 +10,7 @@ import { resolveAssessmentMediaUrl } from '../../lib/resolve-assessment-media-ur
 import { RunnerQuestionInput } from './runner-question-input';
 import {
   buildResponses,
+  hasAbsoluteDeadline,
   hasContent,
   isAnswered,
   isAttemptLocked,
@@ -170,12 +171,26 @@ export function AssessmentRunner({
     [cancelPendingAutosave, onLocked, onSubmitted, onTimeExpired, telemetry, test.id, transport],
   );
 
+  const canAutoSubmit = hasAbsoluteDeadline(test);
+
   const onExpire = useCallback(() => {
+    // Strict guard: never auto-submit without an absolute write/display deadline.
+    // remaining_seconds === 0 alone (untimed / pre-hydration) must not submit.
+    const writeDeadline = test.write_expires_at || test.expires_at;
+    if (typeof writeDeadline !== 'string' || writeDeadline.length === 0) {
+      // #region agent log
+      fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cb1f3d'},body:JSON.stringify({sessionId:'cb1f3d',runId:'post-fix',hypothesisId:'A',location:'assessment-runner.tsx:onExpire',message:'onExpire blocked — no absolute deadline',data:{testId:test.id,expires_at:test.expires_at??null,write_expires_at:test.write_expires_at??null,duration_seconds:test.duration_seconds??null,remaining_seconds:test.remaining_seconds??null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      return;
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cb1f3d'},body:JSON.stringify({sessionId:'cb1f3d',runId:'post-fix',hypothesisId:'A,B,D,E',location:'assessment-runner.tsx:onExpire',message:'onExpire invoked — will auto-submit',data:{testId:test.id,expires_at:test.expires_at??null,write_expires_at:test.write_expires_at??null,duration_seconds:test.duration_seconds??null,remaining_seconds:test.remaining_seconds??null,started_at:test.started_at??null,writeDeadline},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     // Cancel pending autosave first, then single-fire submit (submit() owns the lock).
     cancelPendingAutosave();
     setTimeUp(true);
     void submit('expired');
-  }, [cancelPendingAutosave, submit]);
+  }, [cancelPendingAutosave, submit, test.duration_seconds, test.expires_at, test.id, test.remaining_seconds, test.started_at, test.write_expires_at]);
 
   const onDisplayExpire = useCallback(() => {
     setTimeUp(true);
@@ -187,10 +202,18 @@ export function AssessmentRunner({
     typeof test.expires_at === 'string' && test.expires_at.length > 0;
   const moduleRemaining = hasWallClock ? null : resolveRemainingSeconds(test);
   const moduleWriteRemaining = hasWallClock ? null : resolveWriteRemainingSeconds(test);
+  // #region agent log
+  fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cb1f3d'},body:JSON.stringify({sessionId:'cb1f3d',runId:'post-fix',hypothesisId:'A,C,D,E',location:'assessment-runner.tsx:timer-wiring',message:'timer wiring decision',data:{hasWallClock,canAutoSubmit,moduleRemaining,moduleWriteRemaining,expires_at:test.expires_at??null,write_expires_at:test.write_expires_at??null,duration_seconds:test.duration_seconds??null,remaining_seconds:test.remaining_seconds??null,started_at:test.started_at??null,submitting},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   const moduleTimer = useModuleTimer({
     remainingSeconds: moduleRemaining,
     expireRemainingSeconds: moduleWriteRemaining,
-    onExpire: hasWallClock ? undefined : onExpire,
+    // Preview timed modules may lack wall-clock fields; live auto-submit requires them.
+    onExpire: hasWallClock
+      ? undefined
+      : canAutoSubmit || mode === 'preview'
+        ? onExpire
+        : undefined,
     onDisplayExpire: hasWallClock ? undefined : onDisplayExpire,
     enabled: !hasWallClock && !submitting,
   });
@@ -198,7 +221,7 @@ export function AssessmentRunner({
     expiresAt: hasWallClock ? test.expires_at : null,
     writeExpiresAt: hasWallClock ? (test.write_expires_at ?? test.expires_at) : null,
     serverNow: test.server_now,
-    onExpire: hasWallClock ? onExpire : undefined,
+    onExpire: hasWallClock && canAutoSubmit ? onExpire : undefined,
     onDisplayExpire: hasWallClock ? onDisplayExpire : undefined,
     enabled: hasWallClock && !submitting,
   });

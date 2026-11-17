@@ -30,6 +30,25 @@ export function resolveTopDisclaimer(test: RunnerTest | Record<string, unknown>)
 }
 
 /**
+ * Whether the payload carries an absolute auto-submit / display deadline.
+ *
+ * Auto-submit must never arm from ``remaining_seconds === 0`` alone when
+ * ``expires_at`` / ``write_expires_at`` are missing — that falsely expires
+ * untimed modules and pre-hydration mounts.
+ *
+ * @param test - Candidate or preview runner payload.
+ * @returns True when a non-empty ISO deadline string is present.
+ */
+export function hasAbsoluteDeadline(
+  test: Pick<RunnerTest, 'expires_at' | 'write_expires_at'>,
+): boolean {
+  const write = test.write_expires_at;
+  if (typeof write === 'string' && write.length > 0) return true;
+  const expires = test.expires_at;
+  return typeof expires === 'string' && expires.length > 0;
+}
+
+/**
  * Seed for the module display countdown. The server's integer
  * `remaining_seconds` is authoritative; the full duration is used only when
  * the payload carries none **and** the attempt has not started yet (preview
