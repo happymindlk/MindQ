@@ -221,11 +221,6 @@ export default function StatusTile({
 
       <div className="mt-4 flex items-end justify-between gap-2">
         <div className="min-w-0">
-          {isCompleted && (
-            <span className="cursor-not-allowed text-xs font-medium text-slate-400 dark:text-slate-500">
-              Completed
-            </span>
-          )}
           {timedOut && (
             <span className="cursor-not-allowed text-xs font-medium text-slate-400 dark:text-slate-500">
               Finalizing results…

@@ -16,7 +16,7 @@ describe('StatusTile lifecycle', () => {
       />,
     );
 
-    expect(screen.getAllByText('Completed')).toHaveLength(2);
+    expect(screen.getAllByText('Completed')).toHaveLength(1);
     expect(screen.queryByText(/Start test/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     await userEvent.setup().click(screen.getByText('CogniCheck'));
