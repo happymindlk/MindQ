@@ -52,6 +52,41 @@ describe('useServerTimer', () => {
     expect(result.current.remainingSeconds).toBe(45);
   });
 
+  it('recalibrates from a fresh server_now on re-entry so remaining does not inflate', () => {
+    const { result, rerender } = renderHook(
+      ({
+        expiresAt,
+        serverNow,
+      }: {
+        expiresAt: string;
+        serverNow: string;
+      }) => useServerTimer({ expiresAt, serverNow }),
+      {
+        initialProps: {
+          // Stale /start payload: full 600s from an earlier server_now.
+          expiresAt: '2026-11-13T12:10:00.000Z',
+          serverNow: '2026-11-13T12:00:00.000Z',
+        },
+      },
+    );
+    expect(result.current.remainingSeconds).toBe(600);
+
+    // Leave for 360s; resume GET returns the same expires_at with a fresh server_now.
+    act(() => {
+      vi.setSystemTime(new Date('2026-11-13T12:06:00.000Z'));
+    });
+    rerender({
+      expiresAt: '2026-11-13T12:10:00.000Z',
+      serverNow: '2026-11-13T12:06:00.000Z',
+    });
+    expect(result.current.remainingSeconds).toBe(240);
+
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(result.current.remainingSeconds).toBe(235);
+  });
+
   it('resyncs remaining time on visibilitychange after backgrounding', () => {
     const { result } = renderHook(() =>
       useServerTimer({

@@ -32,17 +32,23 @@ export function resolveTopDisclaimer(test: RunnerTest | Record<string, unknown>)
 /**
  * Seed for the module display countdown. The server's integer
  * `remaining_seconds` is authoritative; the full duration is used only when
- * the payload carries none (preview runs, which start at mount).
+ * the payload carries none **and** the attempt has not started yet (preview
+ * runs / pre-start). Never reset to ``duration_seconds`` when ``started_at``
+ * is already present — that would inflate a resume countdown to full time.
  *
  * @param test - Candidate or preview runner payload.
- * @returns Seconds left, or null when the module is untimed.
+ * @returns Seconds left, or null when the module is untimed / unseedable.
  */
 export function resolveRemainingSeconds(
-  test: Pick<RunnerTest, 'duration_seconds' | 'remaining_seconds'>,
+  test: Pick<RunnerTest, 'duration_seconds' | 'remaining_seconds'> & {
+    started_at?: string | null;
+  },
 ): number | null {
   if (!test.duration_seconds) return null;
   const server = test.remaining_seconds;
   if (typeof server === 'number' && Number.isFinite(server)) return Math.max(0, Math.floor(server));
+  // In-progress attempt without a server seed: do not fall back to full duration.
+  if (test.started_at) return null;
   return test.duration_seconds;
 }
 
@@ -56,7 +62,9 @@ export function resolveRemainingSeconds(
  * @returns Seconds until write lock, or null when untimed.
  */
 export function resolveWriteRemainingSeconds(
-  test: Pick<RunnerTest, 'duration_seconds' | 'remaining_seconds' | 'write_remaining_seconds'>,
+  test: Pick<RunnerTest, 'duration_seconds' | 'remaining_seconds' | 'write_remaining_seconds'> & {
+    started_at?: string | null;
+  },
 ): number | null {
   if (!test.duration_seconds) return null;
   const write = test.write_remaining_seconds;

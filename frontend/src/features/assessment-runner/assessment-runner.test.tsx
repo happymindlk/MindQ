@@ -246,6 +246,95 @@ describe('AssessmentRunner timer tone', () => {
   });
 });
 
+describe('AssessmentRunner leave / re-enter resume', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('resumes a 600s module at 04:00 from expires_at, ticks to 03:55, and does not autosave hydrated answers', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-13T12:06:00.000Z'));
+
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    const serverNow = '2026-11-13T12:06:00.000Z';
+    const startedAt = '2026-11-13T12:00:00.000Z';
+    const expiresAt = '2026-11-13T12:10:00.000Z'; // 240s remaining of 600s
+    const writeExpiresAt = '2026-11-13T12:10:15.000Z';
+
+    renderRunner(
+      {
+        ...twoQuestionTest('psychometric'),
+        duration_seconds: 600,
+        timer_mode: 'strict',
+        started_at: startedAt,
+        expires_at: expiresAt,
+        write_expires_at: writeExpiresAt,
+        server_now: serverNow,
+        remaining_seconds: 240,
+        write_remaining_seconds: 255,
+        answers: { q1: 'Alpha' },
+      },
+      transport,
+      'live',
+      { initialAnswers: { q1: 'Alpha' } },
+    );
+
+    const badge = screen.getByRole('timer');
+    expect(badge).toHaveTextContent('4:00');
+    expect(badge).not.toHaveTextContent('10:00');
+    expect(screen.getByRole('radio', { name: /Alpha/ })).toBeChecked();
+
+    // Hydrated answers must not fire an immediate autosave.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(transport.autosave).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(badge).toHaveTextContent('3:55');
+    expect(transport.autosave).not.toHaveBeenCalled();
+    expect(transport.submit).not.toHaveBeenCalled();
+  });
+
+  it('resumes from remaining_seconds alone without resetting to duration_seconds', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-13T12:06:00.000Z'));
+
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+
+    renderRunner(
+      {
+        ...twoQuestionTest('psychometric'),
+        duration_seconds: 600,
+        timer_mode: 'strict',
+        started_at: '2026-11-13T12:00:00.000Z',
+        remaining_seconds: 240,
+        write_remaining_seconds: 255,
+      },
+      transport,
+      'live',
+      { initialAnswers: { q1: 'Beta' } },
+    );
+
+    const badge = screen.getByRole('timer');
+    expect(badge).toHaveTextContent('4:00');
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(badge).toHaveTextContent('3:55');
+    expect(transport.autosave).not.toHaveBeenCalled();
+  });
+});
+
 describe('AssessmentRunner strict expiry', () => {
   function expiredTest(): RunnerTest {
     return {

@@ -106,14 +106,23 @@ export function useServerTimer({
   const writeAt = writeExpiresAt === undefined ? expiresAt : writeExpiresAt;
   const calibrationKey = `${expiresAt ?? ''}|${writeAt ?? ''}|${serverNow ?? ''}`;
 
-  if (calibratedForRef.current !== calibrationKey) {
-    calibratedForRef.current = calibrationKey;
-    clockOffsetMsRef.current = computeServerOffsetMs(serverNow, nowRef.current());
-  }
+  const [remaining, setRemaining] = useState<number | null>(() => {
+    const offset = computeServerOffsetMs(serverNow, nowRef.current());
+    return remainingFromDeadline(expiresAt, offset, nowRef.current());
+  });
 
-  const [remaining, setRemaining] = useState<number | null>(() =>
-    remainingFromDeadline(expiresAt, clockOffsetMsRef.current, nowRef.current()),
-  );
+  // Recalibrate whenever GET /test or POST /start returns new timing metadata.
+  // Derive remaining from the absolute deadline — never from a drifting counter.
+  if (calibratedForRef.current !== calibrationKey) {
+    const hadPriorCalibration = calibratedForRef.current !== null;
+    calibratedForRef.current = calibrationKey;
+    const clientNow = nowRef.current();
+    clockOffsetMsRef.current = computeServerOffsetMs(serverNow, clientNow);
+    // Skip setState on the initial mount — useState already seeded remaining.
+    if (hadPriorCalibration) {
+      setRemaining(remainingFromDeadline(expiresAt, clockOffsetMsRef.current, clientNow));
+    }
+  }
 
   const clearTicker = useCallback(() => {
     if (intervalRef.current !== null) {

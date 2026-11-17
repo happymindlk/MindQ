@@ -67,11 +67,17 @@ export default function TestRunner() {
     async function loadTest() {
       if (!testId) return;
       try {
-        const data = await cachedQuery(cacheKey, () => api.candidate.getTest(testId));
+        // Always force a network GET: a cached POST /start payload keeps the
+        // original server_now / remaining_seconds and would inflate the wall-clock
+        // timer back to full duration on leave/re-enter.
+        const data = await cachedQuery(cacheKey, () => api.candidate.getTest(testId), {
+          force: true,
+        });
         // A Start click that resolved first already holds the authoritative timer seed.
         if (cancelled || startedRef.current) return;
         setInitialAnswers(mergeAnswers(data.answers || {}, readDraft(candidateId, testId)));
         setTest(data);
+        // Already-started attempts skip the instruction gate and resume in-place.
         setPhase(data.started_at ? 'running' : 'instructions');
         setLoadError(null);
         setLockDetail(null);
@@ -278,9 +284,19 @@ export default function TestRunner() {
     );
   }
 
+  // Remount when authoritative timing arrives so the countdown never inherits a
+  // stale full-duration deadline from a prior visit or cached /start payload.
+  const runnerKey = [
+    test.id,
+    test.started_at ?? 'idle',
+    test.expires_at ?? '',
+    test.server_now ?? '',
+    String(test.remaining_seconds ?? ''),
+  ].join(':');
+
   return (
     <AssessmentRunner
-      key={test.id}
+      key={runnerKey}
       test={test}
       mode="live"
       initialAnswers={initialAnswers}

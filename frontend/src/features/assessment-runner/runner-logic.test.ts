@@ -26,6 +26,22 @@ describe('resolveRemainingSeconds', () => {
     expect(resolveRemainingSeconds({ duration_seconds: 180, remaining_seconds: null })).toBe(180);
   });
 
+  it('never resets to full duration when started_at is set but remaining is missing', () => {
+    expect(
+      resolveRemainingSeconds({
+        duration_seconds: 600,
+        remaining_seconds: null,
+        started_at: '2026-11-13T12:00:00.000Z',
+      }),
+    ).toBeNull();
+    expect(
+      resolveRemainingSeconds({
+        duration_seconds: 600,
+        started_at: '2026-11-13T12:00:00.000Z',
+      }),
+    ).toBeNull();
+  });
+
   it('is null for untimed modules', () => {
     expect(resolveRemainingSeconds({ duration_seconds: null, remaining_seconds: 99 })).toBeNull();
   });

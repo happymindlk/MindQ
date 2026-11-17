@@ -181,11 +181,15 @@ export function AssessmentRunner({
     setTimeUp(true);
   }, []);
 
+  // Prefer absolute expires_at + server_now on resume; fall back to integer
+  // remaining_seconds only when the wall-clock fields are absent (preview).
   const hasWallClock =
     typeof test.expires_at === 'string' && test.expires_at.length > 0;
+  const moduleRemaining = hasWallClock ? null : resolveRemainingSeconds(test);
+  const moduleWriteRemaining = hasWallClock ? null : resolveWriteRemainingSeconds(test);
   const moduleTimer = useModuleTimer({
-    remainingSeconds: hasWallClock ? null : resolveRemainingSeconds(test),
-    expireRemainingSeconds: hasWallClock ? null : resolveWriteRemainingSeconds(test),
+    remainingSeconds: moduleRemaining,
+    expireRemainingSeconds: moduleWriteRemaining,
     onExpire: hasWallClock ? undefined : onExpire,
     onDisplayExpire: hasWallClock ? undefined : onDisplayExpire,
     enabled: !hasWallClock && !submitting,

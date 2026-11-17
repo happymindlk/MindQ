@@ -65,6 +65,23 @@ describe('useModuleTimer', () => {
     expect(onExpire).toHaveBeenCalledTimes(1);
   });
 
+  it('re-seeds from a fresh remaining_seconds on leave/re-enter instead of keeping full duration', () => {
+    const { result, rerender } = renderHook(
+      ({ remaining }: { remaining: number }) =>
+        useModuleTimer({ remainingSeconds: remaining, now: clock }),
+      { initialProps: { remaining: 600 } },
+    );
+    expect(formatClock(result.current.remainingSeconds ?? -1)).toBe('10:00');
+
+    rerender({ remaining: 240 });
+    expect(formatClock(result.current.remainingSeconds ?? -1)).toBe('4:00');
+
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(formatClock(result.current.remainingSeconds ?? -1)).toBe('3:55');
+  });
+
   it('starts a fresh 3-minute module at exactly 3:00', () => {
     const { result } = renderHook(() => useModuleTimer({ remainingSeconds: 180, now: clock }));
     expect(formatClock(result.current.remainingSeconds ?? -1)).toBe('3:00');
