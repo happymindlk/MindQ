@@ -47,6 +47,15 @@ function seedDeadline(
   return now + Math.max(0, remainingSeconds) * 1000;
 }
 
+function seedKey(
+  remainingSeconds: number | null,
+  expireRemainingSeconds: number | null | undefined,
+): string {
+  const expire =
+    expireRemainingSeconds === undefined ? remainingSeconds : expireRemainingSeconds;
+  return `${String(remainingSeconds)}|${String(expire)}`;
+}
+
 /**
  * Countdown seeded by the server's integer remaining seconds.
  *
@@ -55,6 +64,10 @@ function seedDeadline(
  * monotonic local deadline (rather than decrementing per interval) keeps the
  * display accurate when background tabs throttle `setInterval`. Visibility
  * and focus listeners force an immediate recalculation when the tab wakes.
+ *
+ * When the server seed changes (resume GET with a new ``remaining_seconds``),
+ * deadlines are re-armed from the new values — never from a stale full
+ * ``duration_seconds`` cached across re-entry.
  *
  * Display clamps at 00:00 from ``remainingSeconds``. Auto-submit fires from
  * ``expireRemainingSeconds`` (duration + grace) so resume during the server
@@ -82,18 +95,38 @@ export function useModuleTimer({
   const pausedRef = useRef(false);
   const intervalRef = useRef<number | null>(null);
 
-  const [displayDeadline] = useState<number | null>(() =>
+  const expireSeed =
+    expireRemainingSeconds === undefined ? remainingSeconds : expireRemainingSeconds;
+  const nextSeedKey = seedKey(remainingSeconds, expireRemainingSeconds);
+  const seedKeyRef = useRef(nextSeedKey);
+
+  const [displayDeadline, setDisplayDeadline] = useState<number | null>(() =>
     seedDeadline(remainingSeconds, nowRef.current()),
   );
-  const [expireDeadline] = useState<number | null>(() => {
-    const seed =
-      expireRemainingSeconds === undefined ? remainingSeconds : expireRemainingSeconds;
-    return seedDeadline(seed, nowRef.current());
-  });
+  const [expireDeadline, setExpireDeadline] = useState<number | null>(() =>
+    seedDeadline(expireSeed, nowRef.current()),
+  );
   const [remaining, setRemaining] = useState<number | null>(() => {
-    const raw = computeRemaining(displayDeadline, nowRef.current());
+    const raw = computeRemaining(
+      seedDeadline(remainingSeconds, nowRef.current()),
+      nowRef.current(),
+    );
     return raw === null ? null : Math.max(0, raw);
   });
+
+  // Re-arm from a fresh server seed (leave/re-enter) without decrementing a local counter.
+  if (seedKeyRef.current !== nextSeedKey) {
+    seedKeyRef.current = nextSeedKey;
+    const nowMs = nowRef.current();
+    const nextDisplay = seedDeadline(remainingSeconds, nowMs);
+    const nextExpire = seedDeadline(expireSeed, nowMs);
+    setDisplayDeadline(nextDisplay);
+    setExpireDeadline(nextExpire);
+    const raw = computeRemaining(nextDisplay, nowMs);
+    setRemaining(raw === null ? null : Math.max(0, raw));
+    expireFiredRef.current = false;
+    displayFiredRef.current = false;
+  }
 
   const clearTicker = useCallback(() => {
     if (intervalRef.current !== null) {
