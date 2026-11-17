@@ -11,6 +11,10 @@ import { ModuleReadyScreen } from '../../features/assessment-runner/module-ready
 import PackageCompleteScreen from '../../features/candidate-dashboard/package-complete-screen';
 import { useToast } from '../../components/ui/useToast';
 import { candidateTestKey, cachedQuery, invalidateQuery, peekQuery, setQuery } from '../../lib/query-cache';
+import {
+  patchCandidateDashboardModule,
+  remainingSecondsFromExpiry,
+} from '../../features/candidate-dashboard/dashboard-cache';
 import { CANDIDATE_DASHBOARD_KEY } from '../../features/candidate-dashboard/module-status';
 
 const LOCKED_DETAIL = 'Assessment already completed. Modifications are locked.';
@@ -27,6 +31,31 @@ function deferWork(work) {
     return;
   }
   work();
+}
+
+/**
+ * Sync the dashboard card for this module before routing so remount paints
+ * the correct status/countdown with no full-screen spinner.
+ *
+ * @param {string} assessmentId
+ * @param {'in_progress' | 'completed'} status
+ * @param {Record<string, unknown> | null | undefined} test
+ */
+function syncDashboardModule(assessmentId, status, test) {
+  if (!assessmentId || !test) return;
+  const serverNow = new Date().toISOString();
+  const expiresAt =
+    typeof test.expires_at === 'string' && test.expires_at.length > 0 ? test.expires_at : null;
+  const startedAt =
+    typeof test.started_at === 'string' && test.started_at.length > 0 ? test.started_at : null;
+  patchCandidateDashboardModule(assessmentId, {
+    status,
+    started_at: startedAt,
+    expires_at: expiresAt,
+    server_now: serverNow,
+    remaining_seconds:
+      status === 'completed' ? 0 : remainingSecondsFromExpiry(expiresAt, serverNow),
+  });
 }
 
 /**
@@ -113,23 +142,20 @@ export default function TestRunner() {
         if (result.status === 200) {
           clearDraft(candidateId, testId);
           if (result.company_name) setCompanyName(result.company_name);
-          // Bust caches off the critical path so navigation stays fluid.
-          deferWork(() => {
-            invalidateQuery(CANDIDATE_DASHBOARD_KEY);
-            invalidateQuery(cacheKey);
-          });
+          // Optimistic completed card, then route — never await a dashboard refetch.
+          syncDashboardModule(testId, 'completed', test);
+          deferWork(() => invalidateQuery(cacheKey));
           exitHandledRef.current = true;
           if (result.package_complete) {
             setPhase('package_complete');
           } else {
-            // Return to the dashboard immediately; statuses refetch in the background.
             navigate('/portal/dashboard', { replace: true });
           }
         }
         return result;
       },
     }),
-    [testId, candidateId, cacheKey, navigate],
+    [testId, candidateId, cacheKey, navigate, test],
   );
 
   const onAnswersChange = useCallback(
@@ -138,9 +164,12 @@ export default function TestRunner() {
   );
 
   const backToDashboard = useCallback(() => {
-    deferWork(() => invalidateQuery(CANDIDATE_DASHBOARD_KEY));
+    // Instant route change; autosave flush is already fire-and-forget in the runner.
+    if (test?.started_at) {
+      syncDashboardModule(testId, 'in_progress', test);
+    }
     navigate('/portal/dashboard');
-  }, [navigate]);
+  }, [navigate, test, testId]);
 
   const beginModule = useCallback(async () => {
     if (!testId || starting) return;
@@ -161,7 +190,8 @@ export default function TestRunner() {
       setTest(next);
       setQuery(cacheKey, next);
       setPhase('running');
-      deferWork(() => invalidateQuery(CANDIDATE_DASHBOARD_KEY));
+      // Keep dashboard cache warm with in_progress timing (do not wipe it).
+      syncDashboardModule(testId, 'in_progress', next);
     } catch (err) {
       if (isAssessmentLocked(err)) {
         setLockDetail(err.message || LOCKED_DETAIL);
@@ -188,8 +218,8 @@ export default function TestRunner() {
       return;
     }
     setPhase('expired');
+    syncDashboardModule(testId, 'completed', test);
     deferWork(() => {
-      invalidateQuery(CANDIDATE_DASHBOARD_KEY);
       toast({
         title: 'Time expired',
         description: 'Your time for this test has ended. Your answers were automatically submitted.',
@@ -197,7 +227,7 @@ export default function TestRunner() {
         duration: 6000,
       });
     });
-  }, [toast]);
+  }, [toast, testId, test]);
 
   if (isLoading && !test) {
     return (

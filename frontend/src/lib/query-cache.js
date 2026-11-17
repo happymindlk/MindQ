@@ -44,9 +44,11 @@ export function isQueryFresh(key, staleTime = DEFAULT_STALE_TIME_MS) {
  *
  * @param {string} key
  * @param {unknown} data
+ * @param {{ fresh?: boolean }} [options] - When ``fresh`` is false, keep the
+ *   payload for instant paint but treat it as stale so the next read revalidates.
  */
-export function setQuery(key, data) {
-  store.set(key, { data, at: Date.now() });
+export function setQuery(key, data, { fresh = true } = {}) {
+  store.set(key, { data, at: fresh ? Date.now() : 0 });
 }
 
 /**

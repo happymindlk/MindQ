@@ -1,11 +1,12 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TestDashboard from './TestDashboard';
 import { api } from '../../api/client';
-import { invalidateQuery } from '../../lib/query-cache';
+import { CANDIDATE_DASHBOARD_KEY } from '../../features/candidate-dashboard/module-status';
+import { invalidateQuery, setQuery } from '../../lib/query-cache';
 
 const navigate = vi.fn();
 
@@ -184,5 +185,44 @@ describe('TestDashboard deadline', () => {
     renderDashboard();
     await screen.findByText(/hello, ada lovelace/i);
     expect(screen.queryByText(/deadline to complete/i)).not.toBeInTheDocument();
+  });
+
+  it('paints cached cards on frame 1 without a full-screen loading skeleton', async () => {
+    setQuery(
+      CANDIDATE_DASHBOARD_KEY,
+      {
+        candidate_name: 'Ada Lovelace',
+        open_time: null,
+        close_time: null,
+        window_state: 'open',
+        tests,
+      },
+      { fresh: false },
+    );
+    /** @type {(value: unknown) => void} */
+    let resolveFetch = () => undefined;
+    vi.mocked(api.candidate.getDashboard).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+
+    renderDashboard();
+
+    expect(screen.getByText(/hello, ada lovelace/i)).toBeInTheDocument();
+    expect(screen.getByText('Cognitive Reflection Test')).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: /loading assessments/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/updating/i)).toBeInTheDocument();
+
+    await waitFor(() => expect(api.candidate.getDashboard).toHaveBeenCalled());
+    resolveFetch({
+      candidate_name: 'Ada Lovelace',
+      open_time: null,
+      close_time: null,
+      window_state: 'open',
+      tests,
+    });
+    await screen.findByText(/you have 3 tests remaining/i);
   });
 });

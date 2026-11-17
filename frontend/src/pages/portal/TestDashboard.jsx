@@ -14,6 +14,7 @@ import {
   usePackageWindow,
 } from '../../features/candidate-dashboard/use-package-window';
 import { resolveTestDurationSeconds } from '../../features/candidate-dashboard/catalog-duration';
+import { CANDIDATE_DASHBOARD_STALE_MS } from '../../features/candidate-dashboard/dashboard-cache';
 import {
   CANDIDATE_DASHBOARD_KEY,
   normalizeModuleStatus,
@@ -33,7 +34,10 @@ export default function TestDashboard() {
     isLoading,
     isValidating,
     reload: loadDashboard,
-  } = useCachedQuery(CANDIDATE_DASHBOARD_KEY, fetcher);
+  } = useCachedQuery(CANDIDATE_DASHBOARD_KEY, fetcher, {
+    // Keep prior cards on remount (SWR / keepPreviousData equivalent).
+    staleTime: CANDIDATE_DASHBOARD_STALE_MS,
+  });
 
   const windowState = usePackageWindow(
     dashboardData?.window_state,
