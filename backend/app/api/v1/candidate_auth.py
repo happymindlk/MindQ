@@ -26,6 +26,7 @@ from app.services.candidate_otp import (
     verify_candidate_challenge,
 )
 from app.services.candidate_service import CandidateService
+from app.services.session_log import LOGIN, record_session_event
 
 logger = logging.getLogger("app.candidate_auth")
 
@@ -109,6 +110,14 @@ async def verify_candidate_otp(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     candidate.token = issue_candidate_token(candidate)
+    await record_session_event(
+        db,
+        corporate_id=candidate.corporate_id,
+        candidate_id=candidate.id,
+        event_type=LOGIN,
+        request=request,
+        commit=True,
+    )
     logger.info(
         "candidate_login",
         extra={

@@ -11,6 +11,7 @@ from .candidate_response import CandidateResponse
 from .candidate_evaluation import CandidateEvaluation
 from .candidate_report import CandidateReport
 from .support_ticket import SupportTicket
+from .candidate_session_log import CandidateSessionLog
 from .global_module import GlobalModule
 from .package_module import PackageModule
 from .custom_technical_question import CustomTechnicalQuestion
@@ -30,6 +31,7 @@ __all__ = [
     "CandidateEvaluation",
     "CandidateReport",
     "SupportTicket",
+    "CandidateSessionLog",
     "GlobalModule",
     "PackageModule",
     "CustomTechnicalQuestion",

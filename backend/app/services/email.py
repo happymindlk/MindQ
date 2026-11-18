@@ -315,6 +315,7 @@ def send_transactional_email(
     html_content: str,
     *,
     raise_on_error: bool = False,
+    reply_to: str | None = None,
 ) -> dict | None:
     """Send one HTML email through AWS SES.
 
@@ -328,6 +329,7 @@ def send_transactional_email(
         raise_on_error: When True, propagate SES failures as RuntimeError
             instead of returning None (used by beta-access where the UI must
             reflect delivery errors).
+        reply_to: Optional Reply-To address (e.g. candidate email on support tickets).
 
     Returns:
         Dict with ``id`` (SES MessageId) on success, otherwise None when
@@ -345,6 +347,7 @@ def send_transactional_email(
         return None
 
     from_addr = _source_address(getattr(settings, "EMAIL_FROM", None))
+    reply_addr = clean_recipient_email(reply_to) if reply_to else ""
 
     # EMAIL_FROM falls back to DEFAULT_EMAIL_FROM, so configuration hinges on
     # region + credentials rather than a (possibly blank) sender override.
@@ -366,22 +369,26 @@ def send_transactional_email(
         return None
 
     logger.info(
-        "SES send starting to=%s from=%s subject=%r region=%s",
+        "SES send starting to=%s from=%s subject=%r region=%s reply_to=%s",
         clean_email,
         from_addr,
         subject,
         settings.AWS_REGION,
+        reply_addr or None,
     )
 
     try:
-        response = _ses_client().send_email(
-            Source=from_addr,
-            Destination={"ToAddresses": [clean_email]},
-            Message={
+        kwargs: dict[str, Any] = {
+            "Source": from_addr,
+            "Destination": {"ToAddresses": [clean_email]},
+            "Message": {
                 "Subject": {"Data": subject, "Charset": "UTF-8"},
                 "Body": {"Html": {"Data": html_content, "Charset": "UTF-8"}},
             },
-        )
+        }
+        if reply_addr:
+            kwargs["ReplyToAddresses"] = [reply_addr]
+        response = _ses_client().send_email(**kwargs)
         message_id = response.get("MessageId")
         payload: dict[str, Any] = {"id": message_id, "MessageId": message_id}
         logger.info(
@@ -429,6 +436,7 @@ async def send_transactional_email_async(
     html_content: str,
     *,
     raise_on_error: bool = False,
+    reply_to: str | None = None,
 ) -> dict | None:
     """Async wrapper around the sync SES call (threadpool)."""
     send = functools.partial(
@@ -437,6 +445,7 @@ async def send_transactional_email_async(
         subject,
         html_content,
         raise_on_error=raise_on_error,
+        reply_to=reply_to,
     )
     return await run_in_threadpool(send)
 

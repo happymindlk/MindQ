@@ -2,6 +2,7 @@
 // HR admin data access lives in src/lib/adminApi.js (supabase-js + RLS).
 import { API_ORIGIN } from '../lib/api-origin';
 import { requestJson } from '../lib/api-request';
+import { getDeviceHeaders } from '../lib/device';
 
 const API_BASE = `${API_ORIGIN}/api/v1`;
 
@@ -14,6 +15,7 @@ const getAuthHeaders = ({ json = false } = {}) => {
   return {
     ...(json ? { 'Content-Type': 'application/json' } : {}),
     ...(token && { Authorization: `Bearer ${token}` }),
+    ...getDeviceHeaders(),
   };
 };
 
@@ -54,7 +56,7 @@ export const api = {
     sendCandidateOtp: async (target) => {
       const res = await fetch(`${API_BASE}/candidates/auth/otp/send`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getDeviceHeaders() },
         body: JSON.stringify(target),
       });
       return handleResponse(res);
@@ -65,7 +67,7 @@ export const api = {
     verifyCandidateOtp: async (credentials) => {
       const res = await fetch(`${API_BASE}/candidates/auth/otp/verify`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getDeviceHeaders() },
         body: JSON.stringify(credentials),
       });
       return handleResponse(res);

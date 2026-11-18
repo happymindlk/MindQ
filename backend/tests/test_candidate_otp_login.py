@@ -10,7 +10,11 @@ import pytest
 
 from app.database import get_db
 from app.main import app
-from app.security import candidate_otp_limiter, candidate_otp_verify_limiter, login_limiter
+from app.security import (
+    candidate_otp_limiter,
+    candidate_otp_verify_limiter,
+    login_limiter,
+)
 from app.services.admin_otp import locked_message
 from app.services.candidate_otp import CandidateOtpError
 
@@ -34,16 +38,39 @@ PAYLOAD = {
 }
 
 
-async def _no_db() -> AsyncIterator[None]:
-    yield None
+class _FakeSession:
+    """Minimal async session for OTP routes that now write session audit rows."""
+
+    def __init__(self) -> None:
+        self.added: list[object] = []
+
+    def add(self, row: object) -> None:
+        self.added.append(row)
+
+    async def commit(self) -> None:
+        return None
+
+    async def refresh(self, row: object) -> None:
+        return None
+
+    async def execute(self, *_a, **_k):
+        return SimpleNamespace(first=lambda: None, scalar_one_or_none=lambda: None)
+
+
+async def _fake_db() -> AsyncIterator[_FakeSession]:
+    yield _FakeSession()
 
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch):
-    for limiter in (login_limiter, candidate_otp_limiter, candidate_otp_verify_limiter):
+    for limiter in (
+        login_limiter,
+        candidate_otp_limiter,
+        candidate_otp_verify_limiter,
+    ):
         limiter.reset()
         monkeypatch.setattr(limiter, "max_requests", 100)
-    app.dependency_overrides[get_db] = _no_db
+    app.dependency_overrides[get_db] = _fake_db
     calls: list[object] = []
     verify_calls: list[dict] = []
 
@@ -78,7 +105,11 @@ def _isolate(monkeypatch):
     monkeypatch.setattr("app.api.v1.candidate_auth.verify_candidate_challenge", fake_verify)
     yield {"login": calls, "verify": verify_calls}
     app.dependency_overrides.pop(get_db, None)
-    for limiter in (login_limiter, candidate_otp_limiter, candidate_otp_verify_limiter):
+    for limiter in (
+        login_limiter,
+        candidate_otp_limiter,
+        candidate_otp_verify_limiter,
+    ):
         limiter.reset()
 
 

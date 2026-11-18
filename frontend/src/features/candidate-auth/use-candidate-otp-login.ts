@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { persistLoginDraft } from '../../lib/device';
 import {
   normalizeEmail,
   persistCandidateSession,
@@ -55,7 +56,10 @@ export function useCandidateOtpLogin(
   const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
-    if (initialAccessCode) setIdentity((prev) => ({ ...prev, accessCode: initialAccessCode }));
+    if (initialAccessCode) {
+      setIdentity((prev) => ({ ...prev, accessCode: initialAccessCode }));
+      persistLoginDraft({ accessCode: initialAccessCode });
+    }
   }, [initialAccessCode]);
 
   useEffect(() => {
@@ -65,7 +69,16 @@ export function useCandidateOtpLogin(
   }, [cooldown]);
 
   const updateField = useCallback((field: keyof CandidateIdentity, value: string) => {
-    setIdentity((prev) => ({ ...prev, [field]: field === 'accessCode' ? value.trim() : value }));
+    setIdentity((prev) => {
+      const next = { ...prev, [field]: field === 'accessCode' ? value.trim() : value };
+      // Mirror draft fields so Technical Support can prefill email / name / code.
+      persistLoginDraft({
+        email: next.email,
+        accessCode: next.accessCode,
+        fullName: `${next.firstName.trim()} ${next.lastName.trim()}`.trim(),
+      });
+      return next;
+    });
   }, []);
 
   const setCode = useCallback((value: string) => {

@@ -53,6 +53,33 @@ def _result_all(rows):
     return result
 
 
+def _title_result(title: str = "Timed Module"):
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = title
+    result.first.return_value = (title,)
+    return result
+
+
+def _session_with_effects(*effects) -> AsyncMock:
+    """Async session that also accepts session-log writes after finalize."""
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=list(effects))
+    session.add = MagicMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+    return session
+
+
+def _completed_progress(assessment_id, *, completed_at, started_at=None):
+    return SimpleNamespace(
+        status="COMPLETED",
+        assessment_id=assessment_id,
+        completed_at=completed_at,
+        started_at=started_at,
+        server_duration_seconds=None,
+    )
+
+
 @pytest.mark.asyncio
 async def test_list_expired_in_progress_filters_by_display_deadline():
     """Display deadline (no grace) marks the attempt expired for server finalize."""
@@ -107,24 +134,22 @@ async def test_finalize_expired_transitions_and_enqueues_scoring(monkeypatch):
         deleted_at=None,
     )
 
-    session = AsyncMock()
-    session.execute = AsyncMock(
-        side_effect=[
-            _result_all([(progress, assessment)]),
-            MagicMock(
-                scalars=MagicMock(
-                    return_value=MagicMock(all=MagicMock(return_value=[candidate]))
-                )
-            ),
-        ]
+    session = _session_with_effects(
+        _result_all([(progress, assessment)]),
+        MagicMock(
+            scalars=MagicMock(
+                return_value=MagicMock(all=MagicMock(return_value=[candidate]))
+            )
+        ),
+        _title_result(assessment.title),
     )
 
     submit = AsyncMock(
         return_value=(
-            SimpleNamespace(
-                status="COMPLETED",
-                assessment_id=assessment.id,
+            _completed_progress(
+                assessment.id,
                 completed_at=progress.expires_at,
+                started_at=progress.started_at,
             ),
             False,
             "",
@@ -160,16 +185,18 @@ async def test_finalize_expired_assessment_scoped_to_candidate(monkeypatch):
         deleted_at=None,
     )
 
-    session = AsyncMock()
-    session.execute = AsyncMock(
-        side_effect=[
-            _result_all([(progress, assessment)]),
-            MagicMock(scalar_one_or_none=MagicMock(return_value=candidate)),
-        ]
+    session = _session_with_effects(
+        _result_all([(progress, assessment)]),
+        MagicMock(scalar_one_or_none=MagicMock(return_value=candidate)),
+        _title_result(assessment.title),
     )
     submit = AsyncMock(
         return_value=(
-            SimpleNamespace(status="COMPLETED", assessment_id=assessment.id),
+            _completed_progress(
+                assessment.id,
+                completed_at=progress.expires_at,
+                started_at=progress.started_at,
+            ),
             False,
             "",
         )
@@ -261,28 +288,30 @@ async def test_concurrent_finalize_calls_remain_idempotent(monkeypatch):
         deleted_at=None,
     )
 
-    session = AsyncMock()
-    session.execute = AsyncMock(
-        side_effect=[
-            _result_all([(progress, assessment)]),
-            MagicMock(
-                scalars=MagicMock(
-                    return_value=MagicMock(all=MagicMock(return_value=[candidate]))
-                )
-            ),
-            _result_all([(progress, assessment)]),
-            MagicMock(
-                scalars=MagicMock(
-                    return_value=MagicMock(all=MagicMock(return_value=[candidate]))
-                )
-            ),
-        ]
+    session = _session_with_effects(
+        _result_all([(progress, assessment)]),
+        MagicMock(
+            scalars=MagicMock(
+                return_value=MagicMock(all=MagicMock(return_value=[candidate]))
+            )
+        ),
+        _title_result(assessment.title),
+        _result_all([(progress, assessment)]),
+        MagicMock(
+            scalars=MagicMock(
+                return_value=MagicMock(all=MagicMock(return_value=[candidate]))
+            )
+        ),
     )
 
     submit = AsyncMock(
         side_effect=[
             (
-                SimpleNamespace(status="COMPLETED", assessment_id=assessment.id),
+                _completed_progress(
+                    assessment.id,
+                    completed_at=progress.expires_at,
+                    started_at=progress.started_at,
+                ),
                 False,
                 "",
             ),
