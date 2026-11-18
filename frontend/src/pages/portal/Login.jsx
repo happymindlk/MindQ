@@ -204,7 +204,7 @@ function CandidateLogin({ initialAccessCode }) {
           </h1>
           <p className="mt-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
             {step === 'details'
-              ? 'Before you begin, please enter your details to access your assessment. Provide your first and last name as they appear on your application, along with your email address.'
+              ? 'Before you begin, please enter your details to access your assessment. Provide your first name and last name as they appear on your application, along with the email address you provided to the recruitment team.'
               : 'Enter the code we emailed you to continue to your assessment.'}
           </p>
         </div>
@@ -305,8 +305,7 @@ function CandidateLogin({ initialAccessCode }) {
                     className="font-medium text-[#5e3cc4] underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7048E2]"
                   >
                     Terms &amp; Conditions
-                  </button>{' '}
-                  (including the retention of irreversibly anonymized metrics for psychometric research).
+                  </button>.
                 </span>
               </label>
               <FormError message={login.error} />
