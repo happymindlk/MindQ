@@ -4,12 +4,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_hr_user, HRUserContext, is_ops_role
 from app.jobs.enqueue import enqueue_nudge_email
+from app.schemas.session_log import CandidateSessionLogItem, CandidateSessionLogListResponse
 from app.services.candidate_service import CandidateService
 from app.services.package_service import PackageService
+from app.services.session_log import list_session_logs_for_candidate
 from app.services import storage as storage_service
 from app.security import email_limiter, enforce_user_rate_limit
 
 router = APIRouter()
+
+
+@router.get("/{candidate_id}/session-logs", response_model=CandidateSessionLogListResponse)
+async def get_candidate_session_logs(
+    candidate_id: UUID,
+    hr: HRUserContext = Depends(get_current_hr_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return chronological login / device / module timing audit rows.
+
+    Ops may read any tenant; HR is limited to their own corporate.
+
+    Args:
+        candidate_id: ``candidates.id``.
+        hr: Authenticated HR or ops user.
+        db: Async database session.
+
+    Returns:
+        Ordered session log items for the candidate.
+    """
+    candidate = await CandidateService.get_candidate(db, candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    if not is_ops_role(hr.role) and candidate.corporate_id != hr.corporate_id:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    rows = await list_session_logs_for_candidate(db, candidate_id)
+    return CandidateSessionLogListResponse(
+        items=[CandidateSessionLogItem.model_validate(row) for row in rows]
+    )
 
 
 @router.post("/{id}/nudge")

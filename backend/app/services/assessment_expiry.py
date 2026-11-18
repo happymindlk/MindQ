@@ -28,6 +28,7 @@ from app.services.candidate_service import (
     CandidateService,
     is_display_expired,
 )
+from app.services.session_log import MODULE_TIMEOUT, duration_from_progress, record_session_event
 
 logger = logging.getLogger("app.assessment_expiry")
 
@@ -109,6 +110,23 @@ async def finalize_one_expired(
         )
     except AssessmentAlreadySubmittedError:
         return False
+    if progress is not None:
+        assessment_name = (
+            await session.execute(
+                select(Assessment.title).where(Assessment.id == assessment_id)
+            )
+        ).scalar_one_or_none()
+        await record_session_event(
+            session,
+            corporate_id=candidate.corporate_id,
+            candidate_id=candidate.id,
+            event_type=MODULE_TIMEOUT,
+            assessment_id=assessment_id,
+            assessment_name=assessment_name,
+            duration_seconds=duration_from_progress(progress),
+            occurred_at=progress.completed_at,
+            commit=True,
+        )
     return progress is not None
 
 

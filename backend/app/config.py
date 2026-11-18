@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = "MindQ <noreply@mindqtalent.com>"
     # Inbox for gated beta / waitlist access requests (and other admin alerts).
     ADMIN_NOTIFICATION_EMAIL: str = "muhamadnas44@gmail.com"
+    # Candidate Technical Support inbox (SES destination for support tickets).
+    SUPPORT_EMAIL: str = "support@mindqtalent.com"
     # Legacy alias -- prefer ADMIN_NOTIFICATION_EMAIL.
     BETA_ACCESS_ADMIN_EMAIL: str = ""
     # Comma-separated emails that skip waitlist and auto-provision into the

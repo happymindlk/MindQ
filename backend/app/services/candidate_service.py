@@ -647,6 +647,14 @@ class CandidateService:
             .values(
                 candidate_id=None,
                 details="[Candidate data erased]",
+                description="[Candidate data erased]",
+                submitter_email=None,
+                contact_number=None,
+                access_code_entered=None,
+                entered_name=None,
+                device_id=None,
+                browser=None,
+                page_url=None,
                 path=None,
                 user_agent=None,
             )

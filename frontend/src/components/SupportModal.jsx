@@ -1,7 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
 import { API_ORIGIN } from '../lib/api-origin';
+import {
+  getDeviceContext,
+  readAccessCode,
+  readLoginDraftEmail,
+  readLoginDraftName,
+} from '../lib/device';
 import {
   SUPPORT_EMAIL,
   buildSupportMailto,
@@ -12,6 +18,11 @@ const API_BASE = `${API_ORIGIN}/api/v1`;
 
 const NETWORK_ERROR_MESSAGE =
   `Couldn't reach our support team. Check your connection, or email us at ${SUPPORT_EMAIL}.`;
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Digits only; E.164-ish length after stripping formatting. */
+const PHONE_DIGITS_MIN = 7;
+const PHONE_DIGITS_MAX = 15;
 
 function LifeBuoyIcon({ className }) {
   return (
@@ -53,32 +64,93 @@ function CheckIcon({ className }) {
   );
 }
 
+function digitCount(value) {
+  return (value || '').replace(/\D/g, '').length;
+}
+
+function validateEmail(value) {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return 'Email address is required.';
+  if (!EMAIL_PATTERN.test(trimmed)) return 'Enter a valid email address.';
+  return null;
+}
+
+function validateContactNumber(value) {
+  const trimmed = (value || '').trim();
+  if (!trimmed) return 'Contact number is required.';
+  const digits = digitCount(trimmed);
+  if (digits < PHONE_DIGITS_MIN || digits > PHONE_DIGITS_MAX) {
+    return `Enter a valid phone number (${PHONE_DIGITS_MIN}–${PHONE_DIGITS_MAX} digits).`;
+  }
+  if (!/^[+\d][\d\s().-]*$/.test(trimmed)) {
+    return 'Enter a valid phone number.';
+  }
+  return null;
+}
+
+function validateDetails(value) {
+  if (!(value || '').trim()) return 'Please describe the issue.';
+  return null;
+}
+
+const fieldClassName = `
+  w-full rounded-md bg-canvas border border-border text-foreground text-sm p-3
+  placeholder:text-muted/70
+  focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary
+`;
+
 export default function SupportModal() {
   const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [contactNumber, setContactNumber] = useState('');
   const [details, setDetails] = useState('');
+  const [touched, setTouched] = useState({ email: false, contactNumber: false, details: false });
   const [sent, setSent] = useState(false);
   const [error, setError] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const mailtoHref = useMemo(() => (open ? buildSupportMailto(readSupportContext()) : ''), [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    const draftEmail = readLoginDraftEmail();
+    if (draftEmail) {
+      setEmail((prev) => prev || draftEmail);
+    }
+  }, [open]);
+
+  const emailError = validateEmail(email);
+  const contactError = validateContactNumber(contactNumber);
+  const detailsError = validateDetails(details);
+  const formValid = !emailError && !contactError && !detailsError;
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setTouched({ email: true, contactNumber: true, details: true });
+    if (!formValid) return;
     setError(null);
     setIsSubmitting(true);
     try {
-      // Device, package, and session context are attached automatically so
-      // the candidate only has to describe the issue itself.
-      const context = readSupportContext();
+      const device = getDeviceContext();
+      const accessCode = readAccessCode();
+      const enteredName = readLoginDraftName() || null;
       const res = await fetch(`${API_BASE}/support/submit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          email: email.trim(),
+          contact_number: contactNumber.trim(),
           details: details.trim(),
+          description: details.trim(),
           candidate_id: localStorage.getItem('candidateId') || null,
-          package_code: context.packageCode,
-          path: context.pagePath,
-          user_agent: context.userAgent,
+          access_code: accessCode || null,
+          package_code: accessCode || null,
+          entered_name: enteredName,
+          device_id: device.device_id,
+          browser: device.browser,
+          page_url: device.page_url,
+          path: typeof window !== 'undefined' ? window.location.pathname : null,
+          user_agent: device.user_agent,
         }),
       });
       if (!res.ok) {
@@ -87,9 +159,9 @@ export default function SupportModal() {
       }
       setSent(true);
       setDetails('');
+      setContactNumber('');
+      setTouched({ email: false, contactNumber: false, details: false });
     } catch (err) {
-      // A rejected fetch (offline, DNS, CORS, unreachable upstream) surfaces
-      // as a raw TypeError: Failed to fetch; translate it for the candidate.
       setError(err instanceof TypeError ? NETWORK_ERROR_MESSAGE : err.message || 'Failed to submit');
     } finally {
       setIsSubmitting(false);
@@ -104,6 +176,8 @@ export default function SupportModal() {
           setOpen(true);
           setSent(false);
           setError(null);
+          const draftEmail = readLoginDraftEmail();
+          if (draftEmail) setEmail(draftEmail);
         }}
         className="
           fixed bottom-4 right-4 z-50 flex items-center gap-2 h-10 px-3 rounded-md
@@ -134,21 +208,80 @@ export default function SupportModal() {
           </div>
         ) : (
           <div className="space-y-4">
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <label htmlFor="support-details" className="sr-only">
-                Describe the issue
-              </label>
-              <textarea
-                id="support-details"
-                className="
-                  w-full h-32 rounded-md bg-canvas border border-border text-foreground text-sm p-3
-                  placeholder:text-muted/70
-                  focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary
-                "
-                placeholder="Briefly describe the issue you're facing..."
-                value={details}
-                onChange={(e) => setDetails(e.target.value)}
-              />
+            <form onSubmit={handleSubmit} className="space-y-3" noValidate>
+              <div className="space-y-1">
+                <label htmlFor="support-email" className="block text-xs font-medium text-foreground">
+                  Email Address
+                </label>
+                <input
+                  id="support-email"
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  required
+                  placeholder="you@example.com"
+                  className={fieldClassName}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+                  aria-invalid={touched.email && !!emailError}
+                  aria-describedby={touched.email && emailError ? 'support-email-error' : undefined}
+                />
+                {touched.email && emailError && (
+                  <p id="support-email-error" className="text-xs text-danger" role="alert">
+                    {emailError}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="support-contact" className="block text-xs font-medium text-foreground">
+                  Contact Number
+                </label>
+                <input
+                  id="support-contact"
+                  type="tel"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  required
+                  placeholder="+94 77 123 4567"
+                  className={fieldClassName}
+                  value={contactNumber}
+                  onChange={(e) => setContactNumber(e.target.value)}
+                  onBlur={() => setTouched((t) => ({ ...t, contactNumber: true }))}
+                  aria-invalid={touched.contactNumber && !!contactError}
+                  aria-describedby={
+                    touched.contactNumber && contactError ? 'support-contact-error' : undefined
+                  }
+                />
+                {touched.contactNumber && contactError && (
+                  <p id="support-contact-error" className="text-xs text-danger" role="alert">
+                    {contactError}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="support-details" className="block text-xs font-medium text-foreground">
+                  Describe the issue
+                </label>
+                <textarea
+                  id="support-details"
+                  className={`${fieldClassName} h-32`}
+                  placeholder="Briefly describe the issue you're facing..."
+                  value={details}
+                  onChange={(e) => setDetails(e.target.value)}
+                  onBlur={() => setTouched((t) => ({ ...t, details: true }))}
+                  aria-invalid={touched.details && !!detailsError}
+                  aria-describedby={touched.details && detailsError ? 'support-details-error' : undefined}
+                />
+                {touched.details && detailsError && (
+                  <p id="support-details-error" className="text-xs text-danger" role="alert">
+                    {detailsError}
+                  </p>
+                )}
+              </div>
+
               {error && (
                 <p className="text-xs text-danger" role="alert">
                   {error}
@@ -157,7 +290,7 @@ export default function SupportModal() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={!details.trim() || isSubmitting}
+                disabled={!formValid || isSubmitting}
                 isLoading={isSubmitting}
               >
                 Send quick report

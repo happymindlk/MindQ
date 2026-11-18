@@ -3,13 +3,15 @@ from typing import NoReturn
 import logging
 import time
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.jobs.enqueue import (
     enqueue_finalize_and_score_ai,
     enqueue_finalize_expired_assessment,
 )
+from app.models.assessment import Assessment
 from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.response import ResponseSave, ResponseSubmit
@@ -19,6 +21,12 @@ from app.services.runner_payload import (
     remaining_seconds,
     strict_deadline,
     write_remaining_seconds,
+)
+from app.services.session_log import (
+    MODULE_COMPLETE,
+    MODULE_START,
+    duration_from_progress,
+    record_session_event,
 )
 from app.auth import get_current_candidate
 from app.exceptions import (
@@ -121,6 +129,7 @@ async def get_test(
 @router.post("/test/{assessment_id}/start")
 async def start_test(
     assessment_id: UUID,
+    request: Request,
     candidate: Candidate = Depends(get_current_candidate),
     db: AsyncSession = Depends(get_db),
 ):
@@ -138,7 +147,19 @@ async def start_test(
             for_update=True,
             include_questions=False,
         )
+        first_start = progress is None or progress.started_at is None
         progress = await CandidateService.ensure_started(db, candidate, assessment, progress)
+        if first_start:
+            await record_session_event(
+                db,
+                corporate_id=candidate.corporate_id,
+                candidate_id=candidate.id,
+                event_type=MODULE_START,
+                assessment_id=assessment.id,
+                assessment_name=getattr(assessment, "title", None),
+                request=request,
+                commit=True,
+            )
     except (
         AssessmentNotFoundError,
         AssessmentAlreadySubmittedError,
@@ -214,6 +235,7 @@ async def autosave(
 @router.post("/test/{assessment_id}/submit")
 async def submit_test(
     assessment_id: UUID,
+    request: Request,
     candidate: Candidate = Depends(get_current_candidate),
     db: AsyncSession = Depends(get_db),
     body: ResponseSubmit | None = None,
@@ -233,6 +255,22 @@ async def submit_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
+    assessment_row = (
+        await db.execute(select(Assessment.title).where(Assessment.id == assessment_id))
+    ).first()
+    assessment_name = assessment_row[0] if assessment_row else None
+    await record_session_event(
+        db,
+        corporate_id=candidate.corporate_id,
+        candidate_id=candidate.id,
+        event_type=MODULE_COMPLETE,
+        assessment_id=progress.assessment_id,
+        assessment_name=assessment_name,
+        duration_seconds=duration_from_progress(progress),
+        occurred_at=progress.completed_at,
+        request=request,
+        commit=True,
+    )
     # Module COMPLETED is already committed in submit_test. Scoring / Gemini /
     # PDF / HR email must never block this response — enqueue (or spawn) only.
     await enqueue_finalize_and_score_ai(
