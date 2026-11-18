@@ -6,8 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import String, Uuid
-from sqlalchemy.exc import MissingGreenlet
+from sqlalchemy import String, Uuid, inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -1267,9 +1266,11 @@ async def test_get_or_evaluate_no_missing_greenlet_after_release(monkeypatch):
         assert row.package_id == pkg_id
         assert row.status == EVAL_STATUS_OK
 
-        # ORM attrs are expired after release; touching them would MissingGreenlet.
-        with pytest.raises(MissingGreenlet):
-            _ = candidate.corporate_id
+        # Release expired the ORM instance; do not touch attrs (lazy reload would
+        # raise MissingGreenlet / StatementError outside an await greenlet).
+        # Persistence above must have used the pre-release UUID snapshots.
+        insp = sa_inspect(candidate)
+        assert "corporate_id" in insp.unloaded or insp.expired
 
     await engine.dispose()
 
