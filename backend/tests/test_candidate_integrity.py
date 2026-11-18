@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -103,6 +104,19 @@ def test_raise_integrity_404_contract():
     assert exc.value.detail == "Test not found"
 
 
+def _async_session(*, assessment_title: str = "Math") -> AsyncMock:
+    """Async DB session stub that supports session-log writes + title lookup."""
+    session = AsyncMock()
+    session.add = MagicMock()
+    title_row = MagicMock()
+    title_row.first.return_value = (assessment_title,)
+    title_row.scalar_one_or_none.return_value = assessment_title
+    session.execute = AsyncMock(return_value=title_row)
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+    return session
+
+
 @pytest.fixture
 def candidate_client(async_client):
     fake_candidate = SimpleNamespace(
@@ -115,7 +129,7 @@ def candidate_client(async_client):
         return fake_candidate
 
     async def _db():
-        yield None
+        yield _async_session()
 
     app.dependency_overrides[get_current_candidate] = _candidate
     app.dependency_overrides[get_db] = _db

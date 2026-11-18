@@ -195,7 +195,15 @@ async def test_submit_route_enqueues_finalize_not_background_tasks(monkeypatch):
         return candidate
 
     async def _db():
-        yield MagicMock()
+        session = AsyncMock()
+        session.add = MagicMock()
+        title_row = MagicMock()
+        title_row.first.return_value = ("Module",)
+        title_row.scalar_one_or_none.return_value = "Module"
+        session.execute = AsyncMock(return_value=title_row)
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+        yield session
 
     app.dependency_overrides[get_current_candidate] = _cand
     app.dependency_overrides[get_db] = _db
