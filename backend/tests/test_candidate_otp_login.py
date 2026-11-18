@@ -11,7 +11,6 @@ import pytest
 from app.database import get_db
 from app.main import app
 from app.security import (
-    candidate_otp_email_limiter,
     candidate_otp_limiter,
     candidate_otp_verify_limiter,
     login_limiter,
@@ -67,7 +66,6 @@ def _isolate(monkeypatch):
     for limiter in (
         login_limiter,
         candidate_otp_limiter,
-        candidate_otp_email_limiter,
         candidate_otp_verify_limiter,
     ):
         limiter.reset()
@@ -110,7 +108,6 @@ def _isolate(monkeypatch):
     for limiter in (
         login_limiter,
         candidate_otp_limiter,
-        candidate_otp_email_limiter,
         candidate_otp_verify_limiter,
     ):
         limiter.reset()
