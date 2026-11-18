@@ -50,6 +50,9 @@ engine = create_async_engine(
     },
 )
 
+# expire_on_commit=False keeps loaded column values after commit so async
+# code can read scalars across transaction boundaries without implicit lazy
+# reloads (which raise MissingGreenlet outside an await greenlet).
 SessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,

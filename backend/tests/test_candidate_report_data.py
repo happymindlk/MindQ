@@ -406,6 +406,19 @@ def test_report_data_polling_within_cooldown_reports_failed(
     assert synthesis_stub["refreshed"] == [candidate_id]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["missing", "stale"])
+async def test_resolve_synthesis_status_pending_when_warmer_skips_queue(state):
+    """PDF warmers must not stamp missing/stale as failed (blocks reopen retry)."""
+    status = await candidate_reports._resolve_synthesis_status(
+        uuid4(),
+        CachedSynthesis(None, state, needs_refresh=True),
+        missing_open_evals=False,
+        queue_refresh=False,
+    )
+    assert status == "pending"
+
+
 def test_report_data_queues_technical_backfill_without_hiding_cached_narrative(
     app, corp_id, candidate_id, synthesis_stub
 ):

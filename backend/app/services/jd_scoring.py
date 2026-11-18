@@ -1145,8 +1145,13 @@ class JdScoringService:
                     return narrative, "held_for_review"
                 return narrative, "cached"
 
-        # Snapshot scalars before releasing the caller's transaction so lazy
-        # loads cannot touch a closed / rolled-back connection mid-Gemini.
+        # Snapshot scalars BEFORE releasing the caller's transaction.
+        # ``rollback()`` expires ORM attributes even with expire_on_commit=False;
+        # reading candidate.id / corporate_id / package_id afterwards would
+        # trigger an implicit lazy reload and raise MissingGreenlet.
+        candidate_id = candidate.id
+        corporate_id = candidate.corporate_id
+        package_id = candidate.package_id
         candidate_name = candidate.full_name
         package_title = package.title if package else ""
         target_role = (getattr(package, "target_role", None) or "") if package else ""
@@ -1174,10 +1179,14 @@ class JdScoringService:
         except asyncio.TimeoutError:
             deadline = overall_deadline_seconds()
             logger.error(
-                "jd_scoring_timeout candidate_id=%s timeout_s=%s", candidate.id, deadline
+                "jd_scoring_timeout candidate_id=%s timeout_s=%s", candidate_id, deadline
             )
             await JdScoringService._record_failure(
-                candidate, digest, f"timeout after {deadline:.0f}s"
+                candidate_id,
+                corporate_id,
+                package_id,
+                digest,
+                f"timeout after {deadline:.0f}s",
             )
             return None, "failed"
         except HeldForReviewError as exc:
@@ -1185,14 +1194,16 @@ class JdScoringService:
             logger.error(
                 "report_synthesis_held_for_review candidate_id=%s error=%s "
                 "field=%s match=%s context=%s",
-                candidate.id,
+                candidate_id,
                 exc,
                 getattr(hit, "field", None),
                 getattr(hit, "match", None),
                 getattr(hit, "context", None),
             )
             await JdScoringService._record_held(
-                candidate,
+                candidate_id,
+                corporate_id,
+                package_id,
                 digest,
                 exc.narrative,
                 model=exc.model or settings.GEMINI_MODEL,
@@ -1208,7 +1219,7 @@ class JdScoringService:
                 logger.exception(
                     "jd_scoring_failed candidate_id=%s error=%s "
                     "field=%s match=%s context=%s",
-                    candidate.id,
+                    candidate_id,
                     exc,
                     hit.field,
                     hit.match,
@@ -1216,20 +1227,30 @@ class JdScoringService:
                 )
             else:
                 logger.exception(
-                    "jd_scoring_failed candidate_id=%s error=%s", candidate.id, exc
+                    "jd_scoring_failed candidate_id=%s error=%s", candidate_id, exc
                 )
             await JdScoringService._record_failure(
-                candidate, digest, f"{type(exc).__name__}: {exc}"
+                candidate_id,
+                corporate_id,
+                package_id,
+                digest,
+                f"{type(exc).__name__}: {exc}",
             )
             return None, "failed"
 
         await JdScoringService._persist_ok(
-            candidate, digest, evaluation, model=model, usage=usage
+            candidate_id,
+            corporate_id,
+            package_id,
+            digest,
+            evaluation,
+            model=model,
+            usage=usage,
         )
         logger.info(
             "jd_scoring_generated candidate_id=%s model=%s assessments=%s "
             "prompt_tokens=%s output_tokens=%s estimated_cost_usd=%s",
-            candidate.id,
+            candidate_id,
             model,
             len(evaluation.competency_breakdown),
             (usage or {}).get("prompt_tokens"),
@@ -1277,7 +1298,9 @@ class JdScoringService:
 
     @staticmethod
     async def _persist_ok(
-        candidate: Candidate,
+        candidate_id: UUID,
+        corporate_id: UUID,
+        package_id: UUID,
         digest: str,
         evaluation: ReportNarrative,
         *,
@@ -1287,7 +1310,9 @@ class JdScoringService:
         """Persist a successful synthesis on a fresh short-lived DB session.
 
         Args:
-            candidate: Candidate being scored.
+            candidate_id: Candidate being scored (primitive; not an ORM attr).
+            corporate_id: Tenant id (primitive snapshot from before release).
+            package_id: Package id (primitive snapshot from before release).
             digest: Cache key for this attempt.
             evaluation: Validated narrative payload.
             model: Serving model id.
@@ -1296,7 +1321,7 @@ class JdScoringService:
         payload = evaluation.model_dump()
         now = datetime.now(timezone.utc)
         async with SessionLocal() as session:
-            existing = await JdScoringService._load_evaluation(session, candidate.id)
+            existing = await JdScoringService._load_evaluation(session, candidate_id)
             if existing:
                 existing.jd_hash = digest
                 existing.model = model
@@ -1309,9 +1334,9 @@ class JdScoringService:
             else:
                 session.add(
                     CandidateEvaluation(
-                        corporate_id=candidate.corporate_id,
-                        candidate_id=candidate.id,
-                        package_id=candidate.package_id,
+                        corporate_id=corporate_id,
+                        candidate_id=candidate_id,
+                        package_id=package_id,
                         jd_hash=digest,
                         model=model,
                         overall_fit=None,
@@ -1326,7 +1351,9 @@ class JdScoringService:
 
     @staticmethod
     async def _record_failure(
-        candidate: Candidate,
+        candidate_id: UUID,
+        corporate_id: UUID,
+        package_id: UUID,
         digest: str,
         error: str,
     ) -> None:
@@ -1337,7 +1364,9 @@ class JdScoringService:
         session so the write never depends on the pre-Gemini read connection.
 
         Args:
-            candidate: Candidate being scored.
+            candidate_id: Candidate being scored (primitive; not an ORM attr).
+            corporate_id: Tenant id (primitive snapshot from before release).
+            package_id: Package id (primitive snapshot from before release).
             digest: Hash of the JD the attempt used.
             error: Human-readable failure reason.
         """
@@ -1345,7 +1374,7 @@ class JdScoringService:
         now = datetime.now(timezone.utc)
         try:
             async with SessionLocal() as session:
-                existing = await JdScoringService._load_evaluation(session, candidate.id)
+                existing = await JdScoringService._load_evaluation(session, candidate_id)
                 if existing:
                     existing.jd_hash = digest
                     existing.model = settings.GEMINI_MODEL
@@ -1358,9 +1387,9 @@ class JdScoringService:
                 else:
                     session.add(
                         CandidateEvaluation(
-                            corporate_id=candidate.corporate_id,
-                            candidate_id=candidate.id,
-                            package_id=candidate.package_id,
+                            corporate_id=corporate_id,
+                            candidate_id=candidate_id,
+                            package_id=package_id,
                             jd_hash=digest,
                             model=settings.GEMINI_MODEL,
                             overall_fit=None,
@@ -1378,12 +1407,14 @@ class JdScoringService:
                     raise
         except Exception:
             logger.exception(
-                "jd_scoring_failure_record_failed candidate_id=%s", candidate.id
+                "jd_scoring_failure_record_failed candidate_id=%s", candidate_id
             )
 
     @staticmethod
     async def _record_held(
-        candidate: Candidate,
+        candidate_id: UUID,
+        corporate_id: UUID,
+        package_id: UUID,
         digest: str,
         narrative: ReportNarrative,
         *,
@@ -1394,7 +1425,9 @@ class JdScoringService:
         """Persist a held-for-review synthesis with payload kept.
 
         Args:
-            candidate: Candidate being scored.
+            candidate_id: Candidate being scored (primitive; not an ORM attr).
+            corporate_id: Tenant id (primitive snapshot from before release).
+            package_id: Package id (primitive snapshot from before release).
             digest: Cache key for this attempt.
             narrative: Narrative with placeholder executive summary.
             model: Serving model id.
@@ -1406,7 +1439,7 @@ class JdScoringService:
         now = datetime.now(timezone.utc)
         try:
             async with SessionLocal() as session:
-                existing = await JdScoringService._load_evaluation(session, candidate.id)
+                existing = await JdScoringService._load_evaluation(session, candidate_id)
                 if existing:
                     existing.jd_hash = digest
                     existing.model = model
@@ -1419,9 +1452,9 @@ class JdScoringService:
                 else:
                     session.add(
                         CandidateEvaluation(
-                            corporate_id=candidate.corporate_id,
-                            candidate_id=candidate.id,
-                            package_id=candidate.package_id,
+                            corporate_id=corporate_id,
+                            candidate_id=candidate_id,
+                            package_id=package_id,
                             jd_hash=digest,
                             model=model,
                             overall_fit=None,
@@ -1439,5 +1472,5 @@ class JdScoringService:
                     raise
         except Exception:
             logger.exception(
-                "jd_scoring_held_record_failed candidate_id=%s", candidate.id
+                "jd_scoring_held_record_failed candidate_id=%s", candidate_id
             )

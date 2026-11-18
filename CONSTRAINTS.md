@@ -30,6 +30,9 @@ without an explicit ADR.
 
 ## Dependencies
 
-- CI runs `pip-audit` and `npm audit --audit-level=high` against lockfiles /
-  requirements. Deferral of a critical/high finding requires a dated note in
-  the PR.
+- CI runs `pip-audit` and `npm audit --omit=dev --audit-level=high` against
+  lockfiles / requirements. Deferral of a critical/high finding requires a dated
+  note in the PR.
+- Deferred (2026-11-18, review by 2026-12-18): picomatch GHSA-fc5q-39xc-vjpf
+  (ReDoS) — no patched release (`<=4.0.7`); reaches us only via vite/vitest
+  (devDependencies). Production audit uses `--omit=dev` until a fix ships.
