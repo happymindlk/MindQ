@@ -344,8 +344,9 @@ async def _resolve_synthesis_status(
         queue_refresh: When False (PDF warmers), never enqueue new LLM work.
 
     Returns:
-        ``ok``/``skipped`` from the cache, ``generating`` while a job is running
-        or was just queued, otherwise ``failed``.
+        ``ok``/``skipped``/``held_for_review`` from the cache, ``generating``
+        while a job is running or was just queued, ``pending`` when a warmer
+        sees a missing/stale cache without queueing work, otherwise ``failed``.
     """
     wants_refresh = cached.needs_refresh or missing_open_evals
     if cached.state in ("ok", "skipped", "held_for_review"):
@@ -362,6 +363,10 @@ async def _resolve_synthesis_status(
     if queue_refresh and wants_refresh and claim_report_refresh(candidate_id):
         await enqueue_refresh_report_synthesis(candidate_id)
         return "generating"
+    # PDF warmers (queue_refresh=False) must not stamp missing/stale as failed —
+    # that sticks the snapshot and blocks reopen retries after cooldown.
+    if not queue_refresh and cached.state in ("missing", "stale"):
+        return "pending"
     return "failed"
 
 

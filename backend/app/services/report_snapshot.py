@@ -32,7 +32,8 @@ async def read_report_snapshot(
         candidate_id: Candidate whose snapshot should be loaded.
 
     Returns:
-        Parsed ``MindQReportResponse``, or ``None`` when missing / generating.
+        Parsed ``MindQReportResponse``, or ``None`` when missing / incomplete
+        (``generating``, ``pending``, or ``failed``) so live assembly can retry.
     """
     row = (
         await session.execute(
@@ -45,9 +46,9 @@ async def read_report_snapshot(
     # so View Report falls through to live assembly instead of AttributeError.
     if not hasattr(row, "payload") or not hasattr(row, "synthesis_status"):
         return None
-    # Incomplete snapshots must not short-circuit live assembly — HR still needs
-    # scores while the narrative is regenerating.
-    if row.synthesis_status == "generating":
+    # Incomplete / failed snapshots must not short-circuit live assembly — HR
+    # still needs scores, and reopen should retry synthesis after cooldown.
+    if row.synthesis_status in ("generating", "pending", "failed"):
         return None
     try:
         return MindQReportResponse.model_validate(row.payload)

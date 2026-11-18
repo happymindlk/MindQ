@@ -28,10 +28,11 @@ def _report(candidate_id, **overrides) -> MindQReportResponse:
 
 
 @pytest.mark.asyncio
-async def test_read_report_snapshot_returns_none_when_generating():
+@pytest.mark.parametrize("status", ["generating", "pending", "failed"])
+async def test_read_report_snapshot_returns_none_when_incomplete(status):
     candidate_id = uuid4()
     row = SimpleNamespace(
-        synthesis_status="generating",
+        synthesis_status=status,
         payload=_report(candidate_id).model_dump(mode="json"),
     )
     session = AsyncMock()
@@ -69,3 +70,20 @@ async def test_upsert_skips_generating_payloads():
         session, candidate, _report(candidate.id, synthesis_status="generating")
     )
     session.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upsert_persists_held_for_review_with_pdf_cache_key():
+    candidate = SimpleNamespace(id=uuid4(), corporate_id=uuid4(), package_id=uuid4())
+    session = AsyncMock()
+    report = _report(candidate.id, synthesis_status="held_for_review")
+
+    await report_snapshot.upsert_report_snapshot(
+        session, candidate, report, pdf_cache_key="abc123pdfkey"
+    )
+
+    session.execute.assert_awaited_once()
+    session.commit.assert_awaited_once()
+    stmt = session.execute.await_args.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": False}))
+    assert "candidate_reports" in compiled.lower() or "INSERT" in compiled.upper()

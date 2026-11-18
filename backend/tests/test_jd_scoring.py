@@ -2,10 +2,14 @@ import json
 import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import String, Uuid
+from sqlalchemy.exc import MissingGreenlet
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.prompts.jd_scoring import PROMPT_VERSION, SYSTEM_INSTRUCTION, build_user_prompt
 from app.schemas.jd_evaluation import ReportNarrative
@@ -1188,6 +1192,86 @@ async def test_get_or_evaluate_releases_db_before_gemini_and_writes_on_fresh_ses
     assert read_session.commits == 0
     assert write_session.commits == 1
     assert write_session.added[0].status == EVAL_STATUS_OK
+
+
+@pytest.mark.asyncio
+async def test_get_or_evaluate_no_missing_greenlet_after_release(monkeypatch):
+    """Regression: rollback before Gemini must not MissingGreenlet on persist.
+
+    ``_release_read_transaction`` rolls back the read session, which expires
+    ORM attributes. Persisting must use primitive UUIDs captured beforehand —
+    not ``candidate.corporate_id`` / ``package_id`` (lazy reload → MissingGreenlet).
+    """
+
+    class _Base(DeclarativeBase):
+        pass
+
+    class _Cand(_Base):
+        __tablename__ = "jd_scoring_expire_probe"
+        id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+        corporate_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+        package_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+        full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    # expire_on_commit=True mirrors the dangerous default; rollback still expires
+    # even when False, but this makes the post-release probe unambiguous.
+    read_maker = async_sessionmaker(
+        bind=engine, class_=AsyncSession, expire_on_commit=True
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(_Base.metadata.create_all)
+
+    cand_id, corp_id, pkg_id = uuid4(), uuid4(), uuid4()
+    write_session = FakeSession()
+    monkeypatch.setattr("app.services.jd_scoring.SessionLocal", lambda: write_session)
+
+    async with read_maker() as session:
+        session.add(
+            _Cand(
+                id=cand_id,
+                corporate_id=corp_id,
+                package_id=pkg_id,
+                full_name="Pat",
+            )
+        )
+        await session.commit()
+        candidate = await session.get(_Cand, cand_id)
+        assert candidate is not None
+
+        # Cache lookup hits CandidateEvaluation; stub empty so we regenerate.
+        async def _empty_eval(_stmt):
+            return _Result(None)
+
+        session.execute = _empty_eval  # type: ignore[method-assign]
+
+        evaluation, status = await JdScoringService.get_or_evaluate(
+            session,
+            candidate=candidate,  # type: ignore[arg-type]
+            package=SimpleNamespace(
+                description="Ops lead role", title="Ops", target_role="Ops"
+            ),
+            assessments=[],
+            progresses=[],
+            responses=[],
+            outcomes=_outcomes(),
+            complete=lambda _p: json.dumps(VALID_SYNTHESIS),
+        )
+
+        assert status == "generated"
+        assert evaluation is not None
+        assert write_session.commits == 1
+        row = write_session.added[0]
+        assert row.candidate_id == cand_id
+        assert row.corporate_id == corp_id
+        assert row.package_id == pkg_id
+        assert row.status == EVAL_STATUS_OK
+
+        # ORM attrs are expired after release; touching them would MissingGreenlet.
+        with pytest.raises(MissingGreenlet):
+            _ = candidate.corporate_id
+
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
