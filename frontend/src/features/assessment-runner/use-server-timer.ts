@@ -149,9 +149,6 @@ export function useServerTimer({
   }, [expiresAt, writeAt, serverNow]);
 
   useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cb1f3d'},body:JSON.stringify({sessionId:'cb1f3d',runId:'pre-fix',hypothesisId:'B,C,D',location:'use-server-timer.ts:effect',message:'server timer effect arm',data:{expiresAt:expiresAt??null,writeAt:writeAt??null,serverNow:serverNow??null,enabled,hasExpires:Boolean(expiresAt),hasWrite:Boolean(writeAt)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     if (!expiresAt || !enabled) {
       clearTicker();
       if (!expiresAt) setRemaining(null);
@@ -177,11 +174,6 @@ export function useServerTimer({
       const expireRaw = writeAt
         ? remainingFromDeadline(writeAt, clockOffsetMs, clientNow)
         : null;
-      // #region agent log
-      if (expireRaw !== null && expireRaw <= 0) {
-        fetch('http://127.0.0.1:7914/ingest/7b7bc9f0-a919-4525-9fab-35a7604b1d30',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'cb1f3d'},body:JSON.stringify({sessionId:'cb1f3d',runId:'post-fix',hypothesisId:'B,D',location:'use-server-timer.ts:tick-expire',message:'server timer expire gate',data:{expiresAt:expiresAt??null,writeAt:writeAt??null,displayRaw,expireRaw,expireFired:expireFiredRef.current,willFire:!expireFiredRef.current&&Boolean(writeAt)},timestamp:Date.now()})}).catch(()=>{});
-      }
-      // #endregion
       if (writeAt && expireRaw !== null && expireRaw <= 0 && !expireFiredRef.current) {
         expireFiredRef.current = true;
         onExpireRef.current?.();
