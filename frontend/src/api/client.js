@@ -109,6 +109,19 @@ export const api = {
       const data = await handleResponse(res);
       return { ...data, status: res.status };
     },
+    logout: async () => {
+      const token = localStorage.getItem('candidateToken');
+      if (!token) return { ok: true };
+      const res = await fetch(`${API_BASE}/candidate/logout`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+      // Always clear local session; best-effort server release of the device lock.
+      if (!res.ok && res.status !== 401) {
+        await handleResponse(res);
+      }
+      return { ok: true };
+    },
   },
   chat: {
     sendMessage: async (message) => {

@@ -25,6 +25,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.candidate import Candidate
 from app.services.candidate_service import CandidateService
+from app.services.candidate_session_lock import touch_session_last_seen
 
 CANDIDATE_AUDIENCE = "happy-mind-candidate"
 CLIENT_AUDIENCE = "mindq-client"
@@ -52,7 +53,8 @@ def _bearer(authorization: str | None) -> str:
 
 
 async def get_current_candidate(
-    authorization: str | None = Header(None), db: AsyncSession = Depends(get_db)
+    authorization: str | None = Header(None),
+    db: AsyncSession = Depends(get_db),
 ) -> Candidate:
     token = _bearer(authorization)
     try:
@@ -70,6 +72,9 @@ async def get_current_candidate(
     candidate = await CandidateService.get_candidate(db, candidate_id)
     if not candidate:
         raise HTTPException(status_code=401, detail="Candidate not found")
+    touch_session_last_seen(candidate)
+    await db.commit()
+    await db.refresh(candidate)
     return candidate
 
 

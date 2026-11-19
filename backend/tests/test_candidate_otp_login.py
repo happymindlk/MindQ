@@ -87,6 +87,8 @@ def _isolate(monkeypatch):
             access_code=data.access_code,
             logged_in_at=now,
             terms_accepted_at=now,
+            active_device_id=None,
+            session_last_seen_at=None,
             created_at=now,
             token=None,
         )

@@ -19,7 +19,9 @@ export const RESEND_COOLDOWN_SECONDS = 60;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function message(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message ? err.message : fallback;
+  // Preserve FastAPI string details (including HTTP 409 single-device lock) verbatim.
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
 }
 
 export function isIdentityComplete(identity: CandidateIdentity): boolean {

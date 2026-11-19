@@ -175,6 +175,25 @@ describe('useCandidateOtpLogin', () => {
     expect(onAuthenticated).not.toHaveBeenCalled();
   });
 
+  it('surfaces the HTTP 409 single-device lock detail without a generic fallback', async () => {
+    const conflict =
+      'You’re already logged in from one device, please close the other device’s session and try again from this device';
+    sendCandidateOtp.mockResolvedValue('temp-token-value');
+    const err = new Error(conflict) as Error & { status?: number };
+    err.status = 409;
+    verifyCandidateOtp.mockRejectedValue(err);
+    const onAuthenticated = vi.fn();
+    const { result } = renderHook(() => useCandidateOtpLogin('HM-1', onAuthenticated));
+    fill(result);
+    await act(() => result.current.sendCode());
+    act(() => result.current.setCode('123456'));
+    await act(() => result.current.verifyCode());
+
+    expect(result.current.error).toBe(conflict);
+    expect(persistCandidateSession).not.toHaveBeenCalled();
+    expect(onAuthenticated).not.toHaveBeenCalled();
+  });
+
   it('does not verify a short code', async () => {
     const { result } = renderHook(() => useCandidateOtpLogin('HM-1', vi.fn()));
     act(() => result.current.setCode('123'));
