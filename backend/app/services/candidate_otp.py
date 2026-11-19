@@ -32,6 +32,7 @@ from app.services.admin_otp import (
     send_block_reason,
 )
 from app.services.candidate_service import CandidateService
+from app.services.candidate_session_lock import enforce_device_login
 from app.services.email import send_candidate_otp_email
 
 logger = logging.getLogger("app.candidate_otp")
@@ -114,6 +115,53 @@ def _aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value
+
+
+async def _find_existing_login_candidate(
+    db: AsyncSession, access_code: str, email: str
+) -> Candidate | None:
+    """Resolve an existing candidate for the access-code + email pair.
+
+    Args:
+        db: Async database session.
+        access_code: Submitted package or per-candidate access code.
+        email: Normalized candidate email.
+
+    Returns:
+        Matching non-deleted candidate, or ``None`` when open enrollment
+        has not created a row yet / the pair does not resolve.
+    """
+    package = (
+        await db.execute(
+            select(Package).where(
+                Package.access_code.in_((access_code, access_code.upper())),
+                Package.is_active.is_(True),
+            )
+        )
+    ).scalars().first()
+
+    if package is None:
+        invited = (
+            await db.execute(
+                select(Candidate).where(
+                    func.lower(Candidate.access_code) == access_code.lower(),
+                    Candidate.deleted_at.is_(None),
+                )
+            )
+        ).scalars().first()
+        if invited is None or invited.email.lower() != email:
+            return None
+        return invited
+
+    return (
+        await db.execute(
+            select(Candidate).where(
+                func.lower(Candidate.email) == email,
+                Candidate.package_id == package.id,
+                Candidate.deleted_at.is_(None),
+            )
+        )
+    ).scalars().first()
 
 
 async def _validate_login_target(
@@ -220,24 +268,37 @@ async def _supersede_open(db: AsyncSession, email: str, now: datetime) -> None:
 
 
 async def request_candidate_otp(
-    db: AsyncSession, access_code: str, email: str
+    db: AsyncSession,
+    access_code: str,
+    email: str,
+    *,
+    device_id: str | None = None,
 ) -> CandidateOtpChallengeResponse:
     """Validate the target, store a code challenge, and email the code.
+
+    Rejects with HTTP 409 before any email is sent when another device holds
+    an active soft session for this candidate.
 
     Args:
         db: Async database session.
         access_code: Package or per-candidate access code.
         email: Candidate email (normalized here).
+        device_id: Incoming ``X-Device-Id`` for the single-device lock check.
 
     Returns:
         ``otp_required`` plus a signed temp token.
 
     Raises:
         CandidateOtpError: 400 bad target, 429 lock or send cap, 503 mail down.
+        HTTPException: 409 when another device holds an active session.
     """
     normalized_email = email.strip().lower()
     code_value = access_code.strip()
     await _validate_login_target(db, code_value, normalized_email)
+
+    existing = await _find_existing_login_candidate(db, code_value, normalized_email)
+    if existing is not None:
+        enforce_device_login(existing, device_id)
 
     now = datetime.now(timezone.utc)
     # Serialize the send-cap check + insert per email, as in admin OTP.

@@ -67,8 +67,14 @@ async def send_candidate_otp(
         ``otp_required`` plus the temp token required at verify.
     """
     enforce_rate_limit(candidate_otp_limiter, request, "candidate_otp_send")
+    device_id, _browser = device_headers(request)
     try:
-        return await request_candidate_otp(db, body.access_code, str(body.email))
+        return await request_candidate_otp(
+            db,
+            body.access_code,
+            str(body.email),
+            device_id=device_id,
+        )
     except CandidateOtpError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     except (PackageNotOpenError, PackageClosedError) as exc:
