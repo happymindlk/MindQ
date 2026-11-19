@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,9 +102,14 @@ async def reset_candidate_assessment(
 
     await CandidateService.reset_assessment(db, candidate)
     storage_service.purge_cached_reports(candidate.corporate_id, candidate.id)
+    # Marker so clients can invalidate local drafts / caches after an admin reset.
+    reset_at = datetime.now(timezone.utc).isoformat()
     return {
         "success": True,
         "message": "Candidate assessment successfully reset",
+        "reset_at": reset_at,
+        "status": "NOT_STARTED",
+        "started_at": None,
     }
 
 

@@ -59,6 +59,13 @@ export function clearDraft(candidateId, assessmentId) {
   } catch {
     // Ignore storage failures on cleanup.
   }
+  try {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem(draftKey(candidateId, assessmentId));
+    }
+  } catch {
+    // Ignore storage failures on cleanup.
+  }
 }
 
 /**
@@ -71,4 +78,42 @@ export function clearDraft(candidateId, assessmentId) {
  */
 export function mergeAnswers(serverAnswers, localDraft) {
   return { ...(serverAnswers || {}), ...(localDraft || {}) };
+}
+
+/**
+ * Whether cached local answers should be restored for this attempt.
+ *
+ * Admin reset leaves the module as ``NOT_STARTED`` with ``started_at`` null;
+ * stale browser drafts must never resurrect answers in that state. Resume
+ * (``IN_PROGRESS`` / non-null ``started_at``) still merges the local draft.
+ *
+ * @param {{ startedAt?: string | null, status?: string | null }} [meta]
+ * @returns {boolean}
+ */
+export function shouldRestoreDraft(meta = {}) {
+  const status =
+    typeof meta.status === 'string' && meta.status.trim()
+      ? meta.status.trim().toUpperCase().replace(/-/g, '_')
+      : null;
+  if (status === 'IN_PROGRESS') return true;
+  if (status === 'NOT_STARTED') return false;
+  return Boolean(meta.startedAt);
+}
+
+/**
+ * Hydrate runner answers from the server payload, clearing stale drafts when
+ * the attempt is not in progress (never started or admin-reset).
+ *
+ * @param {Record<string, unknown> | null | undefined} serverAnswers
+ * @param {string | null} candidateId
+ * @param {string | null} assessmentId
+ * @param {{ startedAt?: string | null, status?: string | null }} [meta]
+ * @returns {Record<string, unknown>}
+ */
+export function hydrateAttemptAnswers(serverAnswers, candidateId, assessmentId, meta = {}) {
+  if (!shouldRestoreDraft(meta)) {
+    clearDraft(candidateId, assessmentId);
+    return { ...(serverAnswers || {}) };
+  }
+  return mergeAnswers(serverAnswers || {}, readDraft(candidateId, assessmentId));
 }

@@ -27,7 +27,10 @@ import { useQuestionTelemetry } from './use-question-telemetry';
 
 /** Exact copy for the full-screen timed-out completion state. */
 export const ASSESSMENT_TIMEOUT_MESSAGE =
-  'Your time to complete this assessment has concluded. All the completed questions are saved and recorded successfully';
+  'Your time to complete this assessment has concluded. All the completed questions are saved and recorded successfully.';
+
+/** Hold the Submitted confirmation briefly, then auto-return to the dashboard. */
+export const TIMEOUT_AUTO_EXIT_MS = 1500;
 
 /** Leading-edge guard against rapid Next / confirm double-clicks. */
 const NAV_DEBOUNCE_MS = 300;
@@ -122,6 +125,8 @@ export function AssessmentRunner({
   const lastAdvanceAtRef = useRef(0);
   const lastOpenConfirmAtRef = useRef(0);
   const lastConfirmSubmitAtRef = useRef(0);
+  /** Prevents double navigation from the auto-exit timer and the Back button. */
+  const exitFiredRef = useRef(false);
 
   const clearDebounceTimer = useCallback(() => {
     if (debounceTimerRef.current !== null) {
@@ -154,6 +159,21 @@ export function AssessmentRunner({
       onSubmitted();
     }
   }, [onSubmitted, onTimeExpired]);
+
+  const exitAfterTimeout = useCallback(() => {
+    if (exitFiredRef.current) return;
+    exitFiredRef.current = true;
+    onExit();
+  }, [onExit]);
+
+  // After a successful expiry submit, show Submitted briefly then return automatically.
+  useEffect(() => {
+    if (!timeoutComplete) return undefined;
+    const timerId = window.setTimeout(() => {
+      exitAfterTimeout();
+    }, TIMEOUT_AUTO_EXIT_MS);
+    return () => window.clearTimeout(timerId);
+  }, [exitAfterTimeout, timeoutComplete]);
 
   const submit = useCallback(
     async (reason: 'manual' | 'expired') => {
@@ -427,7 +447,7 @@ export function AssessmentRunner({
 
   // Expiry finalize: leave the question / review UI the instant the write lock
   // hits 0. Show the confirmation copy immediately with an inline Submitting...
-  // status; swap to Return to Dashboard only after the submit API resolves.
+  // status; swap to Submitted + Back to Dashboard after the submit API resolves.
   if (timeoutComplete || (timeUp && (submitting || Boolean(submitError)))) {
     const showSubmitting = submitting || (timeUp && !timeoutComplete && !submitError);
     return (
@@ -466,13 +486,22 @@ export function AssessmentRunner({
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={onExit}
-            className="mt-8 inline-flex h-10 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-fg hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
-          >
-            Return to Dashboard
-          </button>
+          <div className="mt-8 flex flex-col items-center gap-4">
+            <p
+              className="text-sm font-medium text-foreground"
+              role="status"
+              aria-label="Submitted"
+            >
+              Submitted
+            </p>
+            <button
+              type="button"
+              onClick={exitAfterTimeout}
+              className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-fg hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
+            >
+              Back to Dashboard
+            </button>
+          </div>
         )}
       </div>
     );

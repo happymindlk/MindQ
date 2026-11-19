@@ -3,7 +3,10 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ASSESSMENT_TIMEOUT_MESSAGE } from '../../features/assessment-runner/assessment-runner';
+import {
+  ASSESSMENT_TIMEOUT_MESSAGE,
+  TIMEOUT_AUTO_EXIT_MS,
+} from '../../features/assessment-runner/assessment-runner';
 import { CANDIDATE_DASHBOARD_KEY } from '../../features/candidate-dashboard/module-status';
 import { invalidateQuery, peekQuery, setQuery } from '../../lib/query-cache';
 import { api } from '../../api/client';
@@ -122,7 +125,7 @@ describe('TestRunner timeout completion lifecycle', () => {
     localStorage.clear();
   });
 
-  it('keeps the timeout notice mounted through submit + portal invalidation until Return to Dashboard', async () => {
+  it('keeps the timeout notice mounted through submit + portal invalidation, then auto-returns', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const startedAt = new Date('2026-11-19T12:00:00.000Z');
     vi.setSystemTime(startedAt);
@@ -151,7 +154,7 @@ describe('TestRunner timeout completion lifecycle', () => {
 
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Submitting...' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Return to Dashboard' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back to Dashboard' })).not.toBeInTheDocument();
     expect(screen.queryByText('Dashboard list')).not.toBeInTheDocument();
     expect(api.candidate.submitTest).toHaveBeenCalledTimes(1);
 
@@ -170,20 +173,21 @@ describe('TestRunner timeout completion lifecycle', () => {
     // Portal query invalidation / dashboard patch must not unmount the notice.
     expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Submitting...' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Submitted' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
     expect(screen.queryByText('Dashboard list')).not.toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
 
     const dash = peekQuery(CANDIDATE_DASHBOARD_KEY);
     expect(dash?.tests?.[0]?.status).toBe('completed');
 
-    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(
-      screen.getByRole('button', { name: 'Return to Dashboard' }),
-    );
-    expect(navigate).toHaveBeenCalledWith('/portal/dashboard');
+    await act(async () => {
+      vi.advanceTimersByTime(TIMEOUT_AUTO_EXIT_MS);
+    });
+    expect(navigate).toHaveBeenCalledWith('/portal/dashboard', { replace: true });
   });
 
-  it('treats 409 already-submitted as success and still shows Return to Dashboard', async () => {
+  it('treats 409 already-submitted as success and auto-returns to the dashboard', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const startedAt = new Date('2026-11-19T12:00:00.000Z');
     vi.setSystemTime(startedAt);
@@ -207,14 +211,15 @@ describe('TestRunner timeout completion lifecycle', () => {
 
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Submitted' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
     });
     expect(screen.queryByText(/Answers locked/i)).not.toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
 
-    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(
-      screen.getByRole('button', { name: 'Return to Dashboard' }),
-    );
-    expect(navigate).toHaveBeenCalledWith('/portal/dashboard');
+    await act(async () => {
+      vi.advanceTimersByTime(TIMEOUT_AUTO_EXIT_MS);
+    });
+    expect(navigate).toHaveBeenCalledWith('/portal/dashboard', { replace: true });
   });
 });

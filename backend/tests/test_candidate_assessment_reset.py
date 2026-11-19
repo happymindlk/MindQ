@@ -94,10 +94,12 @@ def test_reset_allows_ops_cross_tenant_and_purges_cache():
         )
 
     assert res.status_code == 200
-    assert res.json() == {
-        "success": True,
-        "message": "Candidate assessment successfully reset",
-    }
+    body = res.json()
+    assert body["success"] is True
+    assert body["message"] == "Candidate assessment successfully reset"
+    assert body["status"] == "NOT_STARTED"
+    assert body["started_at"] is None
+    assert isinstance(body.get("reset_at"), str) and body["reset_at"]
     reset.assert_awaited_once()
     purge.assert_called_once_with(candidate.corporate_id, candidate.id)
 
@@ -133,3 +135,29 @@ async def test_reset_assessment_clears_child_rows_and_login():
     evaluation_sql = str(session.execute.await_args_list[3].args[0])
     assert "candidate_reports" in report_sql
     assert "candidate_evaluations" in evaluation_sql
+
+
+@pytest.mark.asyncio
+async def test_reset_assessment_deletes_candidate_responses_for_clean_reopen():
+    """Reset must DELETE ``candidate_responses`` so reopen starts with 0 answers."""
+    candidate = _candidate(corporate_id=uuid4(), logged_in=True)
+    session = AsyncMock()
+    session.execute = AsyncMock()
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+
+    await CandidateService.reset_assessment(session, candidate)
+
+    responses_stmt = session.execute.await_args_list[0].args[0]
+    responses_sql = str(responses_stmt).lower()
+    assert "candidate_responses" in responses_sql
+    assert "delete" in responses_sql
+
+    # After the wipe, a reopen hydration must see an empty answer map.
+    empty_result = MagicMock()
+    empty_result.scalars.return_value.all.return_value = []
+    session.execute = AsyncMock(return_value=empty_result)
+    answers = await CandidateService.get_saved_answers(
+        session, candidate.id, uuid4()
+    )
+    assert answers == {}

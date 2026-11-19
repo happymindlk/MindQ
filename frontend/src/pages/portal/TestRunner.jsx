@@ -5,7 +5,7 @@ import Skeleton from '../../components/ui/Skeleton';
 import EmptyState from '../../components/ui/EmptyState';
 import Button from '../../components/ui/Button';
 import { api } from '../../api/client';
-import { readDraft, writeDraft, clearDraft, mergeAnswers } from '../../lib/assessment-draft';
+import { writeDraft, clearDraft, hydrateAttemptAnswers } from '../../lib/assessment-draft';
 import {
   ASSESSMENT_TIMEOUT_MESSAGE,
   AssessmentRunner,
@@ -81,7 +81,12 @@ export default function TestRunner() {
   const cached = peeked && typeof peeked === 'object' && !peeked.started_at ? peeked : null;
   const [test, setTest] = useState(cached);
   const [initialAnswers, setInitialAnswers] = useState(() =>
-    cached ? mergeAnswers(cached.answers || {}, readDraft(candidateId, testId)) : {},
+    cached
+      ? hydrateAttemptAnswers(cached.answers || {}, candidateId, testId, {
+          startedAt: cached.started_at,
+          status: cached.status,
+        })
+      : {},
   );
   const [isLoading, setIsLoading] = useState(() => !cached);
   const [lockDetail, setLockDetail] = useState(null);
@@ -96,9 +101,8 @@ export default function TestRunner() {
   const [phase, setPhase] = useState('instructions');
   /**
    * Sticky timeout notice: once the write deadline fires, keep the runner (and
-   * its full-screen timeout UI) mounted until the candidate clicks
-   * "Return to Dashboard" — even if submit returns 409 or dashboard queries
-   * invalidate / refetch.
+   * its full-screen timeout UI) mounted until auto-return / "Back to Dashboard"
+   * — even if submit returns 409 or dashboard queries invalidate / refetch.
    */
   const [showTimeoutNotice, setShowTimeoutNotice] = useState(false);
   const showTimeoutNoticeRef = useRef(false);
@@ -136,7 +140,14 @@ export default function TestRunner() {
         });
         // A Start click that resolved first already holds the authoritative timer seed.
         if (cancelled || startedRef.current) return;
-        setInitialAnswers(mergeAnswers(data.answers || {}, readDraft(candidateId, testId)));
+        // NOT_STARTED / null started_at (including admin reset) clears stale drafts
+        // before hydration; IN_PROGRESS still merges localStorage resume answers.
+        setInitialAnswers(
+          hydrateAttemptAnswers(data.answers || {}, candidateId, testId, {
+            startedAt: data.started_at,
+            status: data.status,
+          }),
+        );
         setTest(data);
         // Already-started attempts skip the instruction gate and resume in-place.
         setPhase(data.started_at ? 'running' : 'instructions');
@@ -197,7 +208,7 @@ export default function TestRunner() {
           );
         } catch (err) {
           // Server already auto-submitted / expired: treat as successful finalize
-          // so the timeout completion screen can show Return to Dashboard.
+          // so the timeout completion screen can show Submitted / Back to Dashboard.
           const status = err?.status;
           if (status === 400 || status === 409) {
             result = {
@@ -235,7 +246,12 @@ export default function TestRunner() {
     if (test?.started_at && !exitHandledRef.current) {
       syncDashboardModule(testId, 'in_progress', test);
     }
-    navigate('/portal/dashboard');
+    // Mark dashboard stale so remount revalidates the assessment list in the background.
+    const dash = peekQuery(CANDIDATE_DASHBOARD_KEY);
+    if (dash && typeof dash === 'object') {
+      setQuery(CANDIDATE_DASHBOARD_KEY, dash, { fresh: false });
+    }
+    navigate('/portal/dashboard', { replace: true });
   }, [navigate, test, testId]);
 
   const onTimeoutStarted = useCallback(() => {
@@ -352,8 +368,11 @@ export default function TestRunner() {
         <p className="max-w-md text-base font-medium leading-relaxed text-foreground sm:text-lg">
           {ASSESSMENT_TIMEOUT_MESSAGE}
         </p>
-        <Button variant="primary" size="sm" className="mt-8" onClick={backToDashboard}>
-          Return to Dashboard
+        <p className="mt-6 text-sm font-medium text-foreground" role="status" aria-label="Submitted">
+          Submitted
+        </p>
+        <Button variant="primary" size="sm" className="mt-4" onClick={backToDashboard}>
+          Back to Dashboard
         </Button>
       </div>
     );
