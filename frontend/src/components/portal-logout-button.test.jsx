@@ -71,6 +71,9 @@ describe('PortalLogoutButton', () => {
     await user.click(screen.getByRole('button', { name: 'Log out' }));
     const dialog = screen.getByRole('dialog', { name: 'Log out?' });
     expect(dialog).toBeInTheDocument();
+    expect(dialog).not.toHaveTextContent(/End your session/i);
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole('button', { name: 'Log out' }));
 

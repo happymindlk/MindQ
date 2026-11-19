@@ -76,9 +76,7 @@ export default function PortalLogoutButton() {
             </Button>
           </>
         }
-      >
-        <p>End your session on this device so you can sign in from another device?</p>
-      </Modal>
+      />
     </>
   );
 }
