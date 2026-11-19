@@ -94,10 +94,20 @@ export default function TestRunner() {
   });
   // instructions | starting | running | package_complete | expired
   const [phase, setPhase] = useState('instructions');
+  /**
+   * Sticky timeout notice: once the write deadline fires, keep the runner (and
+   * its full-screen timeout UI) mounted until the candidate clicks
+   * "Return to Dashboard" — even if submit returns 409 or dashboard queries
+   * invalidate / refetch.
+   */
+  const [showTimeoutNotice, setShowTimeoutNotice] = useState(false);
+  const showTimeoutNoticeRef = useRef(false);
   const exitHandledRef = useRef(false);
   const startedRef = useRef(false);
   /** Set when submit returns package_complete — defer UI until after timeout/manual exit. */
   const packageCompleteRef = useRef(false);
+  /** Freeze AssessmentRunner remount key while the timeout notice is active. */
+  const frozenRunnerKeyRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -150,36 +160,62 @@ export default function TestRunner() {
     };
   }, [testId, candidateId, cacheKey]);
 
+  const markSubmitFinalized = useCallback(
+    (result) => {
+      clearDraft(candidateId, testId);
+      if (result?.company_name) setCompanyName(result.company_name);
+      // Optimistic completed card — navigation is owned by onSubmitted /
+      // the runner timeout screen so expire UX is not interrupted.
+      syncDashboardModule(testId, 'completed', test);
+      // Only drop the per-test cache. Dashboard stays on the optimistic
+      // completed patch (fresh: false) so remount revalidates without wiping
+      // status — and without unmounting the timeout notice.
+      deferWork(() => invalidateQuery(cacheKey));
+      exitHandledRef.current = true;
+      // Do not flip phase here: expiry auto-submit must keep AssessmentRunner
+      // mounted so the full-screen timeout message can paint (including when
+      // every question was already answered on the review/confirm screen).
+      if (result?.package_complete) {
+        packageCompleteRef.current = true;
+      }
+    },
+    [cacheKey, candidateId, test, testId],
+  );
+
   const transport = useMemo(
     () => ({
       autosave: async (payload) => {
         await api.candidate.autosave(payload);
       },
       submit: async ({ responses, total_module_duration_seconds }) => {
-        const result = await api.candidate.submitTest(
-          testId,
-          responses,
-          total_module_duration_seconds ?? null,
-        );
-        if (result.status === 200) {
-          clearDraft(candidateId, testId);
-          if (result.company_name) setCompanyName(result.company_name);
-          // Optimistic completed card — navigation is owned by onSubmitted /
-          // the runner timeout screen so expire UX is not interrupted.
-          syncDashboardModule(testId, 'completed', test);
-          deferWork(() => invalidateQuery(cacheKey));
-          exitHandledRef.current = true;
-          // Do not flip phase here: expiry auto-submit must keep AssessmentRunner
-          // mounted so the full-screen timeout message can paint (including when
-          // every question was already answered on the review/confirm screen).
-          if (result.package_complete) {
-            packageCompleteRef.current = true;
+        let result;
+        try {
+          result = await api.candidate.submitTest(
+            testId,
+            responses,
+            total_module_duration_seconds ?? null,
+          );
+        } catch (err) {
+          // Server already auto-submitted / expired: treat as successful finalize
+          // so the timeout completion screen can show Return to Dashboard.
+          const status = err?.status;
+          if (status === 400 || status === 409) {
+            result = {
+              status,
+              package_complete: false,
+              company_name: null,
+            };
+          } else {
+            throw err;
           }
+        }
+        if (result.status === 200 || result.status === 400 || result.status === 409) {
+          markSubmitFinalized(result);
         }
         return result;
       },
     }),
-    [testId, candidateId, cacheKey, test],
+    [markSubmitFinalized, testId],
   );
 
   const onAnswersChange = useCallback(
@@ -188,6 +224,9 @@ export default function TestRunner() {
   );
 
   const backToDashboard = useCallback(() => {
+    showTimeoutNoticeRef.current = false;
+    setShowTimeoutNotice(false);
+    frozenRunnerKeyRef.current = null;
     if (packageCompleteRef.current) {
       setPhase('package_complete');
       return;
@@ -198,6 +237,11 @@ export default function TestRunner() {
     }
     navigate('/portal/dashboard');
   }, [navigate, test, testId]);
+
+  const onTimeoutStarted = useCallback(() => {
+    showTimeoutNoticeRef.current = true;
+    setShowTimeoutNotice(true);
+  }, []);
 
   const beginModule = useCallback(async () => {
     if (!testId || starting) return;
@@ -235,6 +279,8 @@ export default function TestRunner() {
   }, [testId, starting, test, cacheKey]);
 
   const onTimeExpired = useCallback(() => {
+    showTimeoutNoticeRef.current = true;
+    setShowTimeoutNotice(true);
     // AssessmentRunner owns the full-screen timeout UI after a successful
     // expiry submit. Keep the runner mounted; only fall back to the portal
     // expired phase when submit never completed (exitHandled still false).
@@ -259,7 +305,9 @@ export default function TestRunner() {
     );
   }
 
-  if (lockDetail) {
+  // Timeout notice wins over a lock EmptyState — a 409 from server auto-submit
+  // must not replace the completion message while showTimeoutNotice is active.
+  if (lockDetail && !showTimeoutNotice) {
     return (
       <div className="max-w-md mx-auto py-10">
         <EmptyState
@@ -356,13 +404,19 @@ export default function TestRunner() {
 
   // Remount when authoritative timing arrives so the countdown never inherits a
   // stale full-duration deadline from a prior visit or cached /start payload.
-  const runnerKey = [
+  // While the timeout notice is active, freeze the key so dashboard invalidation
+  // / parent re-renders cannot remount AssessmentRunner and wipe local state.
+  const nextRunnerKey = [
     test.id,
     test.started_at ?? 'idle',
     test.expires_at ?? '',
     test.server_now ?? '',
     String(test.remaining_seconds ?? ''),
   ].join(':');
+  if (!showTimeoutNotice) {
+    frozenRunnerKeyRef.current = nextRunnerKey;
+  }
+  const runnerKey = frozenRunnerKeyRef.current ?? nextRunnerKey;
 
   return (
     <AssessmentRunner
@@ -373,6 +427,8 @@ export default function TestRunner() {
       transport={transport}
       onAnswersChange={onAnswersChange}
       onSubmitted={() => {
+        // Never auto-route away while the timeout completion screen is showing.
+        if (showTimeoutNoticeRef.current) return;
         if (packageCompleteRef.current) {
           setPhase('package_complete');
           return;
@@ -382,7 +438,11 @@ export default function TestRunner() {
         }
       }}
       onTimeExpired={onTimeExpired}
-      onLocked={setLockDetail}
+      onTimeoutStarted={onTimeoutStarted}
+      onLocked={(detail) => {
+        if (showTimeoutNoticeRef.current) return;
+        setLockDetail(detail);
+      }}
       onExit={backToDashboard}
     />
   );

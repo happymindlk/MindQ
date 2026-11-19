@@ -6,6 +6,7 @@ import {
   hasContent,
   isAnswered,
   isAttemptLocked,
+  isTerminalSubmitConflict,
   isTimeExpired,
   resolveRemainingSeconds,
   resolveResumeIndex,
@@ -184,5 +185,13 @@ describe('runner logic', () => {
     expect(isAttemptLocked({ status: 409, code: null })).toBe(true);
     expect(isAttemptLocked(new Error('x'))).toBe(false);
     expect(hasContent(0)).toBe(true);
+  });
+
+  it('treats 400/409 finalize conflicts as terminal submit success', () => {
+    expect(isTerminalSubmitConflict({ status: 409, code: null })).toBe(true);
+    expect(isTerminalSubmitConflict({ status: 409, code: 'TIME_EXPIRED' })).toBe(true);
+    expect(isTerminalSubmitConflict({ status: 400, message: 'expired' })).toBe(true);
+    expect(isTerminalSubmitConflict({ status: 500 })).toBe(false);
+    expect(isTerminalSubmitConflict(new Error('network'))).toBe(false);
   });
 });
