@@ -32,7 +32,7 @@ const TEST_ID = 'mod-timeout-1';
 
 function startedPayload(overrides = {}) {
   const startedAt = new Date('2026-11-19T12:00:00.000Z');
-  const expiresAt = new Date(startedAt.getTime() + 3_000);
+  const expiresAt = new Date(startedAt.getTime() + 3000);
   return {
     id: TEST_ID,
     title: 'Timed Module',
@@ -145,8 +145,8 @@ describe('TestRunner timeout completion lifecycle', () => {
     expect(screen.getByText(/Question 2 of 2/)).toBeInTheDocument();
 
     await act(async () => {
-      vi.setSystemTime(new Date(startedAt.getTime() + 4_000));
-      vi.advanceTimersByTime(4_000);
+      vi.setSystemTime(new Date(startedAt.getTime() + 4000));
+      vi.advanceTimersByTime(4000);
     });
 
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
@@ -201,8 +201,8 @@ describe('TestRunner timeout completion lifecycle', () => {
     expect(await screen.findByRole('timer')).toBeInTheDocument();
 
     await act(async () => {
-      vi.setSystemTime(new Date(startedAt.getTime() + 4_000));
-      vi.advanceTimersByTime(4_000);
+      vi.setSystemTime(new Date(startedAt.getTime() + 4000));
+      vi.advanceTimersByTime(4000);
     });
 
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
