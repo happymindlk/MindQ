@@ -1,4 +1,7 @@
 import { api } from '../../api/client';
+import { ApiError } from '../../lib/api-error';
+import { CANDIDATE_DASHBOARD_KEY } from '../candidate-dashboard/module-status';
+import { invalidateQuery } from '../../lib/query-cache';
 
 /** Identity the candidate enters before an OTP is sent. */
 export interface CandidateIdentity {
@@ -16,6 +19,14 @@ export interface CandidateSession {
   fullName: string;
   accessCode: string;
 }
+
+const CANDIDATE_SESSION_KEYS = [
+  'candidateToken',
+  'candidateId',
+  'candidateName',
+  'candidateFirstName',
+  'candidateAccessCode',
+] as const;
 
 interface CandidateVerifyResponse {
   token: string;
@@ -97,6 +108,43 @@ export function persistCandidateSession(session: CandidateSession): void {
   localStorage.setItem('candidateAccessCode', session.accessCode);
 }
 
+/** Drop portal session keys without calling the server (expired JWT path). */
+export function clearLocalCandidateSession(): void {
+  for (const key of CANDIDATE_SESSION_KEYS) {
+    localStorage.removeItem(key);
+  }
+  invalidateQuery(CANDIDATE_DASHBOARD_KEY);
+}
+
+/**
+ * When a stored candidate JWT is already invalid/expired, clear it quietly.
+ *
+ * Used on `/portal?code=…` entry so returning candidates see Email + OTP
+ * instead of a dashboard "Invalid or expired token" error.
+ *
+ * @returns `true` when a stale token was cleared.
+ */
+export async function clearStaleCandidateSessionIfExpired(): Promise<boolean> {
+  const token = localStorage.getItem('candidateToken');
+  if (!token) return false;
+  try {
+    await api.candidate.getDashboard();
+    return false;
+  } catch (err) {
+    const status =
+      err instanceof ApiError
+        ? err.status
+        : typeof err === 'object' && err && 'status' in err
+          ? Number((err as { status: unknown }).status)
+          : 0;
+    if (status === 401) {
+      clearLocalCandidateSession();
+      return true;
+    }
+    return false;
+  }
+}
+
 /** Clear portal session keys after a best-effort server logout. */
 export async function clearCandidateSession(): Promise<void> {
   try {
@@ -104,9 +152,5 @@ export async function clearCandidateSession(): Promise<void> {
   } catch {
     // Local clear must still happen if the lock release request fails.
   }
-  localStorage.removeItem('candidateToken');
-  localStorage.removeItem('candidateId');
-  localStorage.removeItem('candidateName');
-  localStorage.removeItem('candidateFirstName');
-  localStorage.removeItem('candidateAccessCode');
+  clearLocalCandidateSession();
 }

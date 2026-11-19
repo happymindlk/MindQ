@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import BrandLogo from './BrandLogo';
 import PortalFooter from './PortalFooter';
@@ -10,22 +10,34 @@ import PortalLogoutButton from './portal-logout-button';
 import KeepAliveOutlet from './keep-alive-outlet';
 import { PORTAL_KEEP_PATTERNS } from './keep-alive-routes';
 import { api } from '../api/client';
+import {
+  clearLocalCandidateSession,
+} from '../features/candidate-auth/candidate-otp-api';
 import { CANDIDATE_DASHBOARD_KEY } from '../features/candidate-dashboard/module-status';
+import { ApiError } from '../lib/api-error';
 import { cachedQuery } from '../lib/query-cache';
 
 /**
  * Candidate assessment shell. Shares Design System tokens with admin Operate surfaces.
  */
 export default function PortalLayout() {
-  const hasSession =
-    typeof window !== 'undefined' && Boolean(localStorage.getItem('candidateToken'));
+  const [hasSession, setHasSession] = useState(
+    () => typeof window !== 'undefined' && Boolean(localStorage.getItem('candidateToken')),
+  );
   const brandTo = hasSession ? '/portal/dashboard' : '/portal';
 
   // Warm the candidate dashboard once at the shell so remounts hit cache.
+  // A 401 from an expired JWT clears local session quietly (no toast).
   useEffect(() => {
     if (!hasSession) return undefined;
     void cachedQuery(CANDIDATE_DASHBOARD_KEY, () => api.candidate.getDashboard()).catch(
-      () => undefined,
+      (err) => {
+        const status = err instanceof ApiError ? err.status : err?.status;
+        if (status === 401) {
+          clearLocalCandidateSession();
+          setHasSession(false);
+        }
+      },
     );
     return undefined;
   }, [hasSession]);

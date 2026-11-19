@@ -60,10 +60,12 @@ async def nudge_candidate(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     package = await PackageService.get_package(db, candidate.package_id)
+    # Prefer package PIN so nudge links match Client Portal / invite emails.
+    nudge_code = package.access_code if package else candidate.access_code
     await enqueue_nudge_email(
         candidate.email,
         candidate.full_name,
-        candidate.access_code,
+        nudge_code,
         package.title if package else "your assessment",
         candidate_id=candidate.id,
     )

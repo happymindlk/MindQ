@@ -210,7 +210,7 @@ async def test_invite_email_includes_guidelines(monkeypatch):
     assert "HM-ABCDEF-G" in captured["html"]
     assert "Guidelines" in captured["html"]
     assert "Start assessment" in captured["html"]
-    assert "https://mindq.pages.dev/assessment?code=HM-ABCDEF-G" in captured["html"]
+    assert "https://mindq.pages.dev/portal?code=HM-ABCDEF-G" in captured["html"]
     assert "No fixed deadline" in captured["html"]
     assert "MindQ (Pvt) Ltd" in captured["html"]
     assert "Level 35, West Tower, World Trade Center," in captured["html"]
@@ -341,7 +341,7 @@ async def test_candidate_invite_logs_dispatch_even_when_ses_fails(monkeypatch, c
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "[INVITE DISPATCHED] Candidate=pat@example.com" in logged
     assert "Code=AP-TEST-9" in logged
-    assert "Link=https://qa.app.mindqtalent.com/assessment?code=AP-TEST-9" in logged
+    assert "Link=https://qa.app.mindqtalent.com/portal?code=AP-TEST-9" in logged
     assert "[INVITE FAILED]" in logged
 
 

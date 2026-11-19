@@ -54,6 +54,7 @@ def test_bulk_invite_queues_new_and_skips_existing(app, corp_id, package_id):
         status="published",
         close_time=None,
         is_active=True,
+        access_code="HM-PKG-BULK",
     )
     corporate = SimpleNamespace(id=corp_id, name="Acme Corp")
 

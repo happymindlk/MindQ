@@ -1,9 +1,10 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Card from '../../components/ui/Card';
 import LegalPolicyModal from '../../components/LegalPolicyModal';
 import { PreviewRunner } from '../../features/assessment-runner/preview-runner';
 import { PREVIEW_ACCESS_CODE } from '../../features/assessment-builder/lib/preview-protocol';
+import { clearStaleCandidateSessionIfExpired } from '../../features/candidate-auth/candidate-otp-api';
 import {
   OTP_MAX_LENGTH,
   OTP_MIN_LENGTH,
@@ -183,7 +184,26 @@ function CandidateLogin({ initialAccessCode }) {
   const onAuthenticated = useCallback(() => navigate('/portal/guidelines'), [navigate]);
   const login = useCandidateOtpLogin(initialAccessCode, onAuthenticated);
   const [legalDoc, setLegalDoc] = useState(null);
+  const [sessionChecked, setSessionChecked] = useState(
+    () => typeof window === 'undefined' || !localStorage.getItem('candidateToken'),
+  );
   const { step, identity, loading } = login;
+
+  // Returning via /portal?code=… with a 24h+ expired JWT must land on OTP,
+  // not a scary "Invalid or expired token" dashboard error.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        await clearStaleCandidateSessionIfExpired();
+      } finally {
+        if (!cancelled) setSessionChecked(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const submitDetails = (e) => {
     e.preventDefault();
@@ -194,6 +214,14 @@ function CandidateLogin({ initialAccessCode }) {
     e.preventDefault();
     void login.verifyCode();
   };
+
+  if (!sessionChecked) {
+    return (
+      <div className="flex-1 flex flex-col justify-center items-center w-full py-8" role="status" aria-label="Checking session">
+        <IconSpinner className="h-5 w-5 text-[#7048E2]" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col justify-center items-center w-full py-8">

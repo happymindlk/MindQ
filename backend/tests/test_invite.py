@@ -77,6 +77,7 @@ def test_invite_queues_email_and_returns_accepted(app, corp_id, package_id):
                 title="Backend Pack",
                 corporate_id=corp_id,
                 status="published",
+                access_code=access,
             ))
 
         def scalar_one_or_none(self):

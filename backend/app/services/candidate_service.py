@@ -34,7 +34,6 @@ from app.schemas.candidate import CandidateAuthOtpVerifyRequest
 from app.schemas.response import ResponseSave
 from app.services.audit_log import log_candidate_erased
 from app.services.instrument_results import SCORING_VERSION, build_score_details
-from app.services.package_generator import _mint_access_code
 from app.services.package_window import (
     ensure_module_launchable,
     ensure_package_open,
@@ -50,45 +49,6 @@ from app.services.runner_payload import (
 from app.services.scoring import ScoreResult, _extract_answer, score_assessment_detailed
 
 logger = logging.getLogger(__name__)
-
-_ACCESS_CODE_MINT_ATTEMPTS = 12
-
-
-async def _mint_unique_candidate_access_code(session: AsyncSession) -> str:
-    """Mint an ``HM-XXXXXX-C`` PIN unused by candidates or packages.
-
-    Args:
-        session: Async SQLAlchemy session.
-
-    Returns:
-        A unique access code string.
-
-    Raises:
-        RuntimeError: When a unique code cannot be minted after retries.
-    """
-    for _ in range(_ACCESS_CODE_MINT_ATTEMPTS):
-        code = _mint_access_code()
-        candidate_hit = (
-            await session.execute(
-                select(Candidate.id)
-                .where(
-                    Candidate.access_code == code,
-                    Candidate.deleted_at.is_(None),
-                )
-                .limit(1)
-            )
-        ).scalar_one_or_none()
-        if candidate_hit is not None:
-            continue
-        package_hit = (
-            await session.execute(
-                select(Package.id).where(Package.access_code == code).limit(1)
-            )
-        ).scalar_one_or_none()
-        if package_hit is not None:
-            continue
-        return code
-    raise RuntimeError("Could not mint a unique candidate access code")
 
 COMPLETED_STATUS = "COMPLETED"
 IN_PROGRESS_STATUS = "IN_PROGRESS"
@@ -491,12 +451,14 @@ class CandidateService:
         if existing:
             return existing, False
 
+        # Share the package PIN so invite emails, Client Portal "Copy Link",
+        # and OTP login all use the same ``package.access_code``.
         candidate = Candidate(
             corporate_id=corporate_id,
             package_id=package.id,
             full_name=display,
             email=email_norm,
-            access_code=await _mint_unique_candidate_access_code(session),
+            access_code=package.access_code,
         )
         session.add(candidate)
         try:

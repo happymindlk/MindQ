@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2, RefreshCw, FileText } from 'lucide-react';
 import StatusTile from '../../components/ui/StatusTile';
@@ -7,6 +7,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import Button from '../../components/ui/Button';
 import Skeleton from '../../components/ui/Skeleton';
 import { api } from '../../api/client';
+import { clearLocalCandidateSession } from '../../features/candidate-auth/candidate-otp-api';
 import DeadlineNotice from '../../features/candidate-dashboard/deadline-notice';
 import PackageCompleteScreen from '../../features/candidate-dashboard/package-complete-screen';
 import {
@@ -25,6 +26,10 @@ import { cachedQuery, candidateTestKey } from '../../lib/query-cache';
 
 const TEST_PREFETCH_STALE_MS = 60000;
 
+function isExpiredCandidateTokenError(message) {
+  return typeof message === 'string' && /invalid or expired token/i.test(message);
+}
+
 export default function TestDashboard() {
   const navigate = useNavigate();
   const fetcher = useCallback(() => api.candidate.getDashboard(), []);
@@ -39,13 +44,23 @@ export default function TestDashboard() {
     staleTime: CANDIDATE_DASHBOARD_STALE_MS,
   });
 
+  // Expired JWT → OTP login with the package code preserved (no scary banner).
+  useEffect(() => {
+    if (!isExpiredCandidateTokenError(loadError)) return undefined;
+    const code = localStorage.getItem('candidateAccessCode') || '';
+    clearLocalCandidateSession();
+    const search = code ? `?code=${encodeURIComponent(code)}` : '';
+    navigate(`/portal${search}`, { replace: true });
+    return undefined;
+  }, [loadError, navigate]);
+
   const windowState = usePackageWindow(
     dashboardData?.window_state,
     dashboardData?.open_time,
     dashboardData?.close_time,
   );
 
-  if (isLoading) {
+  if (isLoading || isExpiredCandidateTokenError(loadError)) {
     return (
       <div className="w-full py-6 space-y-4" role="status" aria-label="Loading assessments">
         <Skeleton className="h-7 w-48" />

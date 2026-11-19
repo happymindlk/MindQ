@@ -234,6 +234,7 @@ def test_invite_route_enqueues_with_invite_job_id(monkeypatch):
         corporate_id=corp_id,
         status="published",
         close_time=None,
+        access_code="HM-AAAAAA-C",
     )
     corporate = SimpleNamespace(id=corp_id, name="Acme")
     captured: dict = {}
