@@ -90,7 +90,7 @@ async def nudge_candidates_due(
                 skipped += 1
                 continue
             ok = await EmailService.send_nudge_email(
-                cand.email, cand.full_name, cand.access_code, pkg.title
+                cand.email, cand.full_name, pkg.access_code, pkg.title
             )
             if ok:
                 nudged += 1

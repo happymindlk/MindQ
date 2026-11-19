@@ -170,16 +170,6 @@ def frontend_origin(request: Request | None = None) -> str:
     return resolve_frontend_origin(request)
 
 
-def _assessment_invite_link(access_code: str, *, origin: str | None = None) -> str:
-    """Candidate CTA: ``{origin}/assessment?code={access_code}``."""
-    base = (origin or frontend_origin()).rstrip("/")
-    return f"{base}/assessment?code={quote(str(access_code))}"
-
-
-def _portal_link(access_code: str, *, origin: str | None = None) -> str:
-    return candidate_portal_link(access_code, origin=origin)
-
-
 def candidate_portal_link(access_code: str, *, origin: str | None = None) -> str:
     """Universal candidate link that pre-fills the access code on the portal login.
 
@@ -192,6 +182,19 @@ def candidate_portal_link(access_code: str, *, origin: str | None = None) -> str
     """
     base = (origin or frontend_origin()).rstrip("/")
     return f"{base}/portal?code={quote(str(access_code))}"
+
+
+def _assessment_invite_link(access_code: str, *, origin: str | None = None) -> str:
+    """Candidate CTA: same portal URL as ``candidate_portal_link``.
+
+    Kept as a named helper so invite/nudge call sites stay readable; always
+    points at ``/portal?code=`` so email links match Client Portal copy-link.
+    """
+    return candidate_portal_link(access_code, origin=origin)
+
+
+def _portal_link(access_code: str, *, origin: str | None = None) -> str:
+    return candidate_portal_link(access_code, origin=origin)
 
 
 def hr_portal_login_link(*, origin: str | None = None) -> str:

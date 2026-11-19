@@ -4,10 +4,12 @@ const {
   sendCandidateOtp: sendCandidateOtpMock,
   verifyCandidateOtp: verifyCandidateOtpMock,
   logout: logoutMock,
+  getDashboard: getDashboardMock,
 } = vi.hoisted(() => ({
   sendCandidateOtp: vi.fn(),
   verifyCandidateOtp: vi.fn(),
   logout: vi.fn(),
+  getDashboard: vi.fn(),
 }));
 
 vi.mock('../../api/client', () => ({
@@ -16,12 +18,16 @@ vi.mock('../../api/client', () => ({
       sendCandidateOtp: sendCandidateOtpMock,
       verifyCandidateOtp: verifyCandidateOtpMock,
       logout: logoutMock,
+      getDashboard: getDashboardMock,
     },
   },
 }));
 
+import { ApiError } from '../../lib/api-error';
 import {
   clearCandidateSession,
+  clearLocalCandidateSession,
+  clearStaleCandidateSessionIfExpired,
   persistCandidateSession,
   sendCandidateOtp,
   verifyCandidateOtp,
@@ -124,6 +130,59 @@ describe('persistCandidateSession', () => {
     expect(localStorage.getItem('candidateId')).toBe('c1');
     expect(localStorage.getItem('candidateName')).toBe('Ada Lovelace');
     expect(localStorage.getItem('candidateFirstName')).toBe('Ada');
+  });
+});
+
+describe('clearLocalCandidateSession', () => {
+  it('drops every portal session key without calling logout', () => {
+    persistCandidateSession({
+      token: 't',
+      id: 'c1',
+      firstName: 'Ada',
+      fullName: 'Ada Lovelace',
+      accessCode: 'HM-ABCDEF-1',
+    });
+    clearLocalCandidateSession();
+    expect(logoutMock).not.toHaveBeenCalled();
+    expect(localStorage.getItem('candidateToken')).toBeNull();
+    expect(localStorage.getItem('candidateAccessCode')).toBeNull();
+  });
+});
+
+describe('clearStaleCandidateSessionIfExpired', () => {
+  it('clears local session when the stored JWT returns 401', async () => {
+    persistCandidateSession({
+      token: 'expired',
+      id: 'c1',
+      firstName: 'Ada',
+      fullName: 'Ada Lovelace',
+      accessCode: 'HM-ABCDEF-1',
+    });
+    getDashboardMock.mockRejectedValue(new ApiError('Invalid or expired token', 401));
+
+    await expect(clearStaleCandidateSessionIfExpired()).resolves.toBe(true);
+    expect(localStorage.getItem('candidateToken')).toBeNull();
+    expect(localStorage.getItem('candidateAccessCode')).toBeNull();
+  });
+
+  it('keeps a still-valid session', async () => {
+    persistCandidateSession({
+      token: 'ok',
+      id: 'c1',
+      firstName: 'Ada',
+      fullName: 'Ada Lovelace',
+      accessCode: 'HM-ABCDEF-1',
+    });
+    getDashboardMock.mockResolvedValue({ tests: [] });
+
+    await expect(clearStaleCandidateSessionIfExpired()).resolves.toBe(false);
+    expect(localStorage.getItem('candidateToken')).toBe('ok');
+  });
+
+  it('is a no-op when no token is stored', async () => {
+    localStorage.clear();
+    await expect(clearStaleCandidateSessionIfExpired()).resolves.toBe(false);
+    expect(getDashboardMock).not.toHaveBeenCalled();
   });
 });
 

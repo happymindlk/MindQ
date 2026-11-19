@@ -558,13 +558,14 @@ async def bulk_invite_candidates(
             )
             continue
 
+        package_code = package.access_code
         if not created:
             skipped_count += 1
             results.append(
                 BulkCandidateInviteResult(
                     email=candidate.email,
                     status="skipped",
-                    access_code=candidate.access_code,
+                    access_code=package_code,
                     detail="Candidate already invited to this package",
                 )
             )
@@ -573,7 +574,7 @@ async def bulk_invite_candidates(
         await enqueue_candidate_invite(
             candidate_email=candidate.email,
             candidate_name=candidate.full_name,
-            access_code=candidate.access_code,
+            access_code=package_code,
             package_title=package_title,
             corporate_name=corporate_name,
             origin=origin,
@@ -585,7 +586,7 @@ async def bulk_invite_candidates(
             BulkCandidateInviteResult(
                 email=candidate.email,
                 status="invited",
-                access_code=candidate.access_code,
+                access_code=package_code,
             )
         )
 

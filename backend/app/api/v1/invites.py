@@ -15,6 +15,7 @@ from app.schemas.candidate import CandidateInviteRequest, CandidateInviteRespons
 from app.services.candidate_service import CandidateService
 from app.services.email import (
     _assessment_invite_link,
+    candidate_portal_link,
     clean_recipient_email,
     resolve_frontend_origin,
 )
@@ -42,10 +43,10 @@ async def _dispatch_candidate_invite(
     Args:
         candidate_email: Raw candidate address (sanitized before dispatch).
         candidate_name: Candidate display name for the email body.
-        access_code: Candidate PIN (``HM-XXXXXX-C``).
+        access_code: Package access code shared with the Client Portal UI.
         package_title: Assessment package title.
         corporate_name: Hiring company shown in the email, if known.
-        origin: Absolute frontend origin for the assessment link.
+        origin: Absolute frontend origin for the portal link.
         close_time: Package assessment window end (UTC), if enforced.
         candidate_first_name: Greeting name; defaults to ``Candidate`` in SES helper.
     """
@@ -136,14 +137,16 @@ async def invite_candidate(
     ).scalar_one_or_none()
 
     origin = resolve_frontend_origin(request)
+    # Always surface the package PIN so invite emails match Client Portal copy-link.
+    package_code = package.access_code
     clean_email = clean_recipient_email(candidate.email)
-    link = _assessment_invite_link(candidate.access_code, origin=origin)
+    link = candidate_portal_link(package_code, origin=origin)
     # Logged synchronously (before the 202 returns) so testers always have a
     # usable link/code even if SES sandbox drops the background delivery.
     logger.info(
         "[INVITE DISPATCHED] Candidate=%s Code=%s Link=%s",
         clean_email or candidate.email,
-        candidate.access_code,
+        package_code,
         link,
     )
     # Mocks / partial package objects may omit close_time; never AttributeError here.
@@ -151,7 +154,7 @@ async def invite_candidate(
     await enqueue_candidate_invite(
         candidate_email=candidate.email,
         candidate_name=candidate.full_name,
-        access_code=candidate.access_code,
+        access_code=package_code,
         package_title=package.title if package else "your assessment",
         corporate_name=corporate.name if corporate else None,
         origin=origin,
@@ -163,6 +166,6 @@ async def invite_candidate(
         id=candidate.id,
         candidate_email=candidate.email,
         package_id=candidate.package_id,
-        access_code=candidate.access_code,
+        access_code=package_code,
         status="pending",
     )
