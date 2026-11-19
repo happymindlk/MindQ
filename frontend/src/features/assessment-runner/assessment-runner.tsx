@@ -20,13 +20,13 @@ import {
   resolveTopDisclaimer,
   resolveWriteRemainingSeconds,
 } from './runner-logic';
+import { formatClock, timerTone, useModuleTimer } from './use-module-timer';
+import { useServerTimer } from './use-server-timer';
+import { useQuestionTelemetry } from './use-question-telemetry';
 
 /** Exact copy for the full-screen timed-out completion state. */
 export const ASSESSMENT_TIMEOUT_MESSAGE =
   'Your time to complete this assessment has concluded. All the completed questions are saved and recorded successfully';
-import { formatClock, timerTone, useModuleTimer } from './use-module-timer';
-import { useServerTimer } from './use-server-timer';
-import { useQuestionTelemetry } from './use-question-telemetry';
 
 /** Leading-edge guard against rapid Next / confirm double-clicks. */
 const NAV_DEBOUNCE_MS = 300;
@@ -417,8 +417,12 @@ export function AssessmentRunner({
   const remaining = timer.remainingSeconds;
   const tone = remaining !== null && test.duration_seconds ? timerTone(remaining, test.duration_seconds) : 'safe';
   const warning = tone === 'urgent' && remaining !== null && remaining > 0;
+  // Hide the clock the moment display hits 0 / submit starts — never leave a blinking 00:00.
+  const showCountdown =
+    remaining !== null && remaining > 0 && !timeUp && !submitting;
   const mediaSrc = resolveAssessmentMediaUrl(current.media_url);
   const questionLabel = `Question ${index + 1} of ${questions.length}`;
+  const submittingLabel = timeUp ? 'Submitting...' : 'Submitting your responses...';
 
   return (
     <div className="relative mx-auto w-full max-w-2xl space-y-4 py-6">
@@ -427,11 +431,11 @@ export function AssessmentRunner({
           className="fixed inset-0 z-40 flex items-center justify-center bg-canvas/70"
           role="status"
           aria-live="assertive"
-          aria-label="Submitting your responses"
+          aria-label={submittingLabel}
         >
           <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-5 py-4 shadow-sm">
             <GpuSpinner />
-            <span className="text-sm font-medium text-foreground">Submitting your responses...</span>
+            <span className="text-sm font-medium text-foreground">{submittingLabel}</span>
           </div>
         </div>
       )}
@@ -459,7 +463,7 @@ export function AssessmentRunner({
         </button>
 
         <div className="flex items-center gap-3 text-xs">
-          {remaining !== null && (
+          {showCountdown && (
             <span
               role="timer"
               aria-live={warning ? 'assertive' : 'off'}

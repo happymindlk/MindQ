@@ -446,10 +446,16 @@ describe('AssessmentRunner strict expiry', () => {
     };
   }
 
-  it('disables inputs, flush-submits current answers, and calls onTimeExpired on success', async () => {
+  it('auto-submits partial answers, hides the timer (no blinking 00:00), then shows the timeout screen', async () => {
+    let resolveSubmit: (() => void) | undefined;
     const transport = {
       autosave: vi.fn(async () => undefined),
-      submit: vi.fn(async () => undefined),
+      submit: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSubmit = resolve;
+          }),
+      ),
     };
     const onSubmitted = vi.fn();
     const onTimeExpired = vi.fn();
@@ -461,8 +467,9 @@ describe('AssessmentRunner strict expiry', () => {
       initialAnswers: { q1: 'Alpha' },
     });
 
-    await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
-    expect(onSubmitted).not.toHaveBeenCalled();
+    expect(await screen.findByRole('status', { name: 'Submitting...' })).toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
     expect(transport.submit).toHaveBeenCalledTimes(1);
     expect(transport.submit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -471,12 +478,46 @@ describe('AssessmentRunner strict expiry', () => {
         ],
       }),
     );
+
+    resolveSubmit?.();
+    await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
+    expect(onSubmitted).not.toHaveBeenCalled();
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: /Alpha/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Return to Dashboard' }));
     expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('auto-submits when every question is already answered without clicking Submit', async () => {
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    const onSubmitted = vi.fn();
+    const onTimeExpired = vi.fn();
+    renderRunner(expiredTest(), transport, 'live', {
+      onSubmitted,
+      onTimeExpired,
+      initialAnswers: { q1: 'Alpha', q2: 'Gamma' },
+    });
+
+    await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
+    expect(onSubmitted).not.toHaveBeenCalled();
+    expect(transport.submit).toHaveBeenCalledTimes(1);
+    expect(transport.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        responses: expect.arrayContaining([
+          expect.objectContaining({ question_id: 'q1', response: { answer: 'Alpha' } }),
+          expect.objectContaining({ question_id: 'q2', response: { answer: 'Gamma' } }),
+        ]),
+      }),
+    );
+    expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Submit test/i })).not.toBeInTheDocument();
   });
 
   it('cancels pending autosave and submits once at 00:00 without double-fire', async () => {
@@ -609,7 +650,9 @@ describe('AssessmentRunner grace resume', () => {
       'live',
       { onTimeExpired },
     );
-    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    // Display deadline elapsed — hide blinking 00:00 while write grace remains.
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
     expect(transport.submit).not.toHaveBeenCalled();
     await act(async () => {
       vi.advanceTimersByTime(16_000);

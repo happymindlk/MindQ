@@ -187,6 +187,35 @@ describe('TestDashboard deadline', () => {
     expect(screen.queryByText(/deadline to complete/i)).not.toBeInTheDocument();
   });
 
+  it('shows Submitting... (no 00:00 timer) for an already-expired in-progress module', async () => {
+    vi.mocked(api.candidate.getDashboard).mockResolvedValue({
+      candidate_name: 'Ada Lovelace',
+      open_time: null,
+      close_time: null,
+      window_state: 'open',
+      tests: [
+        {
+          id: 't-expired',
+          title: 'Expired Module',
+          description: null,
+          status: 'in_progress',
+          launchable: true,
+          duration_seconds: 60,
+          expires_at: '2000-01-01T00:00:00.000Z',
+          server_now: '2000-01-01T00:01:00.000Z',
+          remaining_seconds: 0,
+        },
+      ],
+    });
+    renderDashboard();
+
+    expect(await screen.findByText('Submitting...')).toBeInTheDocument();
+    expect(screen.getByText(/Submitting results/i)).toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Continue test/i)).not.toBeInTheDocument();
+  });
+
   it('paints cached cards on frame 1 without a full-screen loading skeleton', async () => {
     setQuery(
       CANDIDATE_DASHBOARD_KEY,
