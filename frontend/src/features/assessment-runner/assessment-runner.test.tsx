@@ -491,19 +491,34 @@ describe('AssessmentRunner strict expiry', () => {
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
-  it('auto-submits when every question is already answered without clicking Submit', async () => {
+  it('auto-submits when allAnswered on the last-question screen and shows the timeout view', async () => {
+    let resolveSubmit: (() => void) | undefined;
     const transport = {
       autosave: vi.fn(async () => undefined),
-      submit: vi.fn(async () => undefined),
+      submit: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSubmit = resolve;
+          }),
+      ),
     };
     const onSubmitted = vi.fn();
     const onTimeExpired = vi.fn();
+    const onExit = vi.fn();
+    // All answers → resume lands on the final question with "Submit test" visible.
     renderRunner(expiredTest(), transport, 'live', {
       onSubmitted,
       onTimeExpired,
+      onExit,
       initialAnswers: { q1: 'Alpha', q2: 'Gamma' },
     });
 
+    expect(await screen.findByRole('status', { name: 'Submitting...' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Submit test/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+
+    resolveSubmit?.();
     await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
     expect(onSubmitted).not.toHaveBeenCalled();
     expect(transport.submit).toHaveBeenCalledTimes(1);
@@ -516,8 +531,84 @@ describe('AssessmentRunner strict expiry', () => {
       }),
     );
     expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
-    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Submit test/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Confirm submit/i })).not.toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Return to Dashboard' }));
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the all-answered confirm dialog at 00:00 and still shows the timeout screen', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let resolveSubmit: (() => void) | undefined;
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSubmit = resolve;
+          }),
+      ),
+    };
+    const onSubmitted = vi.fn();
+    const onTimeExpired = vi.fn();
+    try {
+      const startedAt = new Date('2026-11-13T12:00:00.000Z');
+      vi.setSystemTime(startedAt);
+      const expiresAt = new Date(startedAt.getTime() + 3_000);
+      renderRunner(
+        {
+          ...twoQuestionTest('psychometric'),
+          duration_seconds: 60,
+          timer_mode: 'strict',
+          started_at: startedAt.toISOString(),
+          expires_at: expiresAt.toISOString(),
+          write_expires_at: expiresAt.toISOString(),
+          server_now: startedAt.toISOString(),
+          remaining_seconds: 3,
+          write_remaining_seconds: 3,
+        },
+        transport,
+        'live',
+        {
+          onSubmitted,
+          onTimeExpired,
+          initialAnswers: { q1: 'Alpha', q2: 'Gamma' },
+        },
+      );
+
+      expect(screen.getByText(/Question 2 of 2/)).toBeInTheDocument();
+      // Fake timers pin performance.now() at 0; advance past the 300ms nav debounce.
+      await act(async () => {
+        vi.advanceTimersByTime(400);
+      });
+      fireEvent.click(screen.getByRole('button', { name: /Submit test/i }));
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByText(/all complete/i)).toBeInTheDocument();
+
+      await act(async () => {
+        vi.setSystemTime(new Date(startedAt.getTime() + 4_000));
+        vi.advanceTimersByTime(4_000);
+      });
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Submitting...' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Submit test/i })).not.toBeInTheDocument();
+      expect(transport.submit).toHaveBeenCalledTimes(1);
+
+      resolveSubmit?.();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(onTimeExpired).toHaveBeenCalledTimes(1);
+      expect(onSubmitted).not.toHaveBeenCalled();
+      expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('cancels pending autosave and submits once at 00:00 without double-fire', async () => {

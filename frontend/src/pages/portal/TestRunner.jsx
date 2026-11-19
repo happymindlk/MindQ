@@ -91,6 +91,8 @@ export default function TestRunner() {
   const [phase, setPhase] = useState('instructions');
   const exitHandledRef = useRef(false);
   const startedRef = useRef(false);
+  /** Set when submit returns package_complete — defer UI until after timeout/manual exit. */
+  const packageCompleteRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,8 +150,11 @@ export default function TestRunner() {
           syncDashboardModule(testId, 'completed', test);
           deferWork(() => invalidateQuery(cacheKey));
           exitHandledRef.current = true;
+          // Do not flip phase here: expiry auto-submit must keep AssessmentRunner
+          // mounted so the full-screen timeout message can paint (including when
+          // every question was already answered on the review/confirm screen).
           if (result.package_complete) {
-            setPhase('package_complete');
+            packageCompleteRef.current = true;
           }
         }
         return result;
@@ -164,8 +169,12 @@ export default function TestRunner() {
   );
 
   const backToDashboard = useCallback(() => {
+    if (packageCompleteRef.current) {
+      setPhase('package_complete');
+      return;
+    }
     // Instant route change; autosave flush is already fire-and-forget in the runner.
-    if (test?.started_at) {
+    if (test?.started_at && !exitHandledRef.current) {
       syncDashboardModule(testId, 'in_progress', test);
     }
     navigate('/portal/dashboard');
@@ -326,6 +335,10 @@ export default function TestRunner() {
       transport={transport}
       onAnswersChange={onAnswersChange}
       onSubmitted={() => {
+        if (packageCompleteRef.current) {
+          setPhase('package_complete');
+          return;
+        }
         if (exitHandledRef.current) {
           navigate('/portal/dashboard', { replace: true });
         }

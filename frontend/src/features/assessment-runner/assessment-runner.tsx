@@ -155,6 +155,9 @@ export function AssessmentRunner({
         });
         setConfirmOpen(false);
         if (reason === 'expired') {
+          // Always show the timeout completion screen — including when every
+          // question was already answered and the candidate was still reviewing
+          // / sitting on "Submit test" without confirming.
           setTimeoutComplete(true);
           if (onTimeExpired) {
             onTimeExpired();
@@ -194,7 +197,10 @@ export function AssessmentRunner({
       return;
     }
     // Cancel pending autosave first, then single-fire submit (submit() owns the lock).
+    // Close the review/confirm dialog immediately — all-answered candidates must not
+    // remain on a locked "Submit test" / confirm screen at 00:00.
     cancelPendingAutosave();
+    setConfirmOpen(false);
     setTimeUp(true);
     void submit('expired');
   }, [cancelPendingAutosave, submit, test.expires_at, test.write_expires_at]);
@@ -383,6 +389,7 @@ export function AssessmentRunner({
     () => questions.filter((q) => hasContent(answers[q.id])).length,
     [answers, questions],
   );
+  const allAnswered = answeredCount === questions.length && questions.length > 0;
 
   if (timeoutComplete) {
     return (
@@ -405,6 +412,24 @@ export function AssessmentRunner({
         >
           Return to Dashboard
         </button>
+      </div>
+    );
+  }
+
+  // Expiry finalize: leave the question / review / locked-Submit UI entirely so
+  // all-answered candidates never stare at a disabled Submit button at 00:00.
+  if (timeUp && submitting) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-canvas px-6 text-center"
+        role="status"
+        aria-live="assertive"
+        aria-label="Submitting..."
+      >
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-5 py-4 shadow-sm">
+          <GpuSpinner />
+          <span className="text-sm font-medium text-foreground">Submitting...</span>
+        </div>
       </div>
     );
   }
@@ -589,11 +614,11 @@ export function AssessmentRunner({
 
       {renderFooter?.({ elapsedFor: telemetry.elapsedFor, totalSeconds: telemetry.totalModuleSeconds, answers })}
 
-      {timeUp && (
+      {timeUp && !submitting && (
         <div role="alert" className="rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-foreground">
           <p className="flex items-center gap-2 font-semibold">
-            {submitting ? <GpuSpinner className="h-4 w-4" /> : <AlarmClock className="h-4 w-4" aria-hidden />}
-            Time is up. {submitting ? 'Submitting your saved answers…' : 'Your answers have been locked.'}
+            <AlarmClock className="h-4 w-4" aria-hidden />
+            Time is up. Your answers have been locked.
           </p>
           {submitError && (
             <div className="mt-2 flex items-center justify-between gap-2 text-xs text-danger">
@@ -622,7 +647,8 @@ export function AssessmentRunner({
                 <CheckCircle2 className="h-6 w-6 text-success" />
               </div>
               <Dialog.Description className="max-w-sm text-xs leading-relaxed text-muted">
-                You answered {answeredCount} of {questions.length} questions. Once submitted, you cannot change your answers.
+                You answered {answeredCount} of {questions.length} questions
+                {allAnswered ? ' (all complete)' : ''}. Once submitted, you cannot change your answers.
               </Dialog.Description>
               {submitError && (
                 <p role="alert" className="mt-3 text-xs text-danger">
