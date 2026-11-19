@@ -7,7 +7,11 @@ import {
   DEFAULT_TOP_DISCLAIMER_TEXT,
 } from '../assessment-builder/types/module';
 import type { AnswerValue } from '../assessment-builder/types/telemetry';
-import { AssessmentRunner, type RunnerTransport } from './assessment-runner';
+import {
+  ASSESSMENT_TIMEOUT_MESSAGE,
+  AssessmentRunner,
+  type RunnerTransport,
+} from './assessment-runner';
 
 const TRANSPORT = {
   autosave: vi.fn(async () => undefined),
@@ -308,6 +312,30 @@ describe('AssessmentRunner untimed mount', () => {
   });
 });
 
+describe('AssessmentRunner resume question index', () => {
+  it('opens on the first unanswered question when earlier answers are hydrated', () => {
+    renderRunner(twoQuestionTest(), TRANSPORT, 'live', {
+      initialAnswers: { q1: 'Alpha' },
+    });
+    expect(screen.getByText('Second question')).toBeInTheDocument();
+    expect(screen.getByText('Question 2 of 2')).toBeInTheDocument();
+  });
+
+  it('opens on the last question when every question already has an answer', () => {
+    renderRunner(twoQuestionTest(), TRANSPORT, 'live', {
+      initialAnswers: { q1: 'Alpha', q2: 'Beta' },
+    });
+    expect(screen.getByText('Second question')).toBeInTheDocument();
+    expect(screen.getByText('Question 2 of 2')).toBeInTheDocument();
+  });
+
+  it('opens on question 1 when nothing is answered yet', () => {
+    renderRunner(twoQuestionTest(), TRANSPORT, 'live');
+    expect(screen.getByText('First question')).toBeInTheDocument();
+    expect(screen.getByText('Question 1 of 2')).toBeInTheDocument();
+  });
+});
+
 describe('AssessmentRunner leave / re-enter resume', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -344,10 +372,11 @@ describe('AssessmentRunner leave / re-enter resume', () => {
       { initialAnswers: { q1: 'Alpha' } },
     );
 
+    // Resume lands on the first unanswered question (q2) with timer intact.
+    expect(screen.getByText('Question 2 of 2')).toBeInTheDocument();
     const badge = screen.getByRole('timer');
     expect(badge).toHaveTextContent('4:00');
     expect(badge).not.toHaveTextContent('10:00');
-    expect(screen.getByRole('radio', { name: /Alpha/ })).toBeChecked();
 
     // Hydrated answers must not fire an immediate autosave.
     await act(async () => {
@@ -386,6 +415,7 @@ describe('AssessmentRunner leave / re-enter resume', () => {
       { initialAnswers: { q1: 'Beta' } },
     );
 
+    expect(screen.getByText('Question 2 of 2')).toBeInTheDocument();
     const badge = screen.getByRole('timer');
     expect(badge).toHaveTextContent('4:00');
 
@@ -423,9 +453,11 @@ describe('AssessmentRunner strict expiry', () => {
     };
     const onSubmitted = vi.fn();
     const onTimeExpired = vi.fn();
+    const onExit = vi.fn();
     renderRunner(expiredTest(), transport, 'live', {
       onSubmitted,
       onTimeExpired,
+      onExit,
       initialAnswers: { q1: 'Alpha' },
     });
 
@@ -439,8 +471,12 @@ describe('AssessmentRunner strict expiry', () => {
         ],
       }),
     );
-    expect(screen.getByRole('radio', { name: /Alpha/ })).toBeDisabled();
-    expect(await screen.findByText(/Time is up/)).toBeInTheDocument();
+    expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /Alpha/ })).not.toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Return to Dashboard' }));
+    expect(onExit).toHaveBeenCalledTimes(1);
   });
 
   it('cancels pending autosave and submits once at 00:00 without double-fire', async () => {
@@ -585,11 +621,10 @@ describe('AssessmentRunner grace resume', () => {
 
 describe('AssessmentRunner Next debounce', () => {
   it('ignores a second Submit-test click within 300ms', async () => {
-    const user = userEvent.setup();
     renderRunner(twoQuestionTest('psychometric'), TRANSPORT, 'live', {
       initialAnswers: { q1: 'Alpha', q2: 'Beta' },
     });
-    await user.click(screen.getByRole('button', { name: /Next question/ }));
+    // Both answers hydrated → resume opens on the last question (Submit test).
     expect(screen.getByText(/Question 2 of 2/)).toBeInTheDocument();
     const submitTest = screen.getByRole('button', { name: /Submit test/ });
     // fireEvent bypasses pointer-events so we can assert the debounce itself.
@@ -629,7 +664,7 @@ describe('AssessmentRunner timed hard-cut (flexible tag)', () => {
     await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
     expect(onSubmitted).not.toHaveBeenCalled();
     expect(transport.submit).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     expect(screen.queryByText(/\+/)).not.toBeInTheDocument();
   });
 });

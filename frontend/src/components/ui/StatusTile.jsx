@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Badge from './Badge';
 import { ArrowRight, CheckCircle, Clock, FileText, Lock, Loader2 } from 'lucide-react';
 import { normalizeModuleStatus } from '../../features/candidate-dashboard/module-status';
@@ -42,6 +42,10 @@ export default function StatusTile({
   const isInProgress = lifecycle === 'in_progress';
   const isLocked = !isCompleted && Boolean(lockedReason);
 
+  /** Once the local countdown hits 0, never re-arm — dashboard refreshes must not restart a buffer countdown. */
+  const lockedAtZeroRef = useRef(false);
+  /** Ensures onTimerExpired fires at most once per in-progress attempt. */
+  const expiredNotifiedRef = useRef(false);
   const [liveRemaining, setLiveRemaining] = useState(() => {
     if (!isInProgress) return null;
     if (expiresAt) {
@@ -49,18 +53,57 @@ export default function StatusTile({
     }
     return typeof remainingSeconds === 'number' ? Math.max(0, remainingSeconds) : null;
   });
+  const [submittingExpired, setSubmittingExpired] = useState(() => {
+    if (!isInProgress) return false;
+    if (expiresAt) {
+      const left = remainingFromDeadline(expiresAt, computeServerOffsetMs(serverNow));
+      const alreadyUp = left !== null && left <= 0;
+      if (alreadyUp) lockedAtZeroRef.current = true;
+      return alreadyUp;
+    }
+    const alreadyUp = typeof remainingSeconds === 'number' && remainingSeconds <= 0;
+    if (alreadyUp) lockedAtZeroRef.current = true;
+    return alreadyUp;
+  });
 
-  const timedOut = isInProgress && liveRemaining !== null && liveRemaining <= 0;
+  const timedOut = isInProgress && (submittingExpired || (liveRemaining !== null && liveRemaining <= 0));
   const interactive =
     !isCompleted && !isLocked && !timedOut && typeof onClick === 'function';
 
   useEffect(() => {
-    if (!isInProgress) {
+    if (isCompleted) {
+      lockedAtZeroRef.current = false;
+      expiredNotifiedRef.current = false;
+      setSubmittingExpired(false);
       setLiveRemaining(null);
       return undefined;
     }
 
-    let expiredNotified = false;
+    if (!isInProgress) {
+      lockedAtZeroRef.current = false;
+      expiredNotifiedRef.current = false;
+      setSubmittingExpired(false);
+      setLiveRemaining(null);
+      return undefined;
+    }
+
+    const notifyExpiredOnce = () => {
+      if (expiredNotifiedRef.current) return;
+      expiredNotifiedRef.current = true;
+      lockedAtZeroRef.current = true;
+      setLiveRemaining(0);
+      setSubmittingExpired(true);
+      if (typeof onTimerExpired === 'function') onTimerExpired();
+    };
+
+    // Stay latched at 00:00 / Submitting... even if a refresh returns residual seconds.
+    if (lockedAtZeroRef.current) {
+      setLiveRemaining(0);
+      setSubmittingExpired(true);
+      notifyExpiredOnce();
+      return undefined;
+    }
+
     /** @type {number | null} */
     let intervalId = null;
     // Calibrate once per payload (same as useServerTimer) — never recompute
@@ -84,10 +127,9 @@ export default function StatusTile({
     };
 
     const notifyExpired = () => {
-      if (expiredNotified) return;
-      expiredNotified = true;
+      if (expiredNotifiedRef.current) return;
       stopTicker();
-      if (typeof onTimerExpired === 'function') onTimerExpired();
+      notifyExpiredOnce();
     };
 
     const tick = () => {
@@ -113,7 +155,7 @@ export default function StatusTile({
 
     tick();
     // Do not arm a new interval once already at zero.
-    if (!expiredNotified) {
+    if (!expiredNotifiedRef.current) {
       intervalId = window.setInterval(tick, 1000);
       document.addEventListener('visibilitychange', onVisible);
       window.addEventListener('focus', tick);
@@ -124,7 +166,7 @@ export default function StatusTile({
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', tick);
     };
-  }, [isInProgress, expiresAt, serverNow, remainingSeconds, onTimerExpired]);
+  }, [isInProgress, isCompleted, expiresAt, serverNow, remainingSeconds, onTimerExpired]);
 
   const icon = isCompleted ? (
     <CheckCircle className="h-5 w-5 text-emerald-500" />
@@ -144,7 +186,10 @@ export default function StatusTile({
     </Badge>
   ) : timedOut ? (
     <Badge variant="active" showDot>
-      Finalizing…
+      <span className="inline-flex items-center gap-1.5">
+        <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+        Submitting...
+      </span>
     </Badge>
   ) : isInProgress ? (
     <Badge variant="active" showDot>
@@ -223,7 +268,7 @@ export default function StatusTile({
         <div className="min-w-0">
           {timedOut && (
             <span className="cursor-not-allowed text-xs font-medium text-slate-400 dark:text-slate-500">
-              Finalizing results…
+              Submitting results…
             </span>
           )}
           {interactive && (

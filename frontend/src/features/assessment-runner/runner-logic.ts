@@ -119,6 +119,25 @@ export function hasContent(value: AnswerValue | undefined): value is AnswerValue
 }
 
 /**
+ * Initial question index when resuming an in-progress attempt.
+ *
+ * Lands on the first question without saved content, or the last question
+ * when every item already has an answer (so the candidate can review/submit).
+ *
+ * @param questions - Ordered runner questions.
+ * @param answers - Hydrated answers keyed by question id.
+ * @returns Zero-based index into ``questions``.
+ */
+export function resolveResumeIndex(
+  questions: Pick<RunnerQuestion, 'id'>[],
+  answers: Record<string, AnswerValue>,
+): number {
+  if (questions.length === 0) return 0;
+  const firstUnanswered = questions.findIndex((q) => !hasContent(answers[q.id]));
+  return firstUnanswered === -1 ? questions.length - 1 : firstUnanswered;
+}
+
+/**
  * Build submit-time responses with per-question elapsed telemetry.
  *
  * @param assessmentId - Assessment being submitted.

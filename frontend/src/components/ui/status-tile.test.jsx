@@ -69,7 +69,7 @@ describe('StatusTile live countdown', () => {
     expect(screen.queryByText('4 mins')).not.toBeInTheDocument();
   });
 
-  it('ticks down, clamps at 0:00, shows Finalizing, and fires onTimerExpired once', () => {
+  it('ticks down, clamps at 0:00, shows Submitting..., and fires onTimerExpired once', () => {
     const onClick = vi.fn();
     const onTimerExpired = vi.fn();
     render(
@@ -92,8 +92,8 @@ describe('StatusTile live countdown', () => {
     });
 
     expect(screen.getByRole('timer')).toHaveTextContent('0:00');
-    expect(screen.getByText('Finalizing…')).toBeInTheDocument();
-    expect(screen.getByText(/Finalizing results/i)).toBeInTheDocument();
+    expect(screen.getByText('Submitting...')).toBeInTheDocument();
+    expect(screen.getByText(/Submitting results/i)).toBeInTheDocument();
     expect(screen.queryByText(/Continue test/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
@@ -121,7 +121,76 @@ describe('StatusTile live countdown', () => {
     );
 
     expect(screen.getByRole('timer')).toHaveTextContent('0:00');
-    expect(screen.getByText('Finalizing…')).toBeInTheDocument();
+    expect(screen.getByText('Submitting...')).toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not restart a buffer countdown after hitting 00:00 when props refresh', () => {
+    const onTimerExpired = vi.fn();
+    const { rerender } = render(
+      <StatusTile
+        title="Mini-IPIP"
+        status="in_progress"
+        expiresAt="2026-11-13T12:00:02.000Z"
+        serverNow="2026-11-13T12:00:00.000Z"
+        remainingSeconds={2}
+        onClick={() => undefined}
+        onTimerExpired={onTimerExpired}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(screen.getByText('Submitting...')).toBeInTheDocument();
+    expect(onTimerExpired).toHaveBeenCalledTimes(1);
+
+    // Simulate dashboard refresh returning a few residual seconds (clock skew / grace noise).
+    rerender(
+      <StatusTile
+        title="Mini-IPIP"
+        status="in_progress"
+        expiresAt="2026-11-13T12:00:03.000Z"
+        serverNow="2026-11-13T12:00:00.000Z"
+        remainingSeconds={3}
+        onClick={() => undefined}
+        onTimerExpired={onTimerExpired}
+      />,
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(screen.getByText('Submitting...')).toBeInTheDocument();
+    expect(screen.queryByText(/Time remaining:/i)).not.toBeInTheDocument();
+    expect(onTimerExpired).toHaveBeenCalledTimes(1);
+  });
+
+  it('transitions from Submitting... to Completed when status updates', () => {
+    const { rerender } = render(
+      <StatusTile
+        title="Mini-IPIP"
+        status="in_progress"
+        expiresAt="2026-11-13T11:59:00.000Z"
+        serverNow="2026-11-13T12:00:00.000Z"
+        remainingSeconds={0}
+        onClick={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Submitting...')).toBeInTheDocument();
+
+    rerender(
+      <StatusTile
+        title="Mini-IPIP"
+        status="completed"
+        expiresAt="2026-11-13T11:59:00.000Z"
+        serverNow="2026-11-13T12:00:00.000Z"
+        remainingSeconds={0}
+        onClick={() => undefined}
+      />,
+    );
+    expect(screen.getByText('Completed')).toBeInTheDocument();
+    expect(screen.queryByText('Submitting...')).not.toBeInTheDocument();
   });
 });
