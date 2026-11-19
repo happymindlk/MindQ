@@ -150,7 +150,7 @@ export default function TestDashboard() {
                 serverNow={test.server_now ?? dashboardData.server_now ?? null}
                 remainingSeconds={test.remaining_seconds ?? null}
                 onTimerExpired={() => {
-                  // Optimistic Finalizing… is already on the tile; refresh to COMPLETED.
+                  // Optimistic Submitting... is already on the tile; refresh to COMPLETED.
                   void loadDashboard();
                 }}
                 onPrefetch={() => {

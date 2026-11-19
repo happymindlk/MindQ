@@ -8,6 +8,7 @@ import {
   isAttemptLocked,
   isTimeExpired,
   resolveRemainingSeconds,
+  resolveResumeIndex,
   resolveTopDisclaimer,
   resolveWriteRemainingSeconds,
 } from './runner-logic';
@@ -94,6 +95,28 @@ const q = (type: string): RunnerQuestion => ({
   media_url: null,
   likert_label_1: null,
   likert_label_5: null,
+});
+
+describe('resolveResumeIndex', () => {
+  const items = [{ id: 'q1' }, { id: 'q2' }, { id: 'q3' }];
+
+  it('starts at the first unanswered question when earlier answers exist', () => {
+    expect(resolveResumeIndex(items, { q1: 'Alpha' })).toBe(1);
+    expect(resolveResumeIndex(items, { q1: 'Alpha', q2: 'Beta' })).toBe(2);
+  });
+
+  it('stays on the last question when every question is answered', () => {
+    expect(resolveResumeIndex(items, { q1: 'A', q2: 'B', q3: 'C' })).toBe(2);
+  });
+
+  it('starts at index 0 when nothing is answered', () => {
+    expect(resolveResumeIndex(items, {})).toBe(0);
+    expect(resolveResumeIndex(items, { q1: '', q2: [] })).toBe(0);
+  });
+
+  it('returns 0 for an empty question list', () => {
+    expect(resolveResumeIndex([], { q1: 'A' })).toBe(0);
+  });
 });
 
 describe('runner logic', () => {

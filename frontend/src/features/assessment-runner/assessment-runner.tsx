@@ -16,9 +16,14 @@ import {
   isAttemptLocked,
   isTimeExpired,
   resolveRemainingSeconds,
+  resolveResumeIndex,
   resolveTopDisclaimer,
   resolveWriteRemainingSeconds,
 } from './runner-logic';
+
+/** Exact copy for the full-screen timed-out completion state. */
+export const ASSESSMENT_TIMEOUT_MESSAGE =
+  'Your time to complete this assessment has concluded. All the completed questions are saved and recorded successfully';
 import { formatClock, timerTone, useModuleTimer } from './use-module-timer';
 import { useServerTimer } from './use-server-timer';
 import { useQuestionTelemetry } from './use-question-telemetry';
@@ -81,13 +86,15 @@ export function AssessmentRunner({
   renderFooter,
 }: AssessmentRunnerProps) {
   const questions = test.questions;
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(() => resolveResumeIndex(questions, initialAnswers));
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>(initialAnswers);
   const [saveError, setSaveError] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [timeUp, setTimeUp] = useState(false);
+  /** True after a successful expiry auto-submit — drives the full-screen timeout UI. */
+  const [timeoutComplete, setTimeoutComplete] = useState(false);
   const [offline, setOffline] = useState(
     () => (typeof navigator !== 'undefined' ? !navigator.onLine : false),
   );
@@ -147,8 +154,14 @@ export function AssessmentRunner({
           total_module_duration_seconds: telemetry.totalModuleSeconds(),
         });
         setConfirmOpen(false);
-        if (reason === 'expired' && onTimeExpired) {
-          onTimeExpired();
+        if (reason === 'expired') {
+          setTimeoutComplete(true);
+          if (onTimeExpired) {
+            onTimeExpired();
+          } else {
+            // Preview / callers without a dedicated expiry handler.
+            onSubmitted();
+          }
         } else {
           onSubmitted();
         }
@@ -370,6 +383,31 @@ export function AssessmentRunner({
     () => questions.filter((q) => hasContent(answers[q.id])).length,
     [answers, questions],
   );
+
+  if (timeoutComplete) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-canvas px-6 text-center"
+        role="status"
+        aria-live="polite"
+        aria-label="Assessment time concluded"
+      >
+        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-success/25 bg-success/15">
+          <CheckCircle2 className="h-7 w-7 text-success" aria-hidden />
+        </div>
+        <p className="max-w-md text-base font-medium leading-relaxed text-foreground sm:text-lg">
+          {ASSESSMENT_TIMEOUT_MESSAGE}
+        </p>
+        <button
+          type="button"
+          onClick={onExit}
+          className="mt-8 inline-flex h-10 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-fg hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
+        >
+          Return to Dashboard
+        </button>
+      </div>
+    );
+  }
 
   if (!current) return null;
 

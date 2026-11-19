@@ -6,10 +6,12 @@ import EmptyState from '../../components/ui/EmptyState';
 import Button from '../../components/ui/Button';
 import { api } from '../../api/client';
 import { readDraft, writeDraft, clearDraft, mergeAnswers } from '../../lib/assessment-draft';
-import { AssessmentRunner } from '../../features/assessment-runner/assessment-runner';
+import {
+  ASSESSMENT_TIMEOUT_MESSAGE,
+  AssessmentRunner,
+} from '../../features/assessment-runner/assessment-runner';
 import { ModuleReadyScreen } from '../../features/assessment-runner/module-ready-screen';
 import PackageCompleteScreen from '../../features/candidate-dashboard/package-complete-screen';
-import { useToast } from '../../components/ui/useToast';
 import { candidateTestKey, cachedQuery, invalidateQuery, peekQuery, setQuery } from '../../lib/query-cache';
 import {
   patchCandidateDashboardModule,
@@ -65,7 +67,6 @@ function syncDashboardModule(assessmentId, status, test) {
 export default function TestRunner() {
   const { testId } = useParams();
   const navigate = useNavigate();
-  const { toast } = useToast();
   const candidateId = typeof window !== 'undefined' ? localStorage.getItem('candidateId') : null;
   const cacheKey = candidateTestKey(testId);
 
@@ -142,20 +143,19 @@ export default function TestRunner() {
         if (result.status === 200) {
           clearDraft(candidateId, testId);
           if (result.company_name) setCompanyName(result.company_name);
-          // Optimistic completed card, then route — never await a dashboard refetch.
+          // Optimistic completed card — navigation is owned by onSubmitted /
+          // the runner timeout screen so expire UX is not interrupted.
           syncDashboardModule(testId, 'completed', test);
           deferWork(() => invalidateQuery(cacheKey));
           exitHandledRef.current = true;
           if (result.package_complete) {
             setPhase('package_complete');
-          } else {
-            navigate('/portal/dashboard', { replace: true });
           }
         }
         return result;
       },
     }),
-    [testId, candidateId, cacheKey, navigate, test],
+    [testId, candidateId, cacheKey, test],
   );
 
   const onAnswersChange = useCallback(
@@ -204,30 +204,13 @@ export default function TestRunner() {
   }, [testId, starting, test, cacheKey]);
 
   const onTimeExpired = useCallback(() => {
-    // transport.submit already navigated or showed package-complete.
-    if (exitHandledRef.current) {
-      deferWork(() => {
-        toast({
-          title: 'Time expired',
-          description:
-            'Your time for this test has ended. Your answers were automatically submitted.',
-          variant: 'warning',
-          duration: 6000,
-        });
-      });
-      return;
-    }
+    // AssessmentRunner owns the full-screen timeout UI after a successful
+    // expiry submit. Keep the runner mounted; only fall back to the portal
+    // expired phase when submit never completed (exitHandled still false).
+    if (exitHandledRef.current) return;
     setPhase('expired');
     syncDashboardModule(testId, 'completed', test);
-    deferWork(() => {
-      toast({
-        title: 'Time expired',
-        description: 'Your time for this test has ended. Your answers were automatically submitted.',
-        variant: 'warning',
-        duration: 6000,
-      });
-    });
-  }, [toast, testId, test]);
+  }, [testId, test]);
 
   if (isLoading && !test) {
     return (
@@ -278,16 +261,20 @@ export default function TestRunner() {
 
   if (phase === 'expired') {
     return (
-      <div className="mx-auto flex w-full max-w-md flex-col items-center py-16 text-center">
-        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-success/25 bg-success/15">
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-canvas px-6 text-center"
+        role="status"
+        aria-live="polite"
+        aria-label="Assessment time concluded"
+      >
+        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-success/25 bg-success/15">
           <CheckCircle2 className="h-7 w-7 text-success" aria-hidden />
         </div>
-        <h1 className="text-lg font-semibold text-foreground">Time is up — answers submitted</h1>
-        <p className="mt-2 text-sm text-muted">
-          Your saved answers were locked when the timer ended.
+        <p className="max-w-md text-base font-medium leading-relaxed text-foreground sm:text-lg">
+          {ASSESSMENT_TIMEOUT_MESSAGE}
         </p>
-        <Button variant="primary" size="sm" className="mt-6" onClick={backToDashboard}>
-          Back to dashboard
+        <Button variant="primary" size="sm" className="mt-8" onClick={backToDashboard}>
+          Return to Dashboard
         </Button>
       </div>
     );
@@ -338,7 +325,11 @@ export default function TestRunner() {
       initialAnswers={initialAnswers}
       transport={transport}
       onAnswersChange={onAnswersChange}
-      onSubmitted={() => undefined}
+      onSubmitted={() => {
+        if (exitHandledRef.current) {
+          navigate('/portal/dashboard', { replace: true });
+        }
+      }}
       onTimeExpired={onTimeExpired}
       onLocked={setLockDetail}
       onExit={backToDashboard}
