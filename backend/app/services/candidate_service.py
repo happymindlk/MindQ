@@ -1016,6 +1016,8 @@ class CandidateService:
         candidate: Candidate,
         assessment: Assessment,
         progress: CandidateProgress | None,
+        *,
+        commit: bool = True,
     ) -> CandidateProgress:
         """Start the attempt clock after the candidate confirms they are ready.
 
@@ -1028,6 +1030,8 @@ class CandidateService:
             candidate: Authenticated candidate.
             assessment: Assessment being opened.
             progress: Existing progress row, if any.
+            commit: When False, leave the txn open so the caller can attach a
+                ``MODULE_START`` log row and commit once.
 
         Returns:
             Progress row with ``started_at`` set.
@@ -1039,7 +1043,8 @@ class CandidateService:
                 deadline = display_expires_at(progress.started_at, duration)
                 if deadline is not None:
                     progress.expires_at = deadline
-                    await session.commit()
+                    if commit:
+                        await session.commit()
             return progress
         started = _utcnow()
         duration = assessment_duration_seconds(assessment)
@@ -1060,6 +1065,8 @@ class CandidateService:
             # Immutable once set — only assign when still null.
             if progress.expires_at is None:
                 progress.expires_at = deadline
+        if not commit:
+            return progress
         try:
             await session.commit()
         except IntegrityError:
@@ -1264,6 +1271,9 @@ class CandidateService:
         pending_responses: list[ResponseSave] | None = None,
         client_duration_seconds: float | None = None,
         completed_at: datetime | None = None,
+        *,
+        record_complete_event: bool = False,
+        request: Any | None = None,
     ):
         """Persist answers and mark COMPLETED; core scoring runs in background.
 
@@ -1280,9 +1290,13 @@ class CandidateService:
             client_duration_seconds: Client-measured total module time (advisory).
             completed_at: Optional completion stamp (server auto-finalize may
                 pass ``expires_at``); defaults to UTC now.
+            record_complete_event: When True, insert ``MODULE_COMPLETE`` in the
+                same transaction as the status flip (no extra round-trip).
+            request: Optional FastAPI request for session-log device headers.
 
         Returns:
-            Tuple of (progress row, package_complete flag, company_name).
+            Tuple of (progress row, package_complete flag, company_name,
+            assessment_title).
         """
         # Skip the questions JSONB bank unless we may accept pending answers.
         assessment, progress = await CandidateService.require_writable_assessment(
@@ -1323,6 +1337,28 @@ class CandidateService:
             duration = assessment_duration_seconds(assessment)
             progress.overtime = bool(duration and server_seconds > duration)
 
+        assessment_title = getattr(assessment, "title", None)
+        if record_complete_event:
+            # Same commit as COMPLETED — avoids a second title SELECT + commit.
+            from app.services.session_log import (
+                MODULE_COMPLETE,
+                duration_from_progress,
+                record_session_event,
+            )
+
+            await record_session_event(
+                session,
+                corporate_id=candidate.corporate_id,
+                candidate_id=candidate.id,
+                event_type=MODULE_COMPLETE,
+                assessment_id=progress.assessment_id,
+                assessment_name=assessment_title,
+                duration_seconds=duration_from_progress(progress),
+                occurred_at=progress.completed_at,
+                request=request,
+                commit=False,
+            )
+
         try:
             await session.commit()
         except IntegrityError as exc:
@@ -1333,7 +1369,7 @@ class CandidateService:
         package_complete, company_name = await CandidateService.get_submit_meta(
             session, candidate
         )
-        return progress, package_complete, company_name
+        return progress, package_complete, company_name, assessment_title
 
     @staticmethod
     async def _upsert_pending_responses(

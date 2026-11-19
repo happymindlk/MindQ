@@ -211,7 +211,7 @@ async def test_start_only_starts_the_requested_module(candidate_client, monkeypa
     ):
         return _assessment(aid), None
 
-    async def ensure_started(session, candidate, assessment, progress):
+    async def ensure_started(session, candidate, assessment, progress, **_kwargs):
         started_ids.append(assessment.id)
         return SimpleNamespace(status="IN_PROGRESS", started_at=datetime.now(timezone.utc))
 
@@ -439,7 +439,7 @@ async def test_submit_409_when_already_submitted(candidate_client, monkeypatch):
     client, _ = candidate_client
     assessment_id = uuid4()
 
-    async def submit(session, candidate, aid, pending_responses=None, client_duration_seconds=None):
+    async def submit(session, candidate, aid, pending_responses=None, client_duration_seconds=None, **_kwargs):
         raise AssessmentAlreadySubmittedError()
 
     monkeypatch.setattr(CandidateService, "submit_test", submit)
@@ -454,7 +454,7 @@ async def test_submit_passes_pending_responses_atomically(candidate_client, monk
     assessment_id = uuid4()
     captured = {}
 
-    async def submit(session, candidate, aid, pending_responses=None, client_duration_seconds=None):
+    async def submit(session, candidate, aid, pending_responses=None, client_duration_seconds=None, **_kwargs):
         captured["aid"] = aid
         captured["pending"] = pending_responses
         captured["client_duration"] = client_duration_seconds
@@ -464,7 +464,7 @@ async def test_submit_passes_pending_responses_atomically(candidate_client, monk
             score=100.0,
             completed_at=SimpleNamespace(isoformat=lambda: "2026-09-17T12:00:00+00:00"),
         )
-        return progress, False, "Acme Corp"
+        return progress, False, "Acme Corp", "Module"
 
     monkeypatch.setattr(CandidateService, "submit_test", submit)
 

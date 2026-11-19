@@ -17,9 +17,14 @@ import {
   patchCandidateDashboardModule,
   remainingSecondsFromExpiry,
 } from '../../features/candidate-dashboard/dashboard-cache';
-import { CANDIDATE_DASHBOARD_KEY } from '../../features/candidate-dashboard/module-status';
+import {
+  CANDIDATE_DASHBOARD_KEY,
+  normalizeModuleStatus,
+} from '../../features/candidate-dashboard/module-status';
 
 const LOCKED_DETAIL = 'Assessment already completed. Modifications are locked.';
+/** Prefer dashboard-prefetch hits for the instruction screen (avoid a redundant cold GET). */
+const TEST_PREFETCH_STALE_MS = 60000;
 
 function isAssessmentLocked(err) {
   return (err?.status === 409 && err?.code !== 'TIME_EXPIRED') || err?.message === LOCKED_DETAIL;
@@ -87,7 +92,7 @@ export default function TestRunner() {
     const dash = peekQuery(CANDIDATE_DASHBOARD_KEY);
     return dash && typeof dash === 'object' ? dash.company_name || '' : '';
   });
-  // instructions | running | package_complete | expired
+  // instructions | starting | running | package_complete | expired
   const [phase, setPhase] = useState('instructions');
   const exitHandledRef = useRef(false);
   const startedRef = useRef(false);
@@ -99,11 +104,25 @@ export default function TestRunner() {
     async function loadTest() {
       if (!testId) return;
       try {
-        // Always force a network GET: a cached POST /start payload keeps the
-        // original server_now / remaining_seconds and would inflate the wall-clock
-        // timer back to full duration on leave/re-enter.
+        const peekedPayload = peekQuery(cacheKey);
+        const resumeFromCache =
+          peekedPayload &&
+          typeof peekedPayload === 'object' &&
+          typeof peekedPayload.started_at === 'string' &&
+          peekedPayload.started_at.length > 0;
+        const dash = peekQuery(CANDIDATE_DASHBOARD_KEY);
+        const dashModule =
+          dash && typeof dash === 'object' && Array.isArray(dash.tests)
+            ? dash.tests.find((row) => row && row.id === testId)
+            : null;
+        const resumeFromDashboard =
+          dashModule && normalizeModuleStatus(dashModule.status) === 'in_progress';
+        // Unstarted modules reuse the dashboard prefetch (stale-while-revalidate).
+        // Started/resume attempts always force a fresh GET so wall-clock fields are not
+        // inflated by a cached POST /start payload from a prior visit.
         const data = await cachedQuery(cacheKey, () => api.candidate.getTest(testId), {
-          force: true,
+          force: Boolean(resumeFromCache || resumeFromDashboard),
+          staleTime: TEST_PREFETCH_STALE_MS,
         });
         // A Start click that resolved first already holds the authoritative timer seed.
         if (cancelled || startedRef.current) return;
@@ -184,6 +203,8 @@ export default function TestRunner() {
     if (!testId || starting) return;
     setStarting(true);
     setStartError(null);
+    // Instant skeleton while POST /start arms the timer — questions are already loaded.
+    setPhase('starting');
     try {
       const started = await api.candidate.startTest(testId);
       const next = {
@@ -202,6 +223,7 @@ export default function TestRunner() {
       // Keep dashboard cache warm with in_progress timing (do not wipe it).
       syncDashboardModule(testId, 'in_progress', next);
     } catch (err) {
+      setPhase('instructions');
       if (isAssessmentLocked(err)) {
         setLockDetail(err.message || LOCKED_DETAIL);
         return;
@@ -298,6 +320,22 @@ export default function TestRunner() {
           actionLabel="Back to dashboard"
           onAction={backToDashboard}
         />
+      </div>
+    );
+  }
+
+  if (phase === 'starting') {
+    return (
+      <div
+        className="w-full max-w-2xl mx-auto py-6 space-y-4"
+        role="status"
+        aria-label="Starting assessment"
+        aria-busy="true"
+      >
+        <p className="text-sm font-medium text-muted">Starting assessment…</p>
+        <Skeleton className="h-4 w-40 animate-pulse" />
+        <Skeleton className="h-2 w-full animate-pulse" />
+        <Skeleton className="h-64 w-full animate-pulse" />
       </div>
     );
   }

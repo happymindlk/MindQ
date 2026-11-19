@@ -100,22 +100,19 @@ async def finalize_one_expired(
         ``False`` when another worker already finalized it.
     """
     try:
-        progress, _package_complete, _company = await CandidateService.submit_test(
-            session,
-            candidate,
-            assessment_id,
-            pending_responses=None,
-            client_duration_seconds=None,
-            completed_at=completed_at,
+        progress, _package_complete, _company, assessment_name = (
+            await CandidateService.submit_test(
+                session,
+                candidate,
+                assessment_id,
+                pending_responses=None,
+                client_duration_seconds=None,
+                completed_at=completed_at,
+            )
         )
     except AssessmentAlreadySubmittedError:
         return False
     if progress is not None:
-        assessment_name = (
-            await session.execute(
-                select(Assessment.title).where(Assessment.id == assessment_id)
-            )
-        ).scalar_one_or_none()
         await record_session_event(
             session,
             corporate_id=candidate.corporate_id,

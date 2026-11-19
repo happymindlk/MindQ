@@ -141,7 +141,6 @@ async def test_finalize_expired_transitions_and_enqueues_scoring(monkeypatch):
                 return_value=MagicMock(all=MagicMock(return_value=[candidate]))
             )
         ),
-        _title_result(assessment.title),
     )
 
     submit = AsyncMock(
@@ -153,6 +152,7 @@ async def test_finalize_expired_transitions_and_enqueues_scoring(monkeypatch):
             ),
             False,
             "",
+            assessment.title,
         )
     )
     enqueue = AsyncMock()
@@ -188,7 +188,6 @@ async def test_finalize_expired_assessment_scoped_to_candidate(monkeypatch):
     session = _session_with_effects(
         _result_all([(progress, assessment)]),
         MagicMock(scalar_one_or_none=MagicMock(return_value=candidate)),
-        _title_result(assessment.title),
     )
     submit = AsyncMock(
         return_value=(
@@ -199,6 +198,7 @@ async def test_finalize_expired_assessment_scoped_to_candidate(monkeypatch):
             ),
             False,
             "",
+            assessment.title,
         )
     )
     enqueue = AsyncMock()
@@ -295,7 +295,6 @@ async def test_concurrent_finalize_calls_remain_idempotent(monkeypatch):
                 return_value=MagicMock(all=MagicMock(return_value=[candidate]))
             )
         ),
-        _title_result(assessment.title),
         _result_all([(progress, assessment)]),
         MagicMock(
             scalars=MagicMock(
@@ -314,6 +313,7 @@ async def test_concurrent_finalize_calls_remain_idempotent(monkeypatch):
                 ),
                 False,
                 "",
+                assessment.title,
             ),
             AssessmentAlreadySubmittedError(),
         ]

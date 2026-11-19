@@ -94,7 +94,9 @@ describe('StatusTile live countdown', () => {
     expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
     expect(screen.getByText('Submitting...')).toBeInTheDocument();
-    expect(screen.getByText(/Submitting results/i)).toBeInTheDocument();
+    // Right-side badge only — no left/inline duplicate label.
+    expect(screen.queryByText(/Submitting results/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText('Submitting...')).toHaveLength(1);
     expect(screen.queryByText(/Continue test/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
