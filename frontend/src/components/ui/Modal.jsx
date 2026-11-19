@@ -39,7 +39,9 @@ export default function Modal({ isOpen, onClose, title, children, actions, conte
               </button>
             </Dialog.Close>
           </div>
-          <div className="px-4 py-4 text-sm text-muted">{children}</div>
+          {children != null && children !== false ? (
+            <div className="px-4 py-4 text-sm text-muted">{children}</div>
+          ) : null}
           {actions && (
             <div className="flex justify-end gap-2 px-4 py-3 border-t border-border bg-surface-raised/50">
               {actions}
