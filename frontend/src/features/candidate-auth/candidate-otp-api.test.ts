@@ -1,16 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { sendCandidateOtp: sendCandidateOtpMock, verifyCandidateOtp: verifyCandidateOtpMock } =
-  vi.hoisted(() => ({
-    sendCandidateOtp: vi.fn(),
-    verifyCandidateOtp: vi.fn(),
-  }));
-
-vi.mock('../../api/client', () => ({
-  api: { candidate: { sendCandidateOtp: sendCandidateOtpMock, verifyCandidateOtp: verifyCandidateOtpMock } },
+const {
+  sendCandidateOtp: sendCandidateOtpMock,
+  verifyCandidateOtp: verifyCandidateOtpMock,
+  logout: logoutMock,
+} = vi.hoisted(() => ({
+  sendCandidateOtp: vi.fn(),
+  verifyCandidateOtp: vi.fn(),
+  logout: vi.fn(),
 }));
 
-import { persistCandidateSession, sendCandidateOtp, verifyCandidateOtp } from './candidate-otp-api';
+vi.mock('../../api/client', () => ({
+  api: {
+    candidate: {
+      sendCandidateOtp: sendCandidateOtpMock,
+      verifyCandidateOtp: verifyCandidateOtpMock,
+      logout: logoutMock,
+    },
+  },
+}));
+
+import {
+  clearCandidateSession,
+  persistCandidateSession,
+  sendCandidateOtp,
+  verifyCandidateOtp,
+} from './candidate-otp-api';
 
 const identity = {
   accessCode: ' HM-ABCDEF-1 ',
@@ -109,5 +124,38 @@ describe('persistCandidateSession', () => {
     expect(localStorage.getItem('candidateId')).toBe('c1');
     expect(localStorage.getItem('candidateName')).toBe('Ada Lovelace');
     expect(localStorage.getItem('candidateFirstName')).toBe('Ada');
+  });
+});
+
+describe('clearCandidateSession', () => {
+  it('calls server logout then clears every portal session key', async () => {
+    logoutMock.mockResolvedValue({ ok: true });
+    persistCandidateSession({
+      token: 't',
+      id: 'c1',
+      firstName: 'Ada',
+      fullName: 'Ada Lovelace',
+      accessCode: 'HM-ABCDEF-1',
+    });
+
+    await clearCandidateSession();
+
+    expect(logoutMock).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem('candidateToken')).toBeNull();
+    expect(localStorage.getItem('candidateId')).toBeNull();
+    expect(localStorage.getItem('candidateName')).toBeNull();
+    expect(localStorage.getItem('candidateFirstName')).toBeNull();
+    expect(localStorage.getItem('candidateAccessCode')).toBeNull();
+  });
+
+  it('still clears local keys when server logout fails', async () => {
+    logoutMock.mockRejectedValue(new Error('network'));
+    localStorage.setItem('candidateToken', 't');
+    localStorage.setItem('candidateAccessCode', 'HM-ABCDEF-1');
+
+    await clearCandidateSession();
+
+    expect(localStorage.getItem('candidateToken')).toBeNull();
+    expect(localStorage.getItem('candidateAccessCode')).toBeNull();
   });
 });

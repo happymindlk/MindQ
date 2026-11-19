@@ -6,6 +6,7 @@ import SupportModal from './SupportModal';
 import ToastProvider from './ui/Toast';
 import RouteErrorBoundary from './route-error-boundary';
 import ThemeToggle from './ThemeToggle';
+import PortalLogoutButton from './portal-logout-button';
 import KeepAliveOutlet from './keep-alive-outlet';
 import { PORTAL_KEEP_PATTERNS } from './keep-alive-routes';
 import { api } from '../api/client';
@@ -44,6 +45,7 @@ export default function PortalLayout() {
             <div className="flex items-center gap-2 shrink-0">
               <p className="text-xs font-medium text-muted hidden sm:block">Assessment Portal</p>
               <ThemeToggle />
+              <PortalLogoutButton />
             </div>
           </div>
         </header>
