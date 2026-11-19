@@ -94,6 +94,21 @@ describe('useCandidateOtpLogin', () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it('stays on Step 1 and shows the HTTP 409 single-device lock when OTP send is blocked', async () => {
+    const conflict =
+      'You’re already logged in from one device, please close the other device’s session and try again from this device';
+    const err = new Error(conflict) as Error & { status?: number };
+    err.status = 409;
+    sendCandidateOtp.mockRejectedValue(err);
+    const { result } = renderHook(() => useCandidateOtpLogin('HM-1', vi.fn()));
+    fill(result);
+    await act(() => result.current.sendCode());
+    expect(result.current.step).toBe('details');
+    expect(result.current.error).toBe(conflict);
+    expect(result.current.tempToken).toBe('');
+    expect(result.current.loading).toBe(false);
+  });
+
   it('blocks resend during the cooldown and allows it once the timer elapses', async () => {
     vi.useFakeTimers();
     sendCandidateOtp.mockResolvedValue('temp-token-value');

@@ -186,21 +186,30 @@ async def test_request_code_returns_temp_token(async_client, monkeypatch):
 
     from app.schemas.candidate import CandidateOtpChallengeResponse
 
-    async def fake_request(_db, access_code, email):
+    async def fake_request(_db, access_code, email, *, device_id=None):
         captured["access_code"] = access_code
         captured["email"] = email
+        captured["device_id"] = device_id
         return CandidateOtpChallengeResponse(status="otp_required", temp_token="t" * 24)
 
     monkeypatch.setattr("app.api.v1.candidate_auth.request_candidate_otp", fake_request)
-    res = await async_client.post(REQUEST_URL, json=SEND_PAYLOAD)
+    res = await async_client.post(
+        REQUEST_URL,
+        json=SEND_PAYLOAD,
+        headers={"X-Device-Id": "device-send-1"},
+    )
     assert res.status_code == 200
     assert res.json() == {"status": "otp_required", "temp_token": "t" * 24}
-    assert captured == {"access_code": "HM-ABCDEF-1", "email": "ada@example.com"}
+    assert captured == {
+        "access_code": "HM-ABCDEF-1",
+        "email": "ada@example.com",
+        "device_id": "device-send-1",
+    }
 
 
 @pytest.mark.asyncio
 async def test_request_code_maps_otp_errors(async_client, monkeypatch):
-    async def fake_request(_db, *_args):
+    async def fake_request(_db, *_args, **_kwargs):
         raise CandidateOtpError(429, "Too many verification codes were requested. Try again later.")
 
     monkeypatch.setattr("app.api.v1.candidate_auth.request_candidate_otp", fake_request)

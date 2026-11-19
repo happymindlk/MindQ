@@ -24,8 +24,16 @@ from app.services.candidate_session_lock import (
 )
 from app.auth import get_current_candidate
 
+SEND_URL = "/api/v1/candidates/auth/otp/send"
 LOGIN_URL = "/api/v1/candidates/auth/otp/verify"
 LOGOUT_URL = "/api/v1/candidate/logout"
+SEND_PAYLOAD = {
+    "first_name": "Ada",
+    "full_name": "Ada Lovelace",
+    "email": "ada@example.com",
+    "access_code": "HM-ABCDEF-1",
+    "terms_accepted": True,
+}
 PAYLOAD = {
     "first_name": "Ada",
     "full_name": "Ada Lovelace",
@@ -171,6 +179,49 @@ def _otp_login_env(monkeypatch):
         candidate_otp_verify_limiter,
     ):
         limiter.reset()
+
+
+@pytest.mark.asyncio
+async def test_otp_send_returns_409_without_email_when_other_device_active(
+    async_client, _otp_login_env, monkeypatch
+):
+    """Step 1 must reject before SES when another device holds the soft lock."""
+    state = _otp_login_env
+    now = datetime.now(timezone.utc)
+    state["candidate"].active_device_id = "device-a"
+    state["candidate"].session_last_seen_at = now
+
+    email_calls: list[tuple[str, str]] = []
+
+    async def fake_validate(_db, _access_code, _email):
+        return None
+
+    async def fake_find(_db, _access_code, _email):
+        return state["candidate"]
+
+    async def fake_send_email(to_email: str, otp: str) -> None:
+        email_calls.append((to_email, otp))
+
+    monkeypatch.setattr(
+        "app.services.candidate_otp._validate_login_target", fake_validate
+    )
+    monkeypatch.setattr(
+        "app.services.candidate_otp._find_existing_login_candidate", fake_find
+    )
+    monkeypatch.setattr(
+        "app.services.candidate_otp.send_candidate_otp_email", fake_send_email
+    )
+
+    blocked = await async_client.post(
+        SEND_URL,
+        json=SEND_PAYLOAD,
+        headers={"X-Device-Id": "device-b"},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == DEVICE_SESSION_CONFLICT_DETAIL
+    assert email_calls == []
+    assert state["session"].added == []
+    assert state["session"].commits == 0
 
 
 @pytest.mark.asyncio
