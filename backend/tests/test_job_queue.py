@@ -180,7 +180,7 @@ async def test_submit_route_enqueues_finalize_not_background_tasks(monkeypatch):
     enqueued: list[tuple] = []
 
     async def _submit(*_a, **_k):
-        return progress, False, "Acme"
+        return progress, False, "Acme", "Module"
 
     async def _enqueue(cid, aid, *, await_inline=True):
         enqueued.append((cid, aid, await_inline))

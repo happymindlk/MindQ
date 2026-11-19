@@ -4,14 +4,13 @@ import logging
 import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.jobs.enqueue import (
     enqueue_finalize_and_score_ai,
     enqueue_finalize_expired_assessment,
 )
-from app.models.assessment import Assessment
 from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.response import ResponseSave, ResponseSubmit
@@ -22,12 +21,7 @@ from app.services.runner_payload import (
     strict_deadline,
     write_remaining_seconds,
 )
-from app.services.session_log import (
-    MODULE_COMPLETE,
-    MODULE_START,
-    duration_from_progress,
-    record_session_event,
-)
+from app.services.session_log import MODULE_START, record_session_event
 from app.auth import get_current_candidate
 from app.services.candidate_session_lock import clear_device_session
 from app.exceptions import (
@@ -168,7 +162,14 @@ async def start_test(
             include_questions=False,
         )
         first_start = progress is None or progress.started_at is None
-        progress = await CandidateService.ensure_started(db, candidate, assessment, progress)
+        # One commit for progress + MODULE_START (no second round-trip).
+        progress = await CandidateService.ensure_started(
+            db,
+            candidate,
+            assessment,
+            progress,
+            commit=False,
+        )
         if first_start:
             await record_session_event(
                 db,
@@ -178,7 +179,22 @@ async def start_test(
                 assessment_id=assessment.id,
                 assessment_name=getattr(assessment, "title", None),
                 request=request,
-                commit=True,
+                commit=False,
+            )
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Two tabs raced on first start; the other insert won.
+            await db.rollback()
+            assessment, progress = await CandidateService.require_writable_assessment(
+                db,
+                candidate,
+                assessment_id,
+                for_update=True,
+                include_questions=False,
+            )
+            progress = await CandidateService.ensure_started(
+                db, candidate, assessment, progress, commit=True
             )
     except (
         AssessmentNotFoundError,
@@ -261,12 +277,16 @@ async def submit_test(
     body: ResponseSubmit | None = None,
 ):
     try:
-        progress, package_complete, company_name = await CandidateService.submit_test(
+        # Single fast transaction: upsert answers, flip COMPLETED, write
+        # MODULE_COMPLETE. Scoring / Gemini / PDF stay on the ARQ queue.
+        progress, package_complete, company_name, _title = await CandidateService.submit_test(
             db,
             candidate,
             assessment_id,
             pending_responses=(body.responses if body else None),
             client_duration_seconds=(body.total_module_duration_seconds if body else None),
+            record_complete_event=True,
+            request=request,
         )
     except (
         AssessmentNotFoundError,
@@ -275,24 +295,6 @@ async def submit_test(
         PackageClosedError,
     ) as exc:
         _raise_integrity(exc)
-    assessment_row = (
-        await db.execute(select(Assessment.title).where(Assessment.id == assessment_id))
-    ).first()
-    assessment_name = assessment_row[0] if assessment_row else None
-    await record_session_event(
-        db,
-        corporate_id=candidate.corporate_id,
-        candidate_id=candidate.id,
-        event_type=MODULE_COMPLETE,
-        assessment_id=progress.assessment_id,
-        assessment_name=assessment_name,
-        duration_seconds=duration_from_progress(progress),
-        occurred_at=progress.completed_at,
-        request=request,
-        commit=True,
-    )
-    # Module COMPLETED is already committed in submit_test. Scoring / Gemini /
-    # PDF / HR email must never block this response — enqueue (or spawn) only.
     await enqueue_finalize_and_score_ai(
         candidate.id, assessment_id, await_inline=False
     )

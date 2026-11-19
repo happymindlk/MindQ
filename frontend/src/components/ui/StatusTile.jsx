@@ -264,11 +264,6 @@ export default function StatusTile({
 
       <div className="mt-4 flex items-end justify-between gap-2">
         <div className="min-w-0">
-          {timedOut && (
-            <span className="cursor-not-allowed text-xs font-medium text-slate-400 dark:text-slate-500">
-              Submitting results…
-            </span>
-          )}
           {interactive && (
             <div
               className={`flex items-center text-xs font-semibold ${

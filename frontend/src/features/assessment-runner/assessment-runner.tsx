@@ -391,12 +391,16 @@ export function AssessmentRunner({
   );
   const allAnswered = answeredCount === questions.length && questions.length > 0;
 
-  if (timeoutComplete) {
+  // Expiry finalize: leave the question / review UI the instant the write lock
+  // hits 0. Show the confirmation copy immediately with an inline Submitting...
+  // status; swap to Return to Dashboard only after the submit API resolves.
+  if (timeoutComplete || (timeUp && (submitting || Boolean(submitError)))) {
+    const showSubmitting = submitting || (timeUp && !timeoutComplete && !submitError);
     return (
       <div
         className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-canvas px-6 text-center"
         role="status"
-        aria-live="polite"
+        aria-live={showSubmitting ? 'assertive' : 'polite'}
         aria-label="Assessment time concluded"
       >
         <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-full border border-success/25 bg-success/15">
@@ -405,31 +409,37 @@ export function AssessmentRunner({
         <p className="max-w-md text-base font-medium leading-relaxed text-foreground sm:text-lg">
           {ASSESSMENT_TIMEOUT_MESSAGE}
         </p>
-        <button
-          type="button"
-          onClick={onExit}
-          className="mt-8 inline-flex h-10 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-fg hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
-        >
-          Return to Dashboard
-        </button>
-      </div>
-    );
-  }
-
-  // Expiry finalize: leave the question / review / locked-Submit UI entirely so
-  // all-answered candidates never stare at a disabled Submit button at 00:00.
-  if (timeUp && submitting) {
-    return (
-      <div
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-canvas px-6 text-center"
-        role="status"
-        aria-live="assertive"
-        aria-label="Submitting..."
-      >
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-5 py-4 shadow-sm">
-          <GpuSpinner />
-          <span className="text-sm font-medium text-foreground">Submitting...</span>
-        </div>
+        {showSubmitting ? (
+          <div
+            className="mt-8 inline-flex items-center gap-3 rounded-lg border border-border bg-surface px-5 py-3 shadow-sm"
+            role="status"
+            aria-label="Submitting..."
+          >
+            <GpuSpinner />
+            <span className="text-sm font-medium text-foreground">Submitting...</span>
+          </div>
+        ) : submitError ? (
+          <div className="mt-8 flex flex-col items-center gap-3">
+            <p role="alert" className="max-w-sm text-xs text-danger">
+              {submitError}
+            </p>
+            <button
+              type="button"
+              onClick={() => void submit('expired')}
+              className="inline-flex h-10 items-center justify-center rounded-md border border-danger/40 bg-surface px-5 text-sm font-medium text-foreground hover:bg-danger/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              Retry submit
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={onExit}
+            className="mt-8 inline-flex h-10 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-fg hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
+          >
+            Return to Dashboard
+          </button>
+        )}
       </div>
     );
   }
@@ -614,24 +624,13 @@ export function AssessmentRunner({
 
       {renderFooter?.({ elapsedFor: telemetry.elapsedFor, totalSeconds: telemetry.totalModuleSeconds, answers })}
 
-      {timeUp && !submitting && (
+      {/* Display-clock hit 0 while write grace remains — lock inputs, keep the question view. */}
+      {timeUp && !submitting && !timeoutComplete && !submitError && (
         <div role="alert" className="rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-foreground">
           <p className="flex items-center gap-2 font-semibold">
             <AlarmClock className="h-4 w-4" aria-hidden />
             Time is up. Your answers have been locked.
           </p>
-          {submitError && (
-            <div className="mt-2 flex items-center justify-between gap-2 text-xs text-danger">
-              <span>{submitError}</span>
-              <button
-                type="button"
-                onClick={() => void submit('expired')}
-                className="rounded-md border border-danger/40 px-2 py-1 font-semibold hover:bg-danger/10"
-              >
-                Retry submit
-              </button>
-            </div>
-          )}
         </div>
       )}
 

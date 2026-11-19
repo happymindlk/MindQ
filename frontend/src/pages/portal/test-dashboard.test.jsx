@@ -210,7 +210,9 @@ describe('TestDashboard deadline', () => {
     renderDashboard();
 
     expect(await screen.findByText('Submitting...')).toBeInTheDocument();
-    expect(screen.getByText(/Submitting results/i)).toBeInTheDocument();
+    // Only the right-side badge — no left/inline duplicate.
+    expect(screen.queryByText(/Submitting results/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText('Submitting...')).toHaveLength(1);
     expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Continue test/i)).not.toBeInTheDocument();
