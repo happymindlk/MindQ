@@ -408,7 +408,7 @@ export function AssessmentRunner({
         </div>
       )}
 
-      <div className="sticky top-0 z-30 -mx-1 flex items-center justify-between gap-3 rounded-lg border border-border/80 bg-canvas/95 px-2 py-2.5 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-canvas/80 sm:mx-0 sm:px-3">
+      <div className="sticky top-0 z-30 -mx-1 flex items-center justify-between gap-3 rounded-lg border border-border/80 bg-canvas/95 px-2 py-2.5 shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-canvas/80 sm:mx-0 sm:px-3 md:top-12 md:z-[9]">
         <button
           type="button"
           onClick={() => {
