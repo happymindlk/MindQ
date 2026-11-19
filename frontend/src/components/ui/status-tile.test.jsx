@@ -69,7 +69,7 @@ describe('StatusTile live countdown', () => {
     expect(screen.queryByText('4 mins')).not.toBeInTheDocument();
   });
 
-  it('ticks down, clamps at 0:00, shows Submitting..., and fires onTimerExpired once', () => {
+  it('ticks down, hides the timer at 0, shows Submitting..., and fires onTimerExpired once', () => {
     const onClick = vi.fn();
     const onTimerExpired = vi.fn();
     render(
@@ -91,22 +91,24 @@ describe('StatusTile live countdown', () => {
       vi.advanceTimersByTime(5000);
     });
 
-    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
     expect(screen.getByText('Submitting...')).toBeInTheDocument();
     expect(screen.getByText(/Submitting results/i)).toBeInTheDocument();
     expect(screen.queryByText(/Continue test/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
 
-    // Interval must stop — further advances must not re-fire or go negative.
+    // Interval must stop — further advances must not re-fire or restart a buffer.
     act(() => {
       vi.advanceTimersByTime(3000);
     });
-    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.getByText('Submitting...')).toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
   });
 
-  it('never displays a negative countdown when expires_at is already past', () => {
+  it('never displays a countdown when expires_at is already past', () => {
     const onTimerExpired = vi.fn();
     render(
       <StatusTile
@@ -120,7 +122,8 @@ describe('StatusTile live countdown', () => {
       />,
     );
 
-    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
     expect(screen.getByText('Submitting...')).toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
   });
@@ -143,6 +146,7 @@ describe('StatusTile live countdown', () => {
       vi.advanceTimersByTime(2000);
     });
     expect(screen.getByText('Submitting...')).toBeInTheDocument();
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
 
     // Simulate dashboard refresh returning a few residual seconds (clock skew / grace noise).
@@ -161,7 +165,8 @@ describe('StatusTile live countdown', () => {
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    expect(screen.getByRole('timer')).toHaveTextContent('0:00');
+    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
     expect(screen.getByText('Submitting...')).toBeInTheDocument();
     expect(screen.queryByText(/Time remaining:/i)).not.toBeInTheDocument();
     expect(onTimerExpired).toHaveBeenCalledTimes(1);
