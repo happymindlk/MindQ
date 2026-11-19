@@ -100,9 +100,9 @@ export default function TestRunner() {
   // instructions | starting | running | package_complete | expired
   const [phase, setPhase] = useState('instructions');
   /**
-   * Sticky timeout notice: once the write deadline fires, keep the runner (and
-   * its full-screen timeout UI) mounted until auto-return / "Back to Dashboard"
-   * — even if submit returns 409 or dashboard queries invalidate / refetch.
+   * Sticky timeout notice: once the countdown hits 0, keep the runner (and its
+   * full-screen timeout UI) mounted through Submitting → Submitted → hold →
+   * redirect — even if progress becomes COMPLETED or queries invalidate.
    */
   const [showTimeoutNotice, setShowTimeoutNotice] = useState(false);
   const showTimeoutNoticeRef = useRef(false);
@@ -297,12 +297,10 @@ export default function TestRunner() {
   const onTimeExpired = useCallback(() => {
     showTimeoutNoticeRef.current = true;
     setShowTimeoutNotice(true);
-    // AssessmentRunner owns the full-screen timeout UI after a successful
-    // expiry submit. Keep the runner mounted; only fall back to the portal
-    // expired phase when submit never completed (exitHandled still false).
-    if (exitHandledRef.current) return;
-    setPhase('expired');
     syncDashboardModule(testId, 'completed', test);
+    // AssessmentRunner owns the timeout overlay. Never switch portal phase to
+    // expired/lock while the notice is pinned (COMPLETED progress must not
+    // unmount the runner mid-Submitting / Submitted hold).
   }, [testId, test]);
 
   if (isLoading && !test) {
@@ -372,7 +370,7 @@ export default function TestRunner() {
           Submitted
         </p>
         <Button variant="primary" size="sm" className="mt-4" onClick={backToDashboard}>
-          Back to Dashboard
+          Return to Dashboard
         </Button>
       </div>
     );

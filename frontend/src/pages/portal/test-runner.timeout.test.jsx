@@ -154,7 +154,7 @@ describe('TestRunner timeout completion lifecycle', () => {
 
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Submitting...' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Back to Dashboard' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Return to Dashboard' })).not.toBeInTheDocument();
     expect(screen.queryByText('Dashboard list')).not.toBeInTheDocument();
     expect(api.candidate.submitTest).toHaveBeenCalledTimes(1);
 
@@ -174,7 +174,7 @@ describe('TestRunner timeout completion lifecycle', () => {
     expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Submitting...' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Submitted' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
     expect(screen.queryByText('Dashboard list')).not.toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
 
@@ -212,7 +212,7 @@ describe('TestRunner timeout completion lifecycle', () => {
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByRole('status', { name: 'Submitted' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
     });
     expect(screen.queryByText(/Answers locked/i)).not.toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
