@@ -4,26 +4,7 @@ import { LogOut } from 'lucide-react';
 import { clearCandidateSession } from '../features/candidate-auth/candidate-otp-api';
 import Button from './ui/Button';
 import Modal from './ui/Modal';
-
-/**
- * Build the post-logout portal login path, keeping the invite code when known.
- *
- * @returns {string}
- */
-export function portalLoginPathAfterLogout() {
-  const code = localStorage.getItem('candidateAccessCode')?.trim();
-  return code ? `/portal?code=${encodeURIComponent(code)}` : '/portal';
-}
-
-/**
- * True while the candidate is on the timed assessment runner.
- *
- * @param {string} pathname
- * @returns {boolean}
- */
-export function isPortalTestRunnerPath(pathname) {
-  return /^\/portal\/test(\/|$)/.test(pathname);
-}
+import { isPortalTestRunnerPath, portalLoginPathAfterLogout } from './portal-logout-path';
 
 /**
  * Header logout control for the authenticated candidate portal.
