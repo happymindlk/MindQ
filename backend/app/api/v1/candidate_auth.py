@@ -26,7 +26,11 @@ from app.services.candidate_otp import (
     verify_candidate_challenge,
 )
 from app.services.candidate_service import CandidateService
-from app.services.session_log import LOGIN, record_session_event
+from app.services.candidate_session_lock import (
+    claim_device_session,
+    enforce_device_login,
+)
+from app.services.session_log import LOGIN, device_headers, record_session_event
 
 logger = logging.getLogger("app.candidate_auth")
 
@@ -109,6 +113,11 @@ async def verify_candidate_otp(
         _raise_package_window(exc)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    device_id, _browser = device_headers(request)
+    enforce_device_login(candidate, device_id)
+    claim_device_session(candidate, device_id)
+    await db.commit()
+    await db.refresh(candidate)
     candidate.token = issue_candidate_token(candidate)
     await record_session_event(
         db,

@@ -29,6 +29,7 @@ from app.services.session_log import (
     record_session_event,
 )
 from app.auth import get_current_candidate
+from app.services.candidate_session_lock import clear_device_session
 from app.exceptions import (
     AssessmentAlreadySubmittedError,
     AssessmentNotFoundError,
@@ -66,6 +67,25 @@ def _raise_integrity(exc: Exception) -> NoReturn:
             status_code=422, detail={"code": exc.code, "message": exc.detail}
         ) from exc
     raise exc
+
+
+@router.post("/logout")
+async def logout_candidate(
+    candidate: Candidate = Depends(get_current_candidate),
+    db: AsyncSession = Depends(get_db),
+):
+    """Release the single-device portal lock so another device can sign in.
+
+    Args:
+        candidate: Authenticated candidate from the bearer token.
+        db: Async database session.
+
+    Returns:
+        Empty success payload.
+    """
+    clear_device_session(candidate)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/dashboard")

@@ -96,3 +96,17 @@ export function persistCandidateSession(session: CandidateSession): void {
   localStorage.setItem('candidateFirstName', session.firstName);
   localStorage.setItem('candidateAccessCode', session.accessCode);
 }
+
+/** Clear portal session keys after a best-effort server logout. */
+export async function clearCandidateSession(): Promise<void> {
+  try {
+    await api.candidate.logout();
+  } catch {
+    // Local clear must still happen if the lock release request fails.
+  }
+  localStorage.removeItem('candidateToken');
+  localStorage.removeItem('candidateId');
+  localStorage.removeItem('candidateName');
+  localStorage.removeItem('candidateFirstName');
+  localStorage.removeItem('candidateAccessCode');
+}
