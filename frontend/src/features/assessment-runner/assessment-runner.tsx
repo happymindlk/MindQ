@@ -14,6 +14,7 @@ import {
   hasContent,
   isAnswered,
   isAttemptLocked,
+  isTerminalSubmitConflict,
   isTimeExpired,
   resolveRemainingSeconds,
   resolveResumeIndex,
@@ -61,6 +62,12 @@ interface AssessmentRunnerProps {
   onSubmitted: () => void;
   /** Called instead of `onSubmitted` when a timed-module expiry submit succeeds. */
   onTimeExpired?: () => void;
+  /**
+   * Fired synchronously the instant the write deadline hits — before the submit
+   * network call — so the parent portal can pin the timeout notice and refuse
+   * to unmount / route away while Submitting... is on screen.
+   */
+  onTimeoutStarted?: () => void;
   onLocked: (message: string) => void;
   onExit: () => void;
   exitLabel?: string;
@@ -80,6 +87,7 @@ export function AssessmentRunner({
   onAnswersChange,
   onSubmitted,
   onTimeExpired,
+  onTimeoutStarted,
   onLocked,
   onExit,
   exitLabel = 'Back to dashboard',
@@ -135,6 +143,18 @@ export function AssessmentRunner({
     return true;
   }, []);
 
+  const finishExpired = useCallback(() => {
+    setConfirmOpen(false);
+    setSubmitError(null);
+    setTimeoutComplete(true);
+    if (onTimeExpired) {
+      onTimeExpired();
+    } else {
+      // Preview / callers without a dedicated expiry handler.
+      onSubmitted();
+    }
+  }, [onSubmitted, onTimeExpired]);
+
   const submit = useCallback(
     async (reason: 'manual' | 'expired') => {
       // Idempotency lock: reject concurrent autoSubmit while a submit is in flight.
@@ -145,6 +165,10 @@ export function AssessmentRunner({
       // Freeze the countdown immediately (before the network round-trip) so a
       // near-zero tick cannot race the in-flight manual submit.
       timerStopRef.current?.();
+      // timeUp + submitting together paint the full-screen timeout notice instantly.
+      if (reason === 'expired') {
+        setTimeUp(true);
+      }
       setSubmitting(true);
       setSubmitError(null);
       try {
@@ -158,17 +182,16 @@ export function AssessmentRunner({
           // Always show the timeout completion screen — including when every
           // question was already answered and the candidate was still reviewing
           // / sitting on "Submit test" without confirming.
-          setTimeoutComplete(true);
-          if (onTimeExpired) {
-            onTimeExpired();
-          } else {
-            // Preview / callers without a dedicated expiry handler.
-            onSubmitted();
-          }
+          finishExpired();
         } else {
           onSubmitted();
         }
       } catch (err) {
+        // Server already auto-submitted / expired: still a successful timeout UX.
+        if (reason === 'expired' && isTerminalSubmitConflict(err)) {
+          finishExpired();
+          return;
+        }
         submittedRef.current = false;
         if (isAttemptLocked(err)) {
           setConfirmOpen(false);
@@ -184,7 +207,15 @@ export function AssessmentRunner({
         setSubmitting(false);
       }
     },
-    [cancelPendingAutosave, onLocked, onSubmitted, onTimeExpired, telemetry, test.id, transport],
+    [
+      cancelPendingAutosave,
+      finishExpired,
+      onLocked,
+      onSubmitted,
+      telemetry,
+      test.id,
+      transport,
+    ],
   );
 
   const canAutoSubmit = hasAbsoluteDeadline(test);
@@ -201,9 +232,12 @@ export function AssessmentRunner({
     // remain on a locked "Submit test" / confirm screen at 00:00.
     cancelPendingAutosave();
     setConfirmOpen(false);
+    // Pin timeout UI synchronously before the network round-trip (and before the
+    // parent can react to dashboard invalidation / lock responses).
     setTimeUp(true);
+    onTimeoutStarted?.();
     void submit('expired');
-  }, [cancelPendingAutosave, submit, test.expires_at, test.write_expires_at]);
+  }, [cancelPendingAutosave, onTimeoutStarted, submit, test.expires_at, test.write_expires_at]);
 
   const onDisplayExpire = useCallback(() => {
     setTimeUp(true);

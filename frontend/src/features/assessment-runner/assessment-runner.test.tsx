@@ -739,6 +739,66 @@ describe('AssessmentRunner strict expiry', () => {
     expect(screen.queryByRole('radio', { name: /Alpha/ })).not.toBeInTheDocument();
   });
 
+  it('treats 409 already-submitted on expiry as successful timeout completion', async () => {
+    const locked = Object.assign(new Error('Assessment already completed. Modifications are locked.'), {
+      status: 409,
+      code: null,
+    });
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => {
+        throw locked;
+      }),
+    };
+    const onSubmitted = vi.fn();
+    const onTimeExpired = vi.fn();
+    const onLocked = vi.fn();
+    const onExit = vi.fn();
+    const onTimeoutStarted = vi.fn();
+    render(
+      <AssessmentRunner
+        test={expiredTest()}
+        mode="live"
+        initialAnswers={{ q1: 'Alpha' }}
+        transport={transport}
+        onSubmitted={onSubmitted}
+        onTimeExpired={onTimeExpired}
+        onTimeoutStarted={onTimeoutStarted}
+        onLocked={onLocked}
+        onExit={onExit}
+      />,
+    );
+
+    expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
+    expect(onTimeoutStarted).toHaveBeenCalled();
+    await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
+    expect(onLocked).not.toHaveBeenCalled();
+    expect(onSubmitted).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Retry submit/ })).not.toBeInTheDocument();
+  });
+
+  it('treats 400 expired conflict on expiry as successful timeout completion', async () => {
+    const expired = Object.assign(new Error('Assessment window expired'), {
+      status: 400,
+      code: null,
+    });
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => {
+        throw expired;
+      }),
+    };
+    const onTimeExpired = vi.fn();
+    const onLocked = vi.fn();
+    renderRunner(expiredTest(), transport, 'live', { onTimeExpired, onLocked });
+
+    expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
+    await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
+    expect(onLocked).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
+  });
+
   it('falls back to onSubmitted when onTimeExpired is not provided (preview)', async () => {
     const transport = {
       autosave: vi.fn(async () => undefined),
