@@ -19,7 +19,6 @@ import {
   resolveRemainingSeconds,
   resolveResumeIndex,
   resolveTopDisclaimer,
-  resolveWriteRemainingSeconds,
 } from './runner-logic';
 import { formatClock, timerTone, useModuleTimer } from './use-module-timer';
 import { useServerTimer } from './use-server-timer';
@@ -29,8 +28,8 @@ import { useQuestionTelemetry } from './use-question-telemetry';
 export const ASSESSMENT_TIMEOUT_MESSAGE =
   'Your time to complete this assessment has concluded. All the completed questions are saved and recorded successfully.';
 
-/** Hold the Submitted confirmation briefly, then auto-return to the dashboard. */
-export const TIMEOUT_AUTO_EXIT_MS = 1500;
+/** Hold the Submitted confirmation so the overlay never flash-redirects away. */
+export const TIMEOUT_AUTO_EXIT_MS = 2000;
 
 /** Leading-edge guard against rapid Next / confirm double-clicks. */
 const NAV_DEBOUNCE_MS = 300;
@@ -104,8 +103,6 @@ export function AssessmentRunner({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [timeUp, setTimeUp] = useState(false);
-  /** True after a successful expiry auto-submit — drives the full-screen timeout UI. */
-  const [timeoutComplete, setTimeoutComplete] = useState(false);
   const [offline, setOffline] = useState(
     () => (typeof navigator !== 'undefined' ? !navigator.onLine : false),
   );
@@ -148,10 +145,9 @@ export function AssessmentRunner({
     return true;
   }, []);
 
-  const finishExpired = useCallback(() => {
+  const markExpiredComplete = useCallback(() => {
     setConfirmOpen(false);
     setSubmitError(null);
-    setTimeoutComplete(true);
     if (onTimeExpired) {
       onTimeExpired();
     } else {
@@ -166,15 +162,6 @@ export function AssessmentRunner({
     onExit();
   }, [onExit]);
 
-  // After a successful expiry submit, show Submitted briefly then return automatically.
-  useEffect(() => {
-    if (!timeoutComplete) return undefined;
-    const timerId = window.setTimeout(() => {
-      exitAfterTimeout();
-    }, TIMEOUT_AUTO_EXIT_MS);
-    return () => window.clearTimeout(timerId);
-  }, [exitAfterTimeout, timeoutComplete]);
-
   const submit = useCallback(
     async (reason: 'manual' | 'expired') => {
       // Idempotency lock: reject concurrent autoSubmit while a submit is in flight.
@@ -185,12 +172,13 @@ export function AssessmentRunner({
       // Freeze the countdown immediately (before the network round-trip) so a
       // near-zero tick cannot race the in-flight manual submit.
       timerStopRef.current?.();
-      // timeUp + submitting together paint the full-screen timeout notice instantly.
-      if (reason === 'expired') {
-        setTimeUp(true);
+      // For expiry, onExpire already flushSync'd timeUp + submitting. Manual
+      // submit still needs the submitting overlay.
+      if (reason !== 'expired') {
+        setSubmitting(true);
       }
-      setSubmitting(true);
       setSubmitError(null);
+      let expiredSucceeded = false;
       try {
         // Final submit carries every answer; no mid-question autosave required.
         await transport.submit({
@@ -199,37 +187,44 @@ export function AssessmentRunner({
         });
         setConfirmOpen(false);
         if (reason === 'expired') {
-          // Always show the timeout completion screen — including when every
-          // question was already answered and the candidate was still reviewing
-          // / sitting on "Submit test" without confirming.
-          finishExpired();
+          markExpiredComplete();
+          expiredSucceeded = true;
         } else {
           onSubmitted();
         }
       } catch (err) {
         // Server already auto-submitted / expired: still a successful timeout UX.
         if (reason === 'expired' && isTerminalSubmitConflict(err)) {
-          finishExpired();
-          return;
+          markExpiredComplete();
+          expiredSucceeded = true;
+        } else {
+          submittedRef.current = false;
+          if (isAttemptLocked(err)) {
+            setConfirmOpen(false);
+            onLocked(errorMessage(err, 'Assessment already completed. Modifications are locked.'));
+          } else {
+            setSubmitError(
+              reason === 'expired'
+                ? `${errorMessage(err, 'Submit failed')}. Your saved answers are kept; retry below.`
+                : errorMessage(err, 'Submit failed'),
+            );
+          }
         }
-        submittedRef.current = false;
-        if (isAttemptLocked(err)) {
-          setConfirmOpen(false);
-          onLocked(errorMessage(err, 'Assessment already completed. Modifications are locked.'));
-          return;
-        }
-        setSubmitError(
-          reason === 'expired'
-            ? `${errorMessage(err, 'Submit failed')}. Your saved answers are kept; retry below.`
-            : errorMessage(err, 'Submit failed'),
-        );
       } finally {
         setSubmitting(false);
+        // Hold the Submitted confirmation so the overlay never flash-redirects.
+        if (expiredSucceeded) {
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, TIMEOUT_AUTO_EXIT_MS);
+          });
+          exitAfterTimeout();
+        }
       }
     },
     [
       cancelPendingAutosave,
-      finishExpired,
+      exitAfterTimeout,
+      markExpiredComplete,
       onLocked,
       onSubmitted,
       telemetry,
@@ -241,53 +236,47 @@ export function AssessmentRunner({
   const canAutoSubmit = hasAbsoluteDeadline(test);
 
   const onExpire = useCallback(() => {
-    // Strict guard: never auto-submit without an absolute write/display deadline.
+    // Strict guard: never auto-submit without an absolute display deadline.
     // remaining_seconds === 0 alone (untimed / pre-hydration) must not submit.
-    const writeDeadline = test.write_expires_at || test.expires_at;
-    if (typeof writeDeadline !== 'string' || writeDeadline.length === 0) {
+    const displayDeadline = test.expires_at;
+    if (typeof displayDeadline !== 'string' || displayDeadline.length === 0) {
       return;
     }
-    // Cancel pending autosave first, then single-fire submit (submit() owns the lock).
-    // Close the review/confirm dialog immediately — all-answered candidates must not
-    // remain on a locked "Submit test" / confirm screen at 00:00.
+    // Very first lines: pin the timeout overlay BEFORE awaiting submit.
+    // Do not gate this on submit success — Submitting... must paint at t=0.
+    setTimeUp(true);
+    setSubmitting(true);
+    onTimeoutStarted?.();
     cancelPendingAutosave();
     setConfirmOpen(false);
-    // Pin timeout UI synchronously before the network round-trip (and before the
-    // parent can react to dashboard invalidation / lock responses).
-    setTimeUp(true);
-    onTimeoutStarted?.();
     void submit('expired');
-  }, [cancelPendingAutosave, onTimeoutStarted, submit, test.expires_at, test.write_expires_at]);
-
-  const onDisplayExpire = useCallback(() => {
-    setTimeUp(true);
-  }, []);
+  }, [cancelPendingAutosave, onTimeoutStarted, submit, test.expires_at]);
 
   // Prefer absolute expires_at + server_now on resume; fall back to integer
   // remaining_seconds only when the wall-clock fields are absent (preview).
   const hasWallClock =
     typeof test.expires_at === 'string' && test.expires_at.length > 0;
   const moduleRemaining = hasWallClock ? null : resolveRemainingSeconds(test);
-  const moduleWriteRemaining = hasWallClock ? null : resolveWriteRemainingSeconds(test);
   const moduleTimer = useModuleTimer({
     remainingSeconds: moduleRemaining,
-    expireRemainingSeconds: moduleWriteRemaining,
+    // Expire with the visible countdown — do not wait for write-grace padding.
+    expireRemainingSeconds: moduleRemaining,
     // Preview timed modules may lack wall-clock fields; live auto-submit requires them.
     onExpire: hasWallClock
       ? undefined
       : canAutoSubmit || mode === 'preview'
         ? onExpire
         : undefined,
-    onDisplayExpire: hasWallClock ? undefined : onDisplayExpire,
-    enabled: !hasWallClock && !submitting,
+    enabled: !hasWallClock && !submitting && !timeUp,
   });
   const serverTimer = useServerTimer({
     expiresAt: hasWallClock ? test.expires_at : null,
-    writeExpiresAt: hasWallClock ? (test.write_expires_at ?? test.expires_at) : null,
+    // Fire popup + submit when the client countdown hits 0 (display expires_at),
+    // without waiting for write_expires_at grace / server polling drift.
+    writeExpiresAt: hasWallClock ? test.expires_at : null,
     serverNow: test.server_now,
     onExpire: hasWallClock && canAutoSubmit ? onExpire : undefined,
-    onDisplayExpire: hasWallClock ? onDisplayExpire : undefined,
-    enabled: hasWallClock && !submitting,
+    enabled: hasWallClock && !submitting && !timeUp,
   });
   const timer = hasWallClock ? serverTimer : moduleTimer;
   timerStopRef.current = timer.stop;
@@ -445,14 +434,13 @@ export function AssessmentRunner({
   );
   const allAnswered = answeredCount === questions.length && questions.length > 0;
 
-  // Expiry finalize: leave the question / review UI the instant the write lock
-  // hits 0. Show the confirmation copy immediately with an inline Submitting...
-  // status; swap to Submitted + Back to Dashboard after the submit API resolves.
-  if (timeoutComplete || (timeUp && (submitting || Boolean(submitError)))) {
-    const showSubmitting = submitting || (timeUp && !timeoutComplete && !submitError);
+  // Timeout overlay mounts the instant the countdown hits 0 (isTimedOut), not
+  // after submit resolves. Submitting... stays visible for the whole request.
+  if (timeUp) {
+    const showSubmitting = submitting && !submitError;
     return (
       <div
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-canvas px-6 text-center"
+        className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-canvas px-6 text-center"
         role="status"
         aria-live={showSubmitting ? 'assertive' : 'polite'}
         aria-label="Assessment time concluded"
@@ -479,7 +467,11 @@ export function AssessmentRunner({
             </p>
             <button
               type="button"
-              onClick={() => void submit('expired')}
+              onClick={() => {
+                setTimeUp(true);
+                setSubmitting(true);
+                void submit('expired');
+              }}
               className="inline-flex h-10 items-center justify-center rounded-md border border-danger/40 bg-surface px-5 text-sm font-medium text-foreground hover:bg-danger/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               Retry submit
@@ -499,7 +491,7 @@ export function AssessmentRunner({
               onClick={exitAfterTimeout}
               className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-5 text-sm font-medium text-primary-fg hover:bg-primary-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
             >
-              Back to Dashboard
+              Return to Dashboard
             </button>
           </div>
         )}
@@ -686,16 +678,6 @@ export function AssessmentRunner({
       </section>
 
       {renderFooter?.({ elapsedFor: telemetry.elapsedFor, totalSeconds: telemetry.totalModuleSeconds, answers })}
-
-      {/* Display-clock hit 0 while write grace remains — lock inputs, keep the question view. */}
-      {timeUp && !submitting && !timeoutComplete && !submitError && (
-        <div role="alert" className="rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-foreground">
-          <p className="flex items-center gap-2 font-semibold">
-            <AlarmClock className="h-4 w-4" aria-hidden />
-            Time is up. Your answers have been locked.
-          </p>
-        </div>
-      )}
 
       <Dialog.Root open={confirmOpen && !timeUp} onOpenChange={(open) => !submitting && setConfirmOpen(open)}>
         <Dialog.Portal>

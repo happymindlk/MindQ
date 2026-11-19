@@ -471,7 +471,7 @@ describe('AssessmentRunner strict expiry', () => {
     expect(await screen.findByRole('status', { name: 'Submitting...' })).toBeInTheDocument();
     // Full-screen notice paints immediately — before the submit API resolves.
     expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Back to Dashboard' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Return to Dashboard' })).not.toBeInTheDocument();
     expect(screen.queryByRole('timer')).not.toBeInTheDocument();
     expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
     expect(transport.submit).toHaveBeenCalledTimes(1);
@@ -489,20 +489,25 @@ describe('AssessmentRunner strict expiry', () => {
     expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Submitting...' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Submitted' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: /Alpha/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('timer')).not.toBeInTheDocument();
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Back to Dashboard' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Return to Dashboard' }));
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
-  it('auto-returns to the dashboard ~1.5s after Submitted confirmation', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it('shows timeout + Submitting at t=0 while a delayed submit is pending, then holds Submitted before exit', async () => {
+    vi.useFakeTimers();
     try {
       const transport = {
         autosave: vi.fn(async () => undefined),
-        submit: vi.fn(async () => undefined),
+        submit: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              window.setTimeout(resolve, 500);
+            }),
+        ),
       };
       const onExit = vi.fn();
       const onTimeExpired = vi.fn();
@@ -512,13 +517,35 @@ describe('AssessmentRunner strict expiry', () => {
         initialAnswers: { q1: 'Alpha' },
       });
 
-      expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
-      await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
-      expect(screen.getByRole('status', { name: 'Submitted' })).toBeInTheDocument();
+      // t=0 while submitAssessment is still pending — overlay must already paint.
+      expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Submitting...' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Return to Dashboard' })).not.toBeInTheDocument();
       expect(onExit).not.toHaveBeenCalled();
+      expect(onTimeExpired).not.toHaveBeenCalled();
 
       await act(async () => {
-        vi.advanceTimersByTime(TIMEOUT_AUTO_EXIT_MS);
+        vi.advanceTimersByTime(500);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(onTimeExpired).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('status', { name: 'Submitting...' })).not.toBeInTheDocument();
+      expect(screen.getByRole('status', { name: 'Submitted' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
+      expect(onExit).not.toHaveBeenCalled();
+
+      // Hold window — overlay stays; redirect only after TIMEOUT_AUTO_EXIT_MS.
+      await act(async () => {
+        vi.advanceTimersByTime(TIMEOUT_AUTO_EXIT_MS - 1);
+        await Promise.resolve();
+      });
+      expect(onExit).not.toHaveBeenCalled();
+      expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        await Promise.resolve();
       });
       expect(onExit).toHaveBeenCalledTimes(1);
     } finally {
@@ -547,16 +574,16 @@ describe('AssessmentRunner strict expiry', () => {
 
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Submitting...' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Back to Dashboard' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Return to Dashboard' })).not.toBeInTheDocument();
     expect(transport.submit).toHaveBeenCalledTimes(1);
 
     resolveSubmit?.();
     await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('status', { name: 'Submitting...' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Submitted' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Back to Dashboard' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Return to Dashboard' }));
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
@@ -602,11 +629,11 @@ describe('AssessmentRunner strict expiry', () => {
     );
     expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Submitting...' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Submit test/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Confirm submit/i })).not.toBeInTheDocument();
 
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Back to Dashboard' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Return to Dashboard' }));
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
@@ -678,7 +705,7 @@ describe('AssessmentRunner strict expiry', () => {
       expect(onSubmitted).not.toHaveBeenCalled();
       expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
       expect(screen.queryByRole('status', { name: 'Submitting...' })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -806,7 +833,7 @@ describe('AssessmentRunner strict expiry', () => {
     await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
     expect(onLocked).not.toHaveBeenCalled();
     expect(onSubmitted).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Retry submit/ })).not.toBeInTheDocument();
   });
 
@@ -828,7 +855,7 @@ describe('AssessmentRunner strict expiry', () => {
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
     await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
     expect(onLocked).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Back to Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
   });
 
   it('falls back to onSubmitted when onTimeExpired is not provided (preview)', async () => {
@@ -842,22 +869,28 @@ describe('AssessmentRunner strict expiry', () => {
   });
 });
 
-describe('AssessmentRunner grace resume', () => {
+describe('AssessmentRunner display-zero expiry', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('does not instant-submit when display is 0 but write grace remains', async () => {
-    vi.useFakeTimers();
+  it('fires timeout popup + submit immediately at display 0 without waiting for write grace', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let resolveSubmit: (() => void) | undefined;
     const transport = {
       autosave: vi.fn(async () => undefined),
-      submit: vi.fn(async () => undefined),
+      submit: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveSubmit = resolve;
+          }),
+      ),
     };
     const onTimeExpired = vi.fn();
     const now = Date.now();
     const startedAt = new Date(now - 61_000);
     const expiresAt = new Date(now - 1_000);
-    const writeExpiresAt = new Date(now + 15_000);
+    const writeExpiresAt = new Date(now + 60_000);
     renderRunner(
       {
         ...twoQuestionTest('psychometric'),
@@ -868,21 +901,21 @@ describe('AssessmentRunner grace resume', () => {
         write_expires_at: writeExpiresAt.toISOString(),
         server_now: new Date(now).toISOString(),
         remaining_seconds: 0,
-        write_remaining_seconds: 15,
+        write_remaining_seconds: 60,
       },
       transport,
       'live',
       { onTimeExpired },
     );
-    // Display deadline elapsed — hide blinking 00:00 while write grace remains.
-    expect(screen.queryByRole('timer')).not.toBeInTheDocument();
-    expect(screen.queryByText(/0:00/)).not.toBeInTheDocument();
-    expect(transport.submit).not.toHaveBeenCalled();
-    await act(async () => {
-      vi.advanceTimersByTime(16_000);
-    });
-    expect(onTimeExpired).toHaveBeenCalledTimes(1);
+    // Client countdown already at 0 — popup + submit must not wait for write grace.
+    expect(screen.getByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Submitting...' })).toBeInTheDocument();
     expect(transport.submit).toHaveBeenCalledTimes(1);
+    expect(onTimeExpired).not.toHaveBeenCalled();
+
+    resolveSubmit?.();
+    await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('status', { name: 'Submitted' })).toBeInTheDocument();
   });
 });
 
