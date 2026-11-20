@@ -172,7 +172,7 @@ async def test_get_test_response_omits_answer_keys(candidate_client, monkeypatch
     # GET must not start the clock; started_at stays null until POST /start.
     assert body["started_at"] is None
     assert body["remaining_seconds"] == 15 * 60
-    assert body["write_remaining_seconds"] == 15 * 60 + 30
+    assert body["write_remaining_seconds"] == 15 * 60 + 15
 
 
 @pytest.mark.asyncio
@@ -194,9 +194,9 @@ async def test_get_test_returns_server_remaining_seconds_for_started_attempt(
     assert body["started_at"].endswith("Z") or body["started_at"].endswith("+00:00")
     assert 15 * 60 - 122 <= body["remaining_seconds"] <= 15 * 60 - 120
     assert (
-        15 * 60 + 30 - 122
+        15 * 60 + 15 - 122
         <= body["write_remaining_seconds"]
-        <= 15 * 60 + 30 - 120
+        <= 15 * 60 + 15 - 120
     )
 
 
@@ -223,7 +223,7 @@ async def test_start_only_starts_the_requested_module(candidate_client, monkeypa
     assert started_ids == [target_id]
     assert body["status"] == "IN_PROGRESS"
     assert body["remaining_seconds"] in (15 * 60, 15 * 60 - 1)
-    assert body["write_remaining_seconds"] in (15 * 60 + 30, 15 * 60 + 30 - 1)
+    assert body["write_remaining_seconds"] in (15 * 60 + 15, 15 * 60 + 15 - 1)
 
 
 @pytest.mark.asyncio
@@ -329,7 +329,7 @@ async def test_get_test_never_leaks_weights_rationale_or_keys(candidate_client, 
     assert by_id["lik1"]["likert_label_5"] == "Always"
     assert body["duration_seconds"] == 180
     assert body["timer_mode"] == "strict"
-    assert body["write_remaining_seconds"] == 180 + 30
+    assert body["write_remaining_seconds"] == 180 + 15
 
 
 @pytest.mark.asyncio

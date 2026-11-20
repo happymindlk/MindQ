@@ -69,14 +69,25 @@ TECHNICAL = "technical"
 ANSWER_KEYS = (
     "correct_answer",
     "correct_answer_or_rubric",
+    "correct_option",
     "benchmark_rubric",
+    "evaluation_rubric",
     "answer",
     "scoring_key",
+    "scoring_profile",
+    "is_correct",
     "correct_keys",
     "option_weights",
+    "weight",
+    "weights",
+    "points",
     "accepted_answers",
     "reverse_scored",
     "sme_rationale",
+    "facet",
+    "facet_scores",
+    "builder_type",
+    "match",
 )
 
 

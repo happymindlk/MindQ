@@ -134,6 +134,8 @@ async def test_autosave_rejects_after_flexible_deadline(monkeypatch):
         "_gate_autosave",
         AsyncMock(side_effect=AssessmentTimeExpiredError()),
     )
+    finalize = AsyncMock(return_value=(progress, False, "Acme", "Math"))
+    monkeypatch.setattr(CandidateService, "submit_test", finalize)
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
     session = AsyncMock()
     body = ResponseSave(
@@ -144,7 +146,8 @@ async def test_autosave_rejects_after_flexible_deadline(monkeypatch):
         await CandidateService.autosave_response(
             session, SimpleNamespace(id=uuid4(), corporate_id=uuid4()), body
         )
-    session.commit.assert_not_awaited()
+    finalize.assert_awaited_once()
+    assert finalize.await_args.kwargs.get("pending_responses") is None
 
 
 @pytest.mark.asyncio
@@ -156,13 +159,16 @@ async def test_autosave_rejects_after_strict_deadline(monkeypatch):
         "_gate_autosave",
         AsyncMock(side_effect=AssessmentTimeExpiredError()),
     )
+    finalize = AsyncMock(return_value=(progress, False, "Acme", "Math"))
+    monkeypatch.setattr(CandidateService, "submit_test", finalize)
     monkeypatch.setattr(candidate_service, "_utcnow", lambda: NOW)
     session = AsyncMock()
     body = ResponseSave(assessment_id=assessment.id, question_id="q1", response={"answer": "a"}, elapsed_seconds=4.2)
 
     with pytest.raises(AssessmentTimeExpiredError):
         await CandidateService.autosave_response(session, SimpleNamespace(id=uuid4(), corporate_id=uuid4()), body)
-    session.commit.assert_not_awaited()
+    finalize.assert_awaited_once()
+    assert finalize.await_args.kwargs.get("pending_responses") is None
 
 
 def _empty_result():
