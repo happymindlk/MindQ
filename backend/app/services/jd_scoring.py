@@ -1,14 +1,14 @@
 """MindQ Report synthesis (Gemini): narrative sections for the v5.1 report.
 
 Generated only in background tasks: after the last test is submitted, and when
-a report view finds the cache missing, stale, or failed past its cooldown.
+a report view finds the cache missing, stale, or failed.
 Report views read the cache via ``read_cached`` and never wait on Gemini.
 Answer keys are stripped from evidence.
 The cache key covers the prompt version, the role brief, and the completed
 scores, so a prompt change or a re-graded assessment regenerates the synthesis.
 
 Outcomes are persisted on ``candidate_evaluations.status``: ``ok`` rows carry the
-payload; ``failed`` rows carry ``last_error`` and are retried on the next call;
+payload; ``failed`` rows carry ``last_error`` and are retried when a report is opened;
 ``held_for_review`` keeps the payload with a placeholder executive summary and
 does not auto-retry on reopen.
 """
@@ -75,9 +75,16 @@ HELD_EXECUTIVE_SUMMARY = "This summary is being prepared by the MindQ team"
 _ERROR_MAX_CHARS = 1000
 _HARD_WORD_RETRIES = 2
 _WATCH_WORD_RETRIES = 1
-# Report polling re-reads the cache every few seconds; a failed synthesis is
-# only re-queued after this cooldown so a persistent provider outage cannot
-# turn each poll into a paid Gemini call. held_for_review never auto-retries.
+# Cap reasoning so synthesis finishes in ~8–12s instead of unbounded thinking.
+SYNTHESIS_THINKING_BUDGET = 512
+# Per-attempt client timeout. SDK ``HttpOptions.timeout`` is milliseconds.
+SYNTHESIS_TIMEOUT_MS = 60_000
+# Transient 429 / 503 / network timeouts. Terminal errors are not retried.
+SYNTHESIS_MAX_ATTEMPTS = 3
+# Report polling re-reads the cache every few seconds. ``claim_report_refresh``
+# uses this window so a persistent provider outage cannot turn each poll into
+# a paid Gemini call. A failed row itself always requests a refresh on open.
+# held_for_review never auto-retries.
 FAILED_RETRY_COOLDOWN = timedelta(minutes=5)
 
 CacheState = Literal["ok", "skipped", "missing", "stale", "failed", "held_for_review"]
@@ -521,6 +528,19 @@ def build_evidence(
     return evidence
 
 
+def _exception_text(exc: BaseException) -> str:
+    """Return the message stored on ``candidate_evaluations.last_error``.
+
+    Args:
+        exc: Failure raised while synthesizing a report.
+
+    Returns:
+        ``str(exc)`` when it is non-empty, otherwise the exception type name.
+    """
+    message = str(exc).strip()
+    return message or type(exc).__name__
+
+
 def complete_with_gemini(user_prompt: str) -> str:
     from google.genai import types
 
@@ -532,7 +552,15 @@ def complete_with_gemini(user_prompt: str) -> str:
                 temperature=0.2,
                 response_mime_type="application/json",
                 response_json_schema=REPORT_NARRATIVE_JSON_SCHEMA,
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=SYNTHESIS_THINKING_BUDGET,
+                ),
+                http_options=types.HttpOptions(
+                    timeout=SYNTHESIS_TIMEOUT_MS,
+                    retry_options=types.HttpRetryOptions(attempts=1),
+                ),
             ),
+            attempts=SYNTHESIS_MAX_ATTEMPTS,
         )
     except GeminiUnavailable as exc:
         raise JdScoringUnavailable(str(exc)) from exc
@@ -1040,7 +1068,8 @@ class JdScoringService:
             candidate: Candidate being reported on.
             package: Candidate's package (role / JD source).
             outcomes: Module outcomes the report is rendering.
-            now: Clock override (tests).
+            now: Clock override retained for callers. Retry throttling is
+                ``claim_report_refresh``, not this lookup.
 
         Returns:
             The cache state and whether a background refresh should be queued.
@@ -1074,10 +1103,9 @@ class JdScoringService:
                 return CachedSynthesis(narrative, "held_for_review", needs_refresh=False)
             return CachedSynthesis(narrative, "ok", needs_refresh=False)
 
-        generated_at = getattr(row, "generated_at", None)
-        current = now or datetime.now(timezone.utc)
-        cooled_down = generated_at is None or current - generated_at >= FAILED_RETRY_COOLDOWN
-        return CachedSynthesis(None, "failed", needs_refresh=cooled_down)
+        # Opening a failed report must re-queue synthesis. Poll frequency is
+        # limited by ``claim_report_refresh``, not by leaving needs_refresh false.
+        return CachedSynthesis(None, "failed", needs_refresh=True)
 
     @staticmethod
     async def get_or_evaluate(
@@ -1176,17 +1204,21 @@ class JdScoringService:
                 ),
                 timeout=overall_deadline_seconds(),
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
             deadline = overall_deadline_seconds()
-            logger.error(
-                "jd_scoring_timeout candidate_id=%s timeout_s=%s", candidate_id, deadline
+            logger.exception(
+                "report_synthesis_failed",
+                extra={"candidate_id": str(candidate_id)},
             )
+            message = _exception_text(exc)
+            if message == type(exc).__name__:
+                message = f"{message}: timeout after {deadline:.0f}s"
             await JdScoringService._record_failure(
                 candidate_id,
                 corporate_id,
                 package_id,
                 digest,
-                f"timeout after {deadline:.0f}s",
+                message,
             )
             return None, "failed"
         except HeldForReviewError as exc:
@@ -1213,28 +1245,17 @@ class JdScoringService:
             return exc.narrative, "held_for_review"
         except Exception as exc:
             # Fail-soft for submit/report; the provider error is logged and persisted.
-            # Never log candidate PII (name/email/phone)—only id and ban context.
-            if isinstance(exc, BannedLanguageError) and exc.details:
-                hit = exc.details[0]
-                logger.exception(
-                    "jd_scoring_failed candidate_id=%s error=%s "
-                    "field=%s match=%s context=%s",
-                    candidate_id,
-                    exc,
-                    hit.field,
-                    hit.match,
-                    hit.context,
-                )
-            else:
-                logger.exception(
-                    "jd_scoring_failed candidate_id=%s error=%s", candidate_id, exc
-                )
+            # Never log candidate PII (name/email/phone)—only the candidate id.
+            logger.exception(
+                "report_synthesis_failed",
+                extra={"candidate_id": str(candidate_id)},
+            )
             await JdScoringService._record_failure(
                 candidate_id,
                 corporate_id,
                 package_id,
                 digest,
-                f"{type(exc).__name__}: {exc}",
+                _exception_text(exc),
             )
             return None, "failed"
 

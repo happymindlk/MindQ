@@ -208,12 +208,69 @@ async def test_submit_route_enqueues_finalize_not_background_tasks(monkeypatch):
     app.dependency_overrides[get_current_candidate] = _cand
     app.dependency_overrides[get_db] = _db
 
+    refreshed: list[tuple] = []
+
+    async def _refresh(cid, *, await_inline=True):
+        refreshed.append((cid, await_inline))
+
+    monkeypatch.setattr(candidate_api, "enqueue_refresh_report_synthesis", _refresh)
+
     res = TestClient(app).post(f"/api/v1/candidate/test/{assessment_id}/submit", json={})
     assert res.status_code == 200
     body = res.json()
     assert body["jd_scoring_queued"] is True
     assert body["company_name"] == "Acme"
     assert enqueued == [(candidate.id, assessment_id, False)]
+    assert refreshed == []
+    assert body["package_complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_submit_final_assessment_enqueues_report_synthesis(monkeypatch):
+    """The last COMPLETED module queues synthesis without blocking the response."""
+    assessment_id = uuid4()
+    candidate = SimpleNamespace(id=uuid4(), corporate_id=uuid4())
+    progress = SimpleNamespace(
+        assessment_id=assessment_id,
+        status="COMPLETED",
+        completed_at=None,
+    )
+    enqueued: list[tuple] = []
+    refreshed: list[tuple] = []
+
+    async def _submit(*_a, **_k):
+        return progress, True, "Acme", "Module"
+
+    async def _enqueue(cid, aid, *, await_inline=True):
+        enqueued.append((cid, aid, await_inline))
+
+    async def _refresh(cid, *, await_inline=True):
+        refreshed.append((cid, await_inline))
+
+    monkeypatch.setattr(candidate_api.CandidateService, "submit_test", _submit)
+    monkeypatch.setattr(candidate_api, "enqueue_finalize_and_score_ai", _enqueue)
+    monkeypatch.setattr(candidate_api, "enqueue_refresh_report_synthesis", _refresh)
+
+    app = FastAPI()
+    app.include_router(candidate_api.router, prefix="/api/v1/candidate")
+
+    async def _cand():
+        return candidate
+
+    async def _db():
+        session = AsyncMock()
+        yield session
+
+    app.dependency_overrides[get_current_candidate] = _cand
+    app.dependency_overrides[get_db] = _db
+
+    res = TestClient(app).post(f"/api/v1/candidate/test/{assessment_id}/submit", json={})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["package_complete"] is True
+    assert body["status"] == "COMPLETED"
+    assert enqueued == [(candidate.id, assessment_id, False)]
+    assert refreshed == [(candidate.id, False)]
 
 
 def test_invite_route_enqueues_with_invite_job_id(monkeypatch):
