@@ -10,6 +10,7 @@ from app.database import get_db
 from app.jobs.enqueue import (
     enqueue_finalize_and_score_ai,
     enqueue_finalize_expired_assessment,
+    enqueue_refresh_report_synthesis,
 )
 from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateTestResponse
@@ -298,6 +299,10 @@ async def submit_test(
     await enqueue_finalize_and_score_ai(
         candidate.id, assessment_id, await_inline=False
     )
+    # package_complete is completed_count == total_count for this package.
+    # Queue narrative synthesis on the worker; do not wait on Gemini here.
+    if package_complete:
+        await enqueue_refresh_report_synthesis(candidate.id, await_inline=False)
     # Scores stay server-side: echoing them lets candidates calibrate answers
     # across modules or share keyed results.
     return {

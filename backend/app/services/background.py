@@ -196,10 +196,11 @@ async def score_ai_for_candidate(
 async def refresh_report_synthesis(candidate_id: UUID) -> None:
     """Regenerate missing technical grades and the report synthesis off the request path.
 
-    Queued by report views when the cached synthesis is missing, stale, or
-    failed past its cooldown. Technical grades run first because the synthesis
-    cache key covers technical scores; grading afterwards would immediately
-    invalidate the narrative. Skips when another AI job for this candidate is
+    Queued when the last assessment is submitted and when a report view finds
+    the cached synthesis missing, stale, or failed. Technical grades run first
+    because the synthesis cache key covers technical scores; grading afterwards
+    would immediately invalidate the narrative. Skips when another AI job for
+    this candidate is
     already running so report polling cannot stack duplicate Gemini calls.
 
     Args:
@@ -268,7 +269,10 @@ async def refresh_report_synthesis(candidate_id: UUID) -> None:
             try:
                 await CandidateService.evaluate_jd_if_package_complete(session, candidate)
             except Exception:
-                logger.exception("report_synthesis_refresh_failed candidate_id=%s", candidate_id)
+                logger.exception(
+                    "report_synthesis_failed",
+                    extra={"candidate_id": str(candidate_id)},
+                )
     await prewarm_report_pdf(candidate_id)
 
 

@@ -338,14 +338,15 @@ def test_report_data_returns_mindq_report_shape(app, corp_id, candidate_id, synt
     assert synthesis_stub["refreshed"] == []
 
 
-def test_report_data_falls_back_when_synthesis_fails(app, corp_id, candidate_id, synthesis_stub):
+def test_report_data_requeues_when_synthesis_failed(app, corp_id, candidate_id, synthesis_stub):
+    """Opening a failed report enqueues synthesis instead of staying failed."""
     results, _gm = _full_fixture(candidate_id, corp_id)
     synthesis_stub["result"] = CachedSynthesis(None, "failed", needs_refresh=False)
     res = _client(app, results).get(f"/api/v1/candidates/{candidate_id}/report-data")
     assert res.status_code == 200
     body = res.json()
-    assert body["synthesis_status"] == "failed"
-    assert synthesis_stub["refreshed"] == []
+    assert body["synthesis_status"] == "generating"
+    assert synthesis_stub["refreshed"] == [candidate_id]
     assert body["executive_summary"] == ""
     assert body["strengths"] == []
     assert body["areas_to_explore"] == []

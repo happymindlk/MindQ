@@ -102,7 +102,8 @@ async def test_read_cached_corrupt_payload_is_stale_not_500():
 
 
 @pytest.mark.asyncio
-async def test_read_cached_recent_failure_waits_for_cooldown():
+async def test_read_cached_recent_failure_still_requests_refresh():
+    """A failed row is retried on the next report open, not left stuck."""
     outcomes = _outcomes()
     digest = synthesis_cache_key(PACKAGE.description, outcomes)
     row = _row(
@@ -112,7 +113,7 @@ async def test_read_cached_recent_failure_waits_for_cooldown():
         generated_at=NOW - FAILED_RETRY_COOLDOWN + timedelta(seconds=30),
     )
     cached = await _read(row, outcomes)
-    assert (cached.state, cached.needs_refresh) == ("failed", False)
+    assert (cached.state, cached.needs_refresh) == ("failed", True)
 
 
 @pytest.mark.asyncio

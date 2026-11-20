@@ -186,14 +186,20 @@ async def enqueue_finalize_and_score_ai(
     )
 
 
-async def enqueue_refresh_report_synthesis(candidate_id: UUID) -> Any:
+async def enqueue_refresh_report_synthesis(
+    candidate_id: UUID,
+    *,
+    await_inline: bool = True,
+) -> Any:
     """Queue technical backfill + JD synthesis refresh for a candidate.
 
     Args:
         candidate_id: Candidate whose report needs regeneration.
+        await_inline: When False, a missing Redis pool spawns the work
+            instead of awaiting Gemini on the caller (candidate submit).
 
     Returns:
-        ARQ job, ``None`` when deduped, or inline result.
+        ARQ job, ``None`` when deduped, inline result, or spawned Task.
     """
 
     async def _run() -> None:
@@ -204,6 +210,7 @@ async def enqueue_refresh_report_synthesis(candidate_id: UUID) -> Any:
         coroutine_factory=_run,
         job_id=_job_id_refresh(candidate_id),
         args=(str(candidate_id),),
+        await_inline=await_inline,
     )
 
 

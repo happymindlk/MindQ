@@ -19,6 +19,8 @@ import logging
 import random
 import re
 import time
+
+import httpx
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -263,8 +265,28 @@ def _error_code_status(exc: BaseException) -> tuple[int | None, str]:
     return (code if isinstance(code, int) else None), status
 
 
+def _is_network_or_timeout(exc: BaseException) -> bool:
+    """True for socket failures and read/connect timeouts.
+
+    Args:
+        exc: Exception raised by the SDK or the HTTP client.
+
+    Returns:
+        Whether the failure is a transient transport error.
+    """
+    if isinstance(exc, (TimeoutError, ConnectionError, httpx.TimeoutException, httpx.NetworkError)):
+        return True
+    text = str(exc).lower()
+    return any(
+        needle in text
+        for needle in ("timed out", "read timeout", "readtimeout", "connect timeout")
+    )
+
+
 def is_retryable(exc: BaseException) -> bool:
-    """True for rate-limit and transient Gemini/provider failures."""
+    """True for rate-limit, unavailable, and transient network/timeout failures."""
+    if _is_network_or_timeout(exc):
+        return True
     code, status = _error_code_status(exc)
     if code in _RETRYABLE_CODES or status in _RETRYABLE_STATUS:
         return True
@@ -391,12 +413,18 @@ def _log_retry(attempt: int, attempts: int, delay: float, exc: BaseException) ->
     )
 
 
-def retry_sync(fn: Callable[[], T], *, sleep: Callable[[float], None] = time.sleep) -> T:
-    """Run ``fn`` up to ``max_attempts()`` times with exponential backoff.
+def retry_sync(
+    fn: Callable[[], T],
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    attempts: int | None = None,
+) -> T:
+    """Run ``fn`` up to ``attempts`` (or ``max_attempts()``) times with backoff.
 
     Args:
         fn: Zero-arg callable performing one Gemini request.
         sleep: Injected sleeper (tests replace this).
+        attempts: Explicit attempt cap. ``None`` uses the active retry profile.
 
     Returns:
         The value returned by ``fn``.
@@ -404,18 +432,18 @@ def retry_sync(fn: Callable[[], T], *, sleep: Callable[[float], None] = time.sle
     Raises:
         The last exception when retries are exhausted or the error is not retryable.
     """
-    attempts = max_attempts()
+    total = max_attempts() if attempts is None else max(1, int(attempts))
     jitter = is_background_profile()
     last: BaseException | None = None
-    for attempt in range(1, attempts + 1):
+    for attempt in range(1, total + 1):
         try:
             return fn()
         except Exception as exc:  # noqa: BLE001 - classify then re-raise
             last = exc
-            if not _should_retry(exc) or attempt >= attempts:
+            if not _should_retry(exc) or attempt >= total:
                 raise
             delay = retry_delay_seconds(attempt, jitter=jitter)
-            _log_retry(attempt, attempts, delay, exc)
+            _log_retry(attempt, total, delay, exc)
             sleep(delay)
     assert last is not None
     raise last
@@ -553,12 +581,18 @@ async def call_with_fallback_async(call: Callable[[str], Awaitable[T]]) -> T:
     raise AssertionError("model chain is never empty")
 
 
-def generate_content_sync(*, contents: str, config: Any) -> Any:
+def generate_content_sync(
+    *,
+    contents: str,
+    config: Any,
+    attempts: int | None = None,
+) -> Any:
     """Synchronous ``models.generate_content`` with retry and model fallback.
 
     Args:
         contents: User prompt.
         config: ``google.genai.types.GenerateContentConfig``.
+        attempts: Per-model attempt cap. ``None`` uses the active retry profile.
 
     Returns:
         SDK response object.
@@ -571,7 +605,8 @@ def generate_content_sync(*, contents: str, config: Any) -> Any:
                 model=model,
                 contents=contents,
                 config=config,
-            )
+            ),
+            attempts=attempts,
         )
 
     return call_with_fallback_sync(_call)

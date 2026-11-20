@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import String, Uuid, inspect as sa_inspect
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from app.prompts.jd_scoring import PROMPT_VERSION, SYSTEM_INSTRUCTION, build_user_prompt
+from app.services import gemini_client
 from app.schemas.jd_evaluation import ReportNarrative
 from app.services.jd_scoring import (
     BANNED_LANGUAGE_ERROR,
@@ -26,6 +28,10 @@ from app.services.jd_scoring import (
     hash_job_description,
     parse_evaluation_json,
     resolve_job_description,
+    SYNTHESIS_MAX_ATTEMPTS,
+    SYNTHESIS_THINKING_BUDGET,
+    SYNTHESIS_TIMEOUT_MS,
+    complete_with_gemini,
     score_against_jd,
     score_against_jd_with_model,
     synthesis_cache_key,
@@ -1082,6 +1088,107 @@ async def test_get_or_evaluate_persists_failed_status_on_provider_error(monkeypa
     assert row.payload == {}
     assert row.overall_fit is None
     assert not evaluation_is_ok(row)
+
+
+@pytest.mark.asyncio
+async def test_terminal_synthesis_error_logs_exception_and_records_last_error(
+    monkeypatch, caplog
+):
+    kwargs = _scoring_kwargs()
+    session = _patch_write_session(monkeypatch, FakeSession())
+
+    def complete(_prompt: str) -> str:
+        raise RuntimeError("synthesis exploded")
+
+    with caplog.at_level(logging.ERROR, logger="app.services.jd_scoring"):
+        evaluation, status = await JdScoringService.get_or_evaluate(
+            session, complete=complete, **kwargs
+        )
+
+    assert evaluation is None
+    assert status == "failed"
+    assert session.added[0].last_error == "synthesis exploded"
+    records = [r for r in caplog.records if r.message == "report_synthesis_failed"]
+    assert records
+    assert records[-1].candidate_id == str(kwargs["candidate"].id)
+    assert records[-1].exc_info is not None
+
+
+def _stub_gemini_client(monkeypatch, generate_content):
+    """Point synthesis at a fake SDK client and skip real backoff sleeps."""
+    client = SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
+    monkeypatch.setattr(gemini_client, "get_client", lambda: client)
+    monkeypatch.setattr(gemini_client.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(gemini_client.settings, "GEMINI_FALLBACK_MODELS", "")
+    monkeypatch.setattr(gemini_client.settings, "GEMINI_MODEL", "gemini-3.5-flash")
+    monkeypatch.setattr(gemini_client.settings, "GEMINI_MAX_RETRIES", 3)
+    monkeypatch.setattr(gemini_client.settings, "GEMINI_BACKGROUND_MAX_RETRIES", 5)
+
+
+def _transient_gemini_errors():
+    from google.genai.errors import ClientError, ServerError
+
+    return [
+        ServerError(503, {"error": {"status": "UNAVAILABLE", "message": "busy"}}),
+        ClientError(429, {"error": {"status": "RESOURCE_EXHAUSTED", "message": "quota"}}),
+        httpx.ReadTimeout("The read operation timed out"),
+    ]
+
+
+@pytest.mark.parametrize("error_index", [0, 1, 2])
+def test_complete_with_gemini_retries_transient_errors_then_succeeds(
+    monkeypatch, error_index
+):
+    calls = {"n": 0}
+    seen: dict = {}
+
+    def generate_content(*, model, contents, config):
+        calls["n"] += 1
+        seen["config"] = config
+        if calls["n"] < SYNTHESIS_MAX_ATTEMPTS:
+            raise _transient_gemini_errors()[error_index]
+        return SimpleNamespace(text='{"ok": true}', model_version=model)
+
+    _stub_gemini_client(monkeypatch, generate_content)
+    with gemini_client.background_retry_profile():
+        result = complete_with_gemini("prompt")
+
+    assert calls["n"] == SYNTHESIS_MAX_ATTEMPTS
+    assert result == '{"ok": true}'
+    assert seen["config"].thinking_config.thinking_budget == SYNTHESIS_THINKING_BUDGET
+    assert seen["config"].http_options.timeout == SYNTHESIS_TIMEOUT_MS
+
+
+def test_complete_with_gemini_stops_after_three_persistent_503s(monkeypatch):
+    from google.genai.errors import ServerError
+
+    calls = {"n": 0}
+
+    def generate_content(*, model, contents, config):
+        calls["n"] += 1
+        raise ServerError(503, {"error": {"status": "UNAVAILABLE", "message": "busy"}})
+
+    _stub_gemini_client(monkeypatch, generate_content)
+    with gemini_client.background_retry_profile():
+        with pytest.raises(ServerError):
+            complete_with_gemini("prompt")
+    assert calls["n"] == SYNTHESIS_MAX_ATTEMPTS
+
+
+def test_complete_with_gemini_does_not_retry_terminal_client_errors(monkeypatch):
+    from google.genai.errors import ClientError
+
+    calls = {"n": 0}
+
+    def generate_content(*, model, contents, config):
+        calls["n"] += 1
+        raise ClientError(400, {"error": {"status": "INVALID_ARGUMENT", "message": "bad"}})
+
+    _stub_gemini_client(monkeypatch, generate_content)
+    with gemini_client.background_retry_profile():
+        with pytest.raises(ClientError):
+            complete_with_gemini("prompt")
+    assert calls["n"] == 1
 
 
 @pytest.mark.asyncio
