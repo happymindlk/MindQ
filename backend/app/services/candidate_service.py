@@ -1170,14 +1170,31 @@ class CandidateService:
         Hot path is one locked join (progress + question containment, questions
         JSONB deferred) plus ``INSERT ... ON CONFLICT DO UPDATE`` — no extra
         SELECT round-trips and no full bank load.
+
+        Past the write grace window (``expires_at + 15s``) the late answer is
+        rejected, ``overtime`` is set, and the attempt is auto-finalized from
+        answers already saved before the deadline.
         """
         started = time.perf_counter()
-        assessment, progress = await CandidateService._gate_autosave(
-            session,
-            candidate,
-            save_data.assessment_id,
-            str(save_data.question_id),
-        )
+        try:
+            assessment, progress = await CandidateService._gate_autosave(
+                session,
+                candidate,
+                save_data.assessment_id,
+                str(save_data.question_id),
+            )
+        except AssessmentTimeExpiredError:
+            # Reject this write; finalize with pre-expiry answers only.
+            try:
+                await CandidateService.submit_test(
+                    session,
+                    candidate,
+                    save_data.assessment_id,
+                    pending_responses=None,
+                )
+            except AssessmentAlreadySubmittedError:
+                pass
+            raise
 
         elapsed = _elapsed_decimal(save_data.elapsed_seconds)
         saved_at = _utcnow()

@@ -14,7 +14,7 @@ from app.schemas.question_payload import (
 )
 
 # Network latency + auto-submit round-trip allowance after a timed deadline.
-STRICT_GRACE_SECONDS = 30
+STRICT_GRACE_SECONDS = 15
 
 
 def shuffle_questions(questions: list[dict[str, Any]], seed: str) -> list[dict[str, Any]]:

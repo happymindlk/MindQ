@@ -7,19 +7,29 @@ from app.schemas.question_payload import rewrite_local_media_url
 
 
 # Keep in sync with ``client_package.ANSWER_KEYS`` — candidate portal defense in depth.
+# Anything a candidate could use to reverse-engineer scoring must stay here.
 _ANSWER_KEY_ALIASES = (
     "correct_answer",
     "correct_answer_or_rubric",
+    "correct_option",
     "benchmark_rubric",
+    "evaluation_rubric",
     "answer",
     "scoring_key",
+    "scoring_profile",
     "is_correct",
     "correct_keys",
     "option_weights",
+    "weight",
+    "weights",
+    "points",
     "accepted_answers",
     "reverse_scored",
     "sme_rationale",
     "facet",
+    "facet_scores",
+    "builder_type",
+    "match",
 )
 
 

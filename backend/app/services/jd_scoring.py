@@ -26,12 +26,13 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.database import SessionLocal
+from app.exceptions import SynthesisCapExceeded
 from app.models.assessment import Assessment
 from app.models.candidate import Candidate
 from app.models.candidate_evaluation import CandidateEvaluation
@@ -79,15 +80,56 @@ _WATCH_WORD_RETRIES = 1
 SYNTHESIS_THINKING_BUDGET = 512
 # Per-attempt client timeout. SDK ``HttpOptions.timeout`` is milliseconds.
 SYNTHESIS_TIMEOUT_MS = 60_000
-# Transient 429 / 503 / network timeouts. Terminal errors are not retried.
+# Transient 429 / 503 / network timeouts within a single Gemini run.
 SYNTHESIS_MAX_ATTEMPTS = 3
+# Hard lifetime cap on discrete synthesis *runs* per candidate (cost-drain).
+# Does not count in-run capacity retries; each entry into
+# ``score_against_jd_with_model`` (via ``get_or_evaluate``) claims one slot.
+MAX_CANDIDATE_SYNTHESIS_ATTEMPTS = 3
 # Report polling re-reads the cache every few seconds. ``claim_report_refresh``
 # uses this window so a persistent provider outage cannot turn each poll into
 # a paid Gemini call. A failed row itself always requests a refresh on open.
 # held_for_review never auto-retries.
 FAILED_RETRY_COOLDOWN = timedelta(minutes=5)
 
-CacheState = Literal["ok", "skipped", "missing", "stale", "failed", "held_for_review"]
+
+def synthesis_cap_reached(
+    attempt_count: int | None,
+    *,
+    max_attempts: int = MAX_CANDIDATE_SYNTHESIS_ATTEMPTS,
+) -> bool:
+    """True when this candidate has exhausted their synthesis budget.
+
+    Args:
+        attempt_count: Persisted ``candidates.synthesis_attempt_count``.
+        max_attempts: Lifetime run cap (default 3).
+
+    Returns:
+        True when ``attempt_count >= max_attempts``.
+    """
+    return int(attempt_count or 0) >= int(max_attempts)
+
+
+def assert_synthesis_attempt_allowed(
+    attempt_count: int | None,
+    *,
+    max_attempts: int = MAX_CANDIDATE_SYNTHESIS_ATTEMPTS,
+) -> None:
+    """Raise when a new synthesis run would exceed the per-candidate cap.
+
+    Args:
+        attempt_count: Persisted attempt counter before claiming a new run.
+        max_attempts: Lifetime run cap (default 3).
+
+    Raises:
+        SynthesisCapExceeded: Budget already exhausted.
+    """
+    if synthesis_cap_reached(attempt_count, max_attempts=max_attempts):
+        raise SynthesisCapExceeded()
+
+CacheState = Literal[
+    "ok", "skipped", "missing", "stale", "failed", "held_for_review", "capped"
+]
 
 
 @dataclass(frozen=True)
@@ -1186,6 +1228,37 @@ class JdScoringService:
         evidence = build_evidence(assessments, progresses, responses)
         assessment_scores = prompt_assessments(outcomes)
 
+        try:
+            await JdScoringService.claim_synthesis_attempt(session, candidate_id)
+        except SynthesisCapExceeded as exc:
+            logger.warning(
+                "report_synthesis_cap_exceeded candidate_id=%s attempts=%s",
+                candidate_id,
+                getattr(candidate, "synthesis_attempt_count", None),
+            )
+            await JdScoringService._record_failure(
+                candidate_id,
+                corporate_id,
+                package_id,
+                digest,
+                str(exc),
+            )
+            return None, "capped"
+        except Exception as exc:
+            # Claim must never raise into the report/submit path.
+            logger.exception(
+                "report_synthesis_claim_failed",
+                extra={"candidate_id": str(candidate_id)},
+            )
+            await JdScoringService._record_failure(
+                candidate_id,
+                corporate_id,
+                package_id,
+                digest,
+                _exception_text(exc),
+            )
+            return None, "failed"
+
         # Do not hold an open Supabase/pooler transaction across Gemini
         # (often 40–60s with retries); idle-in-transaction kills the socket.
         await JdScoringService._release_read_transaction(session)
@@ -1279,6 +1352,46 @@ class JdScoringService:
             (usage or {}).get("estimated_cost_usd"),
         )
         return evaluation, "generated"
+
+    @staticmethod
+    async def claim_synthesis_attempt(
+        session: AsyncSession,
+        candidate_id: UUID,
+        *,
+        max_attempts: int = MAX_CANDIDATE_SYNTHESIS_ATTEMPTS,
+    ) -> int:
+        """Atomically reserve one synthesis run slot for ``candidate_id``.
+
+        Increments ``candidates.synthesis_attempt_count`` only when it is still
+        below ``max_attempts``. In-run Gemini 429/503 retries do not call this.
+
+        Args:
+            session: Async DB session (must still be open).
+            candidate_id: Candidate about to enter a Gemini synthesis run.
+            max_attempts: Lifetime run cap (default 3).
+
+        Returns:
+            The new attempt count after a successful claim.
+
+        Raises:
+            SynthesisCapExceeded: The candidate has already used all slots.
+        """
+        stmt = (
+            update(Candidate)
+            .where(
+                Candidate.id == candidate_id,
+                Candidate.synthesis_attempt_count < int(max_attempts),
+            )
+            .values(
+                synthesis_attempt_count=Candidate.synthesis_attempt_count + 1,
+            )
+            .returning(Candidate.synthesis_attempt_count)
+        )
+        new_count = (await session.execute(stmt)).scalar_one_or_none()
+        if new_count is None:
+            raise SynthesisCapExceeded()
+        await session.commit()
+        return int(new_count)
 
     @staticmethod
     async def _release_read_transaction(session: AsyncSession) -> None:

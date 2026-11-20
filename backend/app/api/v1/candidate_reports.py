@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import HRUserContext, get_current_hr_user, is_ops_role
 from app.database import get_db
 from app.jobs.enqueue import enqueue_refresh_report_synthesis
+from app.exceptions import SynthesisCapExceeded
 from app.models.assessment import Assessment
 from app.models.candidate import Candidate
+from app.models.candidate_evaluation import CandidateEvaluation
 from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.models.corporate import Corporate
@@ -30,7 +32,12 @@ from app.services.background import (
     is_ai_job_inflight,
 )
 from app.services.client_package import PSYCHOMETRIC, TECHNICAL, _strip_answer_keys
-from app.services.jd_scoring import CachedSynthesis, JdScoringService
+from app.services.jd_scoring import (
+    CachedSynthesis,
+    JdScoringService,
+    evaluation_is_readable,
+    synthesis_cap_reached,
+)
 from app.services.report_synthesis import (
     build_category_summaries,
     build_competency_breakdown,
@@ -208,6 +215,25 @@ async def get_candidate_report_data(
     if not is_ops_role(hr.role) and candidate.corporate_id != hr.corporate_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
+    if synthesis_cap_reached(getattr(candidate, "synthesis_attempt_count", 0)):
+        # Cap blocks further paid Gemini runs; surface a clear 429 so clients
+        # stop polling / retrying synthesis for this candidate.
+        eval_row = (
+            await db.execute(
+                select(CandidateEvaluation).where(
+                    CandidateEvaluation.candidate_id == candidate.id
+                )
+            )
+        ).scalars().first()
+        if not evaluation_is_readable(eval_row):
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "code": "SYNTHESIS_CAP",
+                    "message": SynthesisCapExceeded.detail,
+                },
+            )
+
     report = await build_technical_report_data(db, candidate)
     log_report_accessed(
         actor_id=hr.user_id,
@@ -334,6 +360,7 @@ async def _resolve_synthesis_status(
     *,
     missing_open_evals: bool,
     queue_refresh: bool,
+    synthesis_attempts: int = 0,
 ) -> SynthesisStatus:
     """Map the cache state to an API status, queueing a refresh when one is due.
 
@@ -342,6 +369,7 @@ async def _resolve_synthesis_status(
         cached: Read-only cache lookup result.
         missing_open_evals: Whether technical open-ended items still lack a grade.
         queue_refresh: When False (PDF warmers), never enqueue new LLM work.
+        synthesis_attempts: Lifetime Gemini synthesis runs for this candidate.
 
     Returns:
         ``ok``/``skipped``/``held_for_review`` from the cache, ``generating``
@@ -350,16 +378,21 @@ async def _resolve_synthesis_status(
     """
     # Failed and missing rows are re-queued on open even when an older caller
     # left needs_refresh false. claim_report_refresh still stops poll storms.
+    capped = synthesis_cap_reached(synthesis_attempts)
     wants_refresh = (
-        cached.needs_refresh
-        or missing_open_evals
-        or cached.state in ("failed", "missing")
+        not capped
+        and (
+            cached.needs_refresh
+            or missing_open_evals
+            or cached.state in ("failed", "missing")
+        )
     )
     if cached.state in ("ok", "skipped", "held_for_review"):
         if (
             cached.state != "held_for_review"
             and queue_refresh
             and missing_open_evals
+            and not capped
             and claim_report_refresh(candidate_id)
         ):
             await enqueue_refresh_report_synthesis(candidate_id)
@@ -476,6 +509,9 @@ async def assemble_technical_report_data(
             synthesis_cache,
             missing_open_evals=missing_open_evals,
             queue_refresh=queue_refresh,
+            synthesis_attempts=int(
+                getattr(candidate, "synthesis_attempt_count", 0) or 0
+            ),
         )
     elif queue_refresh and missing_open_evals and claim_report_refresh(candidate.id):
         await enqueue_refresh_report_synthesis(candidate.id)

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, DateTime, ForeignKey, Uuid
+from sqlalchemy import Integer, String, DateTime, ForeignKey, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -26,6 +26,10 @@ class Candidate(Base):
     active_device_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     session_last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # Lifetime Gemini report-synthesis runs (excludes in-run 429/503 retries).
+    synthesis_attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
     )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

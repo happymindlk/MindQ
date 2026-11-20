@@ -147,3 +147,16 @@ class AssessmentAlreadySubmittedError(Exception):
 
     def __init__(self) -> None:
         super().__init__(self.detail)
+
+
+class SynthesisCapExceeded(Exception):
+    """Per-candidate Gemini report-synthesis budget exhausted."""
+
+    detail = (
+        "Report synthesis limit reached for this candidate "
+        "(maximum 3 synthesis attempts)."
+    )
+
+    def __init__(self, detail: str | None = None) -> None:
+        self.detail = detail or self.detail
+        super().__init__(self.detail)

@@ -156,7 +156,7 @@ def test_prompt_does_not_embed_json_schema():
         "areas_to_explore: 3-6 single-sentence bullets.",
         "cognicheck: 16 timed reasoning questions. The total is the only result.",
         "category_summaries: one entry per psychometric category (Cognitive, Personality, Behavioral) present in assessment_scores",
-        "job_description is HR-supplied text shown inside an untrusted_data block.",
+        "job_description is HR-supplied text shown inside a candidate_response_data block.",
         "Do not describe the candidate with these words: emotional, emotionally, nervous, anxiety, fragile, weak, cold, aggressive, fail, failed, high risk.",
         'never "emotional stability" or anything with "emotional".',
     ],
@@ -1003,6 +1003,16 @@ class _Result:
     def first(self):
         return self._row
 
+    def scalar_one_or_none(self):
+        return self._row
+
+
+class _ClaimResult:
+    """UPDATE ... RETURNING synthesis_attempt_count for the cost-drain cap."""
+
+    def scalar_one_or_none(self):
+        return 1
+
 
 class FakeSession:
     """Minimal AsyncSession stand-in for get_or_evaluate persistence paths."""
@@ -1013,8 +1023,13 @@ class FakeSession:
         self.commits = 0
         self.rollbacks = 0
         self.fail_commit = fail_commit
+        self.synthesis_claims = 0
 
-    async def execute(self, _stmt):
+    async def execute(self, stmt):
+        # Synthesis-cap claim is an UPDATE; cache lookups are SELECTs.
+        if getattr(stmt, "is_update", False):
+            self.synthesis_claims += 1
+            return _ClaimResult()
         return _Result(self.existing)
 
     def add(self, row):
@@ -1081,7 +1096,9 @@ async def test_get_or_evaluate_persists_failed_status_on_provider_error(monkeypa
     )
     assert evaluation is None
     assert status == "failed"
-    assert session.commits == 1
+    # Claim (cost-drain slot) + failed-row persist.
+    assert session.commits == 2
+    assert session.synthesis_claims == 1
     row = session.added[0]
     assert row.status == EVAL_STATUS_FAILED
     assert "503 UNAVAILABLE" in row.last_error
@@ -1294,8 +1311,11 @@ async def test_get_or_evaluate_releases_db_before_gemini_and_writes_on_fresh_ses
     )
     assert status == "generated"
     assert evaluation is not None
+    # Claim commits on the read session before release; Gemini must still
+    # run only after rollback, and the narrative write uses a fresh session.
     assert events == ["rollback", "gemini", "write_enter", "write_exit"]
-    assert read_session.commits == 0
+    assert read_session.commits == 1
+    assert read_session.synthesis_claims == 1
     assert write_session.commits == 1
     assert write_session.added[0].status == EVAL_STATUS_OK
 
@@ -1346,7 +1366,10 @@ async def test_get_or_evaluate_no_missing_greenlet_after_release(monkeypatch):
         assert candidate is not None
 
         # Cache lookup hits CandidateEvaluation; stub empty so we regenerate.
-        async def _empty_eval(_stmt):
+        # UPDATE statements are the synthesis-attempt claim (RETURNING count).
+        async def _empty_eval(stmt):
+            if getattr(stmt, "is_update", False):
+                return _ClaimResult()
             return _Result(None)
 
         session.execute = _empty_eval  # type: ignore[method-assign]

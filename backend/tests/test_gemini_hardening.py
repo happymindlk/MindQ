@@ -277,8 +277,12 @@ class FakeSession:
         self.existing = existing
         self.added: list[Any] = []
         self.commits = 0
+        self.synthesis_claims = 0
 
-    async def execute(self, _stmt):
+    async def execute(self, stmt):
+        if getattr(stmt, "is_update", False):
+            self.synthesis_claims += 1
+            return _ClaimResult()
         return _Result(self.existing)
 
     def add(self, obj) -> None:
@@ -302,6 +306,11 @@ def _patch_write_session(monkeypatch, session: FakeSession) -> FakeSession:
     return session
 
 
+class _ClaimResult:
+    def scalar_one_or_none(self):
+        return 1
+
+
 class _Result:
     def __init__(self, row):
         self._row = row
@@ -310,6 +319,9 @@ class _Result:
         return self
 
     def first(self):
+        return self._row
+
+    def scalar_one_or_none(self):
         return self._row
 
 
