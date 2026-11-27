@@ -356,7 +356,7 @@ async def test_load_runner_context_locks_progress_without_outer_join_for_update(
     )
 
     join_result = MagicMock()
-    join_result.first.return_value = (assessment, progress, None, None)
+    join_result.first.return_value = (assessment, progress, None, None, None)
     lock_result = MagicMock()
     lock_result.scalars.return_value.first.return_value = locked
 
@@ -391,7 +391,7 @@ async def test_load_runner_context_skips_lock_when_progress_missing():
     assessment = SimpleNamespace(id=assessment_id, package_id=candidate.package_id)
 
     join_result = MagicMock()
-    join_result.first.return_value = (assessment, None, None, None)
+    join_result.first.return_value = (assessment, None, None, None, None)
     session = AsyncMock()
     session.execute = AsyncMock(return_value=join_result)
 

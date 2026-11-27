@@ -1150,6 +1150,62 @@ class JdScoringService:
         return CachedSynthesis(None, "failed", needs_refresh=True)
 
     @staticmethod
+    async def current_input_digest(
+        session: AsyncSession, *, candidate: Candidate
+    ) -> str | None:
+        """Synthesis cache key for the candidate's *current* inputs (no Gemini).
+
+        ``refresh_report_synthesis`` compares this before and after a run: a
+        different digest means scores / JD changed while it ran (and any refresh
+        requested meanwhile was deduped), so another pass is needed (P2-03).
+
+        Args:
+            session: Async SQLAlchemy session.
+            candidate: Candidate being reported on.
+
+        Returns:
+            The digest, or None when there is no JD or no completed module.
+        """
+        package = (
+            await session.execute(select(Package).where(Package.id == candidate.package_id))
+        ).scalars().first()
+        jd = resolve_job_description(package)
+        if not jd:
+            return None
+        assessments = list(
+            (
+                await session.execute(
+                    select(Assessment)
+                    .where(Assessment.package_id == candidate.package_id)
+                    .order_by(Assessment.position)
+                )
+            ).scalars().all()
+        )
+        progresses = list(
+            (
+                await session.execute(
+                    select(CandidateProgress).where(
+                        CandidateProgress.candidate_id == candidate.id
+                    )
+                )
+            ).scalars().all()
+        )
+        responses = list(
+            (
+                await session.execute(
+                    select(CandidateResponse).where(
+                        CandidateResponse.candidate_id == candidate.id
+                    )
+                )
+            ).scalars().all()
+        )
+        catalog = await load_catalog_categories(session, assessments)
+        outcomes = build_module_outcomes(assessments, progresses, responses, catalog)
+        if not outcomes:
+            return None
+        return synthesis_cache_key(jd, outcomes)
+
+    @staticmethod
     async def get_or_evaluate(
         session: AsyncSession,
         *,

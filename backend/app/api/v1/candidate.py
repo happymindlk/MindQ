@@ -2,7 +2,6 @@ from uuid import UUID
 from typing import NoReturn
 import logging
 import time
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,7 +14,11 @@ from app.jobs.enqueue import (
 from app.models.candidate import Candidate
 from app.schemas.candidate import CandidateTestResponse
 from app.schemas.response import ResponseSave, ResponseSubmit
-from app.services.candidate_service import CandidateService, assessment_duration_seconds
+from app.services.candidate_service import (
+    CandidateService,
+    assessment_duration_seconds,
+    request_clock,
+)
 from app.services.runner_payload import (
     build_runner_payload,
     remaining_seconds,
@@ -207,7 +210,8 @@ async def start_test(
     ) as exc:
         _raise_integrity(exc)
 
-    now = datetime.now(timezone.utc)
+    # Same DB clock the gate used, so remaining_seconds matches the deadline.
+    now = request_clock(db)
     duration = assessment_duration_seconds(assessment)
     expires_at = getattr(progress, "expires_at", None)
     write_at = strict_deadline(
@@ -219,6 +223,7 @@ async def start_test(
             candidate.id,
             progress.assessment_id,
             defer_until=expires_at,
+            started_at=progress.started_at,
         )
     return {
         "assessment_id": str(assessment.id),

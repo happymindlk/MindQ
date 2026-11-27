@@ -16,6 +16,7 @@ from .global_module import GlobalModule
 from .package_module import PackageModule
 from .custom_technical_question import CustomTechnicalQuestion
 from .template_question import TemplateQuestion
+from .sent_email import SentEmail
 
 __all__ = [
     "AdminLoginChallenge",
@@ -36,4 +37,5 @@ __all__ = [
     "PackageModule",
     "CustomTechnicalQuestion",
     "TemplateQuestion",
+    "SentEmail",
 ]

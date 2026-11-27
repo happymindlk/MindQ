@@ -9,6 +9,7 @@ from fastapi import (
     APIRouter,
     Depends,
     File,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -72,7 +73,17 @@ from app.services.package_generator import (
     save_blueprint_package,
 )
 from app.services.gemini_client import overall_deadline_seconds
-from app.services.jd_pdf import JdPdfError, JdPdfTooLargeError, extract_jd_text
+from app.services.jd_pdf import (
+    MAX_PDF_BYTES,
+    JdPdfError,
+    JdPdfTooLargeError,
+    extract_jd_text,
+)
+from app.services.upload_limits import (
+    UploadTooLargeError,
+    check_content_length,
+    read_upload_capped,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +142,7 @@ async def generate_package(
 @router.post("/jd/extract-pdf", response_model=JdPdfExtractResponse)
 async def extract_jd_pdf(
     file: UploadFile = File(...),
+    content_length: str | None = Header(None),
     hr: HRUserContext = Depends(get_current_ops_user),
 ):
     """Extract JD text from an uploaded PDF (nothing is stored).
@@ -151,7 +163,12 @@ async def extract_jd_pdf(
             a readable text-layer PDF.
     """
     _ = hr  # Auth gate; extraction is stateless.
-    raw = await file.read()
+    try:
+        # P2-09: bounded chunked read instead of loading the whole upload.
+        check_content_length(content_length, MAX_PDF_BYTES)
+        raw = await read_upload_capped(file, MAX_PDF_BYTES)
+    except UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail="PDF must be 10 MB or smaller.") from exc
     try:
         # Parsing is CPU-bound; keep it off the event loop.
         result = await asyncio.to_thread(extract_jd_text, raw)

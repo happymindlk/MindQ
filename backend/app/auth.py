@@ -19,13 +19,14 @@ from typing import Any
 
 import jwt
 from fastapi import Depends, Header, HTTPException
+from sqlalchemy import func, or_, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.config import settings
 from app.database import get_db
 from app.models.candidate import Candidate
 from app.services.candidate_service import CandidateService
-from app.services.candidate_session_lock import touch_session_last_seen
 
 CANDIDATE_AUDIENCE = "happy-mind-candidate"
 CLIENT_AUDIENCE = "mindq-client"
@@ -98,10 +99,52 @@ async def get_current_candidate(
     candidate = await CandidateService.get_candidate(db, candidate_id)
     if not candidate:
         raise HTTPException(status_code=401, detail="Candidate not found")
-    touch_session_last_seen(candidate)
-    await db.commit()
-    await db.refresh(candidate)
+    await touch_last_seen_throttled(db, candidate)
     return candidate
+
+
+# P2-06: autosave fires many authenticated requests per minute; stamping
+# ``session_last_seen_at`` on each one made ``candidates`` a hot row (UPDATE +
+# COMMIT + refresh per request). The device lock window is 3 minutes, so a
+# 60 s resolution is plenty.
+LAST_SEEN_THROTTLE_SECONDS = 60
+
+
+async def touch_last_seen_throttled(db: AsyncSession, candidate: Candidate) -> bool:
+    """Refresh ``session_last_seen_at`` at most once per throttle window.
+
+    One conditional ``UPDATE ... WHERE session_last_seen_at < now() - 60s``
+    on the database clock: inside the window it matches no row, so nothing is
+    written and no commit is issued.
+
+    Args:
+        db: Request session.
+        candidate: Authenticated candidate (in-memory copy updated on write).
+
+    Returns:
+        True when the row was written.
+    """
+    stale_before = func.now() - text(f"interval '{LAST_SEEN_THROTTLE_SECONDS} seconds'")
+    result = await db.execute(
+        update(Candidate)
+        .where(
+            Candidate.id == candidate.id,
+            or_(
+                Candidate.session_last_seen_at.is_(None),
+                Candidate.session_last_seen_at < stale_before,
+            ),
+        )
+        .values(session_last_seen_at=func.now())
+        .returning(Candidate.session_last_seen_at)
+        .execution_options(synchronize_session=False)
+    )
+    stamp = result.scalar_one_or_none()
+    if stamp is None:
+        return False
+    await db.commit()
+    # Keep the loaded instance in step without a refresh round trip.
+    set_committed_value(candidate, "session_last_seen_at", stamp)
+    return True
 
 
 class SupabaseUserContext:
