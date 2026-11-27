@@ -5,8 +5,8 @@ import logging
 from uuid import UUID
 
 from starlette.concurrency import run_in_threadpool
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,11 @@ from app.database import get_db
 from app.exceptions import schema_drift_detail
 from app.models.corporate import Corporate
 from app.schemas.client_package import (
+    AdminCandidateOverviewRow,
+    AdminCandidateScorecard,
+    AdminCorporateBrandingUpdate,
+    AdminCorporateRow,
+    AdminPackageOverviewRow,
     AdminPackageDetail,
     AdminPackageUpdateRequest,
     CompanyCreateRequest,
@@ -268,6 +273,224 @@ async def invite_hr(
         message="Access link sent",
         email=body.email,
     )
+
+
+_CANDIDATE_OVERVIEW_COLUMNS = """
+    id, corporate_id, package_id, full_name, email, access_code,
+    logged_in_at, created_at, package_title, total_assessments,
+    completed_assessments, technical_score, avg_score, evaluated,
+    completed_at
+"""
+
+_CANDIDATE_OVERVIEW_SQL = f"""
+    select {_CANDIDATE_OVERVIEW_COLUMNS}
+      from public.candidate_overview
+     where (cast(:package_id as uuid) is null or package_id = cast(:package_id as uuid))
+     order by created_at desc
+"""
+
+_SCORECARD_CANDIDATE_SQL = f"""
+    select {_CANDIDATE_OVERVIEW_COLUMNS}
+      from public.candidate_overview
+     where id = cast(:candidate_id as uuid)
+"""
+
+_SCORECARD_EVALUATION_SQL = """
+    select payload, status, generated_at
+      from public.candidate_evaluations
+     where candidate_id = cast(:candidate_id as uuid)
+     order by generated_at desc nulls last
+     limit 1
+"""
+
+_SCORECARD_ASSESSMENTS_SQL = """
+    select id, title, position, questions
+      from public.assessments
+     where package_id = cast(:package_id as uuid)
+     order by position
+"""
+
+_SCORECARD_RESPONSES_SQL = """
+    select assessment_id, question_id, response
+      from public.candidate_responses
+     where candidate_id = cast(:candidate_id as uuid)
+"""
+
+_SCORECARD_PROGRESS_SQL = """
+    select assessment_id, status, score, completed_at
+      from public.candidate_progress
+     where candidate_id = cast(:candidate_id as uuid)
+"""
+
+
+@router.get("/candidates", response_model=list[AdminCandidateOverviewRow])
+async def list_admin_candidates(
+    package_id: UUID | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _: HRUserContext = Depends(get_current_ops_user),
+):
+    """List ``candidate_overview`` rows across tenants for Assessment History.
+
+    The ops console has no PostgREST grant on ``candidate_progress`` (the
+    view is ``security_invoker``), so this read runs server-side behind the
+    ops JWT instead of loosening RLS.
+
+    Args:
+        package_id: Optional package filter.
+        db: Async database session.
+        _: Authenticated ops user.
+
+    Returns:
+        Overview rows, newest first.
+    """
+    try:
+        result = await db.execute(
+            text(_CANDIDATE_OVERVIEW_SQL),
+            {"package_id": str(package_id) if package_id else None},
+        )
+    except ProgrammingError as exc:
+        raise HTTPException(status_code=503, detail=schema_drift_detail(exc)) from exc
+    return [dict(row) for row in result.mappings().all()]
+
+
+@router.get("/candidates/{candidate_id}/scorecard", response_model=AdminCandidateScorecard)
+async def get_admin_candidate_scorecard(
+    candidate_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: HRUserContext = Depends(get_current_ops_user),
+):
+    """Return one candidate's overview, evaluation, questions, answers and progress.
+
+    Same server-side read pattern as :func:`list_admin_candidates`: the ops
+    console cannot read ``candidate_progress`` / ``candidate_responses``
+    through PostgREST, so these reads run behind the ops JWT.
+
+    Args:
+        candidate_id: Target candidate UUID.
+        db: Async database session.
+        _: Authenticated ops user.
+
+    Returns:
+        Candidate overview row plus evaluation, assessments, responses, progress.
+    """
+    params = {"candidate_id": str(candidate_id)}
+    try:
+        candidate = (
+            await db.execute(text(_SCORECARD_CANDIDATE_SQL), params)
+        ).mappings().first()
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+
+        evaluation = (
+            await db.execute(text(_SCORECARD_EVALUATION_SQL), params)
+        ).mappings().first()
+        assessments = (
+            await db.execute(
+                text(_SCORECARD_ASSESSMENTS_SQL),
+                {"package_id": str(candidate["package_id"])},
+            )
+        ).mappings().all()
+        responses = (
+            await db.execute(text(_SCORECARD_RESPONSES_SQL), params)
+        ).mappings().all()
+        progress = (
+            await db.execute(text(_SCORECARD_PROGRESS_SQL), params)
+        ).mappings().all()
+    except ProgrammingError as exc:
+        raise HTTPException(status_code=503, detail=schema_drift_detail(exc)) from exc
+
+    return {
+        "candidate": dict(candidate),
+        "evaluation": dict(evaluation) if evaluation is not None else None,
+        "assessments": [dict(row) for row in assessments],
+        "responses": [dict(row) for row in responses],
+        "progress": [dict(row) for row in progress],
+    }
+
+
+_PACKAGE_OVERVIEW_SQL = """
+    select * from public.package_overview order by created_at desc
+"""
+
+
+@router.get("/packages", response_model=list[AdminPackageOverviewRow])
+async def list_admin_packages(
+    db: AsyncSession = Depends(get_db),
+    _: HRUserContext = Depends(get_current_ops_user),
+):
+    """List ``package_overview`` rows across tenants (newest first).
+
+    Same server-side pattern as :func:`list_admin_candidates`; replaces the
+    console's direct PostgREST read of the view.
+
+    Args:
+        db: Async database session.
+        _: Authenticated ops user.
+
+    Returns:
+        Package rows with corporate name/slug and candidate count.
+    """
+    try:
+        result = await db.execute(text(_PACKAGE_OVERVIEW_SQL))
+    except ProgrammingError as exc:
+        raise HTTPException(status_code=503, detail=schema_drift_detail(exc)) from exc
+    return [dict(row) for row in result.mappings().all()]
+
+
+async def _load_corporate(db: AsyncSession, corporate_id: UUID) -> Corporate:
+    corporate = (
+        await db.execute(select(Corporate).where(Corporate.id == corporate_id))
+    ).scalar_one_or_none()
+    if corporate is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return corporate
+
+
+@router.get("/corporates/{corporate_id}", response_model=AdminCorporateRow)
+async def get_admin_corporate(
+    corporate_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: HRUserContext = Depends(get_current_ops_user),
+):
+    """Return one ``corporates`` row for the branding page.
+
+    Args:
+        corporate_id: Target corporate UUID.
+        db: Async database session.
+        _: Authenticated ops user.
+
+    Returns:
+        The full corporate row.
+    """
+    return await _load_corporate(db, corporate_id)
+
+
+@router.patch("/corporates/{corporate_id}", response_model=AdminCorporateRow)
+async def update_admin_corporate(
+    corporate_id: UUID,
+    body: AdminCorporateBrandingUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: HRUserContext = Depends(get_current_ops_user),
+):
+    """Update branding/contact fields on a corporate.
+
+    Only fields present in the request body change; ``null`` or blank clears.
+
+    Args:
+        corporate_id: Target corporate UUID.
+        body: Logo URL, brand color, contact email/phone.
+        db: Async database session.
+        _: Authenticated ops user.
+
+    Returns:
+        The updated corporate row.
+    """
+    corporate = await _load_corporate(db, corporate_id)
+    for field in body.model_fields_set:
+        setattr(corporate, field, getattr(body, field))
+    await db.commit()
+    await db.refresh(corporate)
+    return corporate
 
 
 @router.get("/packages/{package_id}", response_model=AdminPackageDetail)

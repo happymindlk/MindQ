@@ -641,6 +641,124 @@ class PackageScheduleResponse(BaseModel):
     close_time: datetime | None = None
 
 
+class AdminCandidateOverviewRow(BaseModel):
+    """One ``public.candidate_overview`` row for the ops Assessment History page."""
+
+    id: UUID
+    corporate_id: UUID
+    package_id: UUID
+    full_name: str | None = None
+    email: str | None = None
+    access_code: str | None = None
+    logged_in_at: datetime | None = None
+    created_at: datetime | None = None
+    package_title: str | None = None
+    total_assessments: int = 0
+    completed_assessments: int = 0
+    technical_score: float | None = None
+    avg_score: float | None = None
+    evaluated: bool = False
+    completed_at: datetime | None = None
+
+
+class AdminPackageOverviewRow(BaseModel):
+    """One ``public.package_overview`` row (``packages.*`` + corporate name/slug + count).
+
+    Extra columns pass through so the payload matches the view's ``select *``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: UUID
+    corporate_id: UUID
+    title: str | None = None
+    status: str | None = None
+    created_at: datetime | None = None
+    corporate_name: str | None = None
+    corporate_slug: str | None = None
+    candidate_count: int = 0
+
+
+class AdminCorporateRow(BaseModel):
+    """Full ``corporates`` row for the ops branding page."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    slug: str
+    logo_url: str | None = None
+    primary_color: str | None = None
+    contact_email: str | None = None
+    contact_phone: str | None = None
+    allowed_hr_emails: list[str] = Field(default_factory=list)
+    is_active: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class AdminCorporateBrandingUpdate(BaseModel):
+    """Ops branding edit. Omitted fields are untouched; blank strings clear."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    logo_url: str | None = Field(default=None, max_length=1024)
+    primary_color: str | None = Field(default=None, max_length=32)
+    contact_email: str | None = Field(default=None, max_length=255)
+    contact_phone: str | None = Field(default=None, max_length=64)
+
+    @field_validator("logo_url", "primary_color", "contact_email", "contact_phone", mode="before")
+    @classmethod
+    def _blank(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+        return _blank_to_none(value)
+
+
+class AdminScorecardEvaluation(BaseModel):
+    """Cached synthesis row (``candidate_evaluations``) for the ops scorecard."""
+
+    payload: Any = None
+    status: str | None = None
+    generated_at: datetime | None = None
+
+
+class AdminScorecardAssessment(BaseModel):
+    """Assessment in the candidate's package, with its question definitions."""
+
+    id: UUID
+    title: str | None = None
+    position: int = 0
+    questions: Any = None
+
+
+class AdminScorecardResponseRow(BaseModel):
+    """One saved candidate answer."""
+
+    assessment_id: UUID
+    question_id: str
+    response: Any = None
+
+
+class AdminScorecardProgress(BaseModel):
+    """Per-assessment completion and score."""
+
+    assessment_id: UUID
+    status: str | None = None
+    score: float | None = None
+    completed_at: datetime | None = None
+
+
+class AdminCandidateScorecard(BaseModel):
+    """Everything the ops CandidateReport page renders for one candidate."""
+
+    candidate: AdminCandidateOverviewRow
+    evaluation: AdminScorecardEvaluation | None = None
+    assessments: list[AdminScorecardAssessment] = Field(default_factory=list)
+    responses: list[AdminScorecardResponseRow] = Field(default_factory=list)
+    progress: list[AdminScorecardProgress] = Field(default_factory=list)
+
+
 class PackageUpdate(AdminPackageUpdateRequest):
     """Alias for PUT package payloads (optional ``questions`` / ``target_role``)."""
 

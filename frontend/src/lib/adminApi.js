@@ -52,56 +52,50 @@ function expectArray(rows, resource) {
   return rows;
 }
 
-// HR admin data access via supabase-js. RLS enforces tenant isolation, so these
-// queries never need an explicit corporate_id filter.
+// Ops console data access. All table/view reads go through ops-authenticated
+// FastAPI endpoints; supabase-js is only used for the auth session.
 export const adminApi = {
+  /** `package_overview` rows across companies, newest first. */
   async getPackages() {
-    const { data, error } = await supabase
-      .from('package_overview')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (error) throw new Error(error.message);
-    return data;
+    const rows = await authedJson('/api/v1/admin/packages', 'Failed to load assessment suites');
+    return expectArray(rows, 'admin/packages');
   },
 
-  async createPackage({ title, description, tests }) {
-    const { data, error } = await supabase.rpc('create_package', {
-      p_title: title,
-      p_description: description ?? '',
-      p_tests: tests ?? [],
-    });
-    if (error) throw new Error(error.message);
-    return data;
-  },
-
+  /**
+   * Candidate overview rows via the ops-authenticated FastAPI endpoint. The
+   * `candidate_overview` view is security_invoker over `candidate_progress`,
+   * which the ops console cannot read through PostgREST.
+   * @param {string} [packageId]
+   */
   async getCandidates(packageId) {
-    // Timed-out attempts are finalized by the server's ARQ cron every 30s, so
-    // the overview no longer triggers (and silently swallows) a sweep here.
-    let query = supabase
-      .from('candidate_overview')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (packageId) query = query.eq('package_id', packageId);
-    const { data, error } = await query;
-    if (error) throw new Error(error.message);
-    return data;
+    const qs = packageId ? `?package_id=${encodeURIComponent(packageId)}` : '';
+    const rows = await authedJson(`/api/v1/admin/candidates${qs}`, 'Failed to load candidates');
+    return expectArray(rows, 'admin/candidates');
   },
 
-  async getCorporate() {
-    const { data, error } = await supabase.from('corporates').select('*').limit(1).maybeSingle();
-    if (error) throw new Error(error.message);
-    return data;
+  /**
+   * Full `corporates` row. Resolves to null when no company id is known yet.
+   * @param {string | null | undefined} corporateId
+   */
+  async getCorporate(corporateId) {
+    if (!corporateId) return null;
+    return authedJson(
+      `/api/v1/admin/corporates/${encodeURIComponent(corporateId)}`,
+      'Failed to load company',
+    );
   },
 
+  /**
+   * Update branding/contact fields; returns the full updated row.
+   * @param {string} id
+   * @param {{ logo_url?: string | null, primary_color?: string | null, contact_email?: string | null, contact_phone?: string | null }} fields
+   */
   async updateCorporate(id, fields) {
-    const { data, error } = await supabase
-      .from('corporates')
-      .update(fields)
-      .eq('id', id)
-      .select('*')
-      .single();
-    if (error) throw new Error(error.message);
-    return data;
+    return authedJson(
+      `/api/v1/admin/corporates/${encodeURIComponent(id)}`,
+      'Failed to save company',
+      { method: 'PATCH', body: fields },
+    );
   },
 
   /**
@@ -140,46 +134,26 @@ export const adminApi = {
     });
   },
 
+  /**
+   * Candidate scorecard via the ops-authenticated FastAPI endpoint (same
+   * server-side pattern as `getCandidates`).
+   * @param {string} candidateId
+   * @returns {Promise<{candidate: any, evaluation: any, assessments: any[], responses: any[], progress: any[]}>}
+   */
   async getCandidateScorecard(candidateId) {
-    const { data: candidate, error: candErr } = await supabase
-      .from('candidate_overview')
-      .select('*')
-      .eq('id', candidateId)
-      .maybeSingle();
-    if (candErr) throw new Error(candErr.message);
-    if (!candidate) throw new Error('Candidate not found');
-
-    const [evalRes, assessRes, respRes, progRes] = await Promise.all([
-      supabase
-        .from('candidate_evaluations')
-        .select('payload, status, generated_at')
-        .eq('candidate_id', candidateId)
-        .maybeSingle(),
-      supabase
-        .from('assessments')
-        .select('id, title, position, questions')
-        .eq('package_id', candidate.package_id)
-        .order('position'),
-      supabase
-        .from('candidate_responses')
-        .select('assessment_id, question_id, response')
-        .eq('candidate_id', candidateId),
-      supabase
-        .from('candidate_progress')
-        .select('assessment_id, status, score, completed_at')
-        .eq('candidate_id', candidateId),
-    ]);
-
-    for (const result of [evalRes, assessRes, respRes, progRes]) {
-      if (result.error) throw new Error(result.error.message);
+    const payload = await authedJson(
+      `/api/v1/admin/candidates/${encodeURIComponent(candidateId)}/scorecard`,
+      'Failed to load candidate',
+    );
+    if (!payload || typeof payload !== 'object' || !payload.candidate) {
+      throw new ApiError(BAD_RESPONSE_MESSAGE, 200, 'BAD_RESPONSE', 'admin/scorecard: missing candidate');
     }
-
     return {
-      candidate,
-      evaluation: evalRes.data,
-      assessments: assessRes.data || [],
-      responses: respRes.data || [],
-      progress: progRes.data || [],
+      candidate: payload.candidate,
+      evaluation: payload.evaluation ?? null,
+      assessments: expectArray(payload.assessments ?? [], 'admin/scorecard.assessments'),
+      responses: expectArray(payload.responses ?? [], 'admin/scorecard.responses'),
+      progress: expectArray(payload.progress ?? [], 'admin/scorecard.progress'),
     };
   },
 
