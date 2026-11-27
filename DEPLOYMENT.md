@@ -340,3 +340,17 @@ if the worker is launched some other way. Each process logs
   on autosave / submit / HR reset are retried once server-side; otherwise
   `503` with `Retry-After: 1`. A dropped connection invalidates only that
   connection (no pool-wide reconnect).
+
+## Host configuration (`infra/`)
+
+Sanitized Nginx, systemd and logrotate templates for the API nodes live in
+[`infra/`](infra/README.md). The values that must stay aligned:
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| Nginx `proxy_read_timeout` / `proxy_send_timeout` | `90s` | Above asyncpg `command_timeout` (60s) and PDF rendering |
+| Nginx `client_max_body_size` | `15m` | Above the 10 MiB JD PDF upload cap |
+| systemd `TimeoutStopSec` (API + worker) | `40` | Above Uvicorn `--timeout-graceful-shutdown 30` |
+| systemd `Restart` / `KillSignal` | `always` / `SIGTERM` | Crash recovery and graceful drain |
+
+Change a template in the repo first, then apply it to both nodes.

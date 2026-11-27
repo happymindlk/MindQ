@@ -5,12 +5,15 @@ import Skeleton from '../../components/ui/Skeleton';
 import EmptyState from '../../components/ui/EmptyState';
 import Button from '../../components/ui/Button';
 import { api } from '../../api/client';
-import { writeDraft, clearDraft, hydrateAttemptAnswers } from '../../lib/assessment-draft';
+import { writeDraft, clearDraft, hydrateAttemptAnswers, readDraft, mergeAnswers } from '../../lib/assessment-draft';
 import { getCandidateId } from '../../lib/candidate-identity';
 import {
   ASSESSMENT_TIMEOUT_MESSAGE,
   AssessmentRunner,
 } from '../../features/assessment-runner/assessment-runner';
+import { RunnerErrorBoundary } from '../../features/assessment-runner/runner-error-boundary';
+import { buildResponses } from '../../features/assessment-runner/runner-logic';
+import { clearLocalCandidateSession } from '../../features/candidate-auth/candidate-otp-api';
 import { ModuleReadyScreen } from '../../features/assessment-runner/module-ready-screen';
 import PackageCompleteScreen from '../../features/candidate-dashboard/package-complete-screen';
 import { candidateTestKey, cachedQuery, invalidateQuery, peekQuery, setQuery } from '../../lib/query-cache';
@@ -45,6 +48,13 @@ async function confirmModuleCompleted(assessmentId) {
 }
 /** Prefer dashboard-prefetch hits for the instruction screen (avoid a redundant cold GET). */
 const TEST_PREFETCH_STALE_MS = 60000;
+
+/** Where an expired candidate session is sent to sign in again. */
+export const CANDIDATE_LOGIN_PATH = '/portal';
+
+function isUnauthorizedError(err) {
+  return err?.status === 401;
+}
 
 function isAssessmentLocked(err) {
   // Only ALREADY_SUBMITTED (or the legacy code-less 409) means "completed".
@@ -179,6 +189,12 @@ export default function TestRunner() {
         setLockDetail(null);
       } catch (err) {
         if (cancelled) return;
+        if (isUnauthorizedError(err)) {
+          // Expired / revoked token: the local draft is kept for after re-login.
+          clearLocalCandidateSession();
+          navigate(CANDIDATE_LOGIN_PATH, { replace: true, state: { sessionExpired: true } });
+          return;
+        }
         const detail = err.message || '';
         if (isAssessmentLocked(err)) {
           setLockDetail(detail || LOCKED_DETAIL);
@@ -193,7 +209,7 @@ export default function TestRunner() {
     return () => {
       cancelled = true;
     };
-  }, [testId, candidateId, cacheKey]);
+  }, [testId, candidateId, cacheKey, navigate]);
 
   const markSubmitFinalized = useCallback(
     (result) => {
@@ -295,6 +311,7 @@ export default function TestRunner() {
         expires_at: started.expires_at ?? test.expires_at,
         write_expires_at: started.write_expires_at ?? test.write_expires_at,
         server_now: started.server_now ?? test.server_now,
+        client_rtt_ms: started.server_now ? started.client_rtt_ms : test.client_rtt_ms,
         remaining_seconds: started.remaining_seconds,
         write_remaining_seconds: started.write_remaining_seconds,
       };
@@ -306,6 +323,11 @@ export default function TestRunner() {
       syncDashboardModule(testId, 'in_progress', next);
     } catch (err) {
       setPhase('instructions');
+      if (isUnauthorizedError(err)) {
+        clearLocalCandidateSession();
+        navigate(CANDIDATE_LOGIN_PATH, { replace: true, state: { sessionExpired: true } });
+        return;
+      }
       if (isAssessmentLocked(err)) {
         setLockDetail(err.message || LOCKED_DETAIL);
         return;
@@ -314,7 +336,48 @@ export default function TestRunner() {
     } finally {
       setStarting(false);
     }
-  }, [testId, starting, test, cacheKey]);
+  }, [testId, starting, test, cacheKey, navigate]);
+
+  /**
+   * Session expired mid-exam (401 on autosave/submit). Answers are already in
+   * the local draft via onAnswersChange, so drop the dead token and send the
+   * candidate to sign in; the draft is merged back on resume.
+   */
+  const onUnauthorized = useCallback(() => {
+    clearLocalCandidateSession();
+    navigate(CANDIDATE_LOGIN_PATH, { replace: true, state: { sessionExpired: true } });
+  }, [navigate]);
+
+  /**
+   * Runner crash fallback: submit the answers held in the local draft (plus
+   * any server-hydrated answers) without the crashed runner's telemetry.
+   */
+  const submitSavedAnswers = useCallback(async () => {
+    if (!testId) return;
+    const saved = mergeAnswers(initialAnswers, readDraft(candidateId, testId));
+    try {
+      await transport.submit({
+        responses: buildResponses(testId, saved, () => 0),
+        total_module_duration_seconds: null,
+      });
+    } catch (err) {
+      if (isUnauthorizedError(err)) onUnauthorized();
+      throw err;
+    }
+  }, [candidateId, initialAnswers, onUnauthorized, testId, transport]);
+
+  /** Runner crash "Try again": remount from the freshest local draft. */
+  const retryAfterCrash = useCallback(() => {
+    setInitialAnswers((prev) => mergeAnswers(prev, readDraft(candidateId, testId)));
+  }, [candidateId, testId]);
+
+  const afterSavedSubmit = useCallback(() => {
+    if (packageCompleteRef.current) {
+      setPhase('package_complete');
+      return;
+    }
+    navigate('/portal/dashboard', { replace: true });
+  }, [navigate]);
 
   const onTimeExpired = useCallback(() => {
     showTimeoutNoticeRef.current = true;
@@ -458,31 +521,39 @@ export default function TestRunner() {
   const runnerKey = frozenRunnerKeyRef.current ?? nextRunnerKey;
 
   return (
-    <AssessmentRunner
-      key={runnerKey}
-      test={test}
-      mode="live"
-      initialAnswers={initialAnswers}
-      transport={transport}
-      onAnswersChange={onAnswersChange}
-      onSubmitted={() => {
-        // Never auto-route away while the timeout completion screen is showing.
-        if (showTimeoutNoticeRef.current) return;
-        if (packageCompleteRef.current) {
-          setPhase('package_complete');
-          return;
-        }
-        if (exitHandledRef.current) {
-          navigate('/portal/dashboard', { replace: true });
-        }
-      }}
-      onTimeExpired={onTimeExpired}
-      onTimeoutStarted={onTimeoutStarted}
-      onLocked={(detail) => {
-        if (showTimeoutNoticeRef.current) return;
-        setLockDetail(detail);
-      }}
-      onExit={backToDashboard}
-    />
+    <RunnerErrorBoundary
+      key={testId}
+      onSubmitSaved={submitSavedAnswers}
+      onRetry={retryAfterCrash}
+      onSubmitted={afterSavedSubmit}
+    >
+      <AssessmentRunner
+        key={runnerKey}
+        test={test}
+        mode="live"
+        initialAnswers={initialAnswers}
+        transport={transport}
+        onAnswersChange={onAnswersChange}
+        onSubmitted={() => {
+          // Never auto-route away while the timeout completion screen is showing.
+          if (showTimeoutNoticeRef.current) return;
+          if (packageCompleteRef.current) {
+            setPhase('package_complete');
+            return;
+          }
+          if (exitHandledRef.current) {
+            navigate('/portal/dashboard', { replace: true });
+          }
+        }}
+        onTimeExpired={onTimeExpired}
+        onTimeoutStarted={onTimeoutStarted}
+        onLocked={(detail) => {
+          if (showTimeoutNoticeRef.current) return;
+          setLockDetail(detail);
+        }}
+        onUnauthorized={onUnauthorized}
+        onExit={backToDashboard}
+      />
+    </RunnerErrorBoundary>
   );
 }

@@ -42,5 +42,6 @@ class Candidate(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    # Active uniqueness: partial unique index uq_candidates_package_email_active
-    # (package_id, email) WHERE deleted_at IS NULL — see migration.
+    # Active uniqueness: partial unique index uq_candidates_package_lower_email_active
+    # (package_id, lower(email)) WHERE deleted_at IS NULL — see migration
+    # 20261127130000_schema_index_constraint_cleanup.sql.

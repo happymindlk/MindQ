@@ -1,0 +1,43 @@
+# MindQ ARQ worker — systemd unit (reference template, P2-12).
+#
+# Runs durable jobs (scoring, Gemini synthesis, PDF prewarm, SES email,
+# report purge) from Redis. Install: /etc/systemd/system/mindq-worker.service,
+# then `systemctl daemon-reload && systemctl enable --now mindq-worker`.
+# DB_PROCESS_ROLE is auto-detected from the `arq` command (DEPLOYMENT.md).
+
+[Unit]
+Description=MindQ ARQ worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=mindq
+Group=mindq
+WorkingDirectory=/opt/mindq/backend
+EnvironmentFile=/etc/mindq/mindq.env
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/opt/mindq/backend/.venv/bin/arq app.jobs.worker.WorkerSettings
+
+# SIGTERM lets ARQ stop taking jobs and finish/requeue the current one;
+# jobs are idempotent, so a SIGKILL after 40s only costs a retry.
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=40
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+StandardOutput=append:/var/log/mindq/worker.log
+StandardError=append:/var/log/mindq/worker.log
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/mindq/backend/data /var/log/mindq
+
+[Install]
+WantedBy=multi-user.target

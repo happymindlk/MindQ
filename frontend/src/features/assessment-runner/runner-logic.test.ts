@@ -6,6 +6,7 @@ import {
   hasContent,
   isAnswered,
   isAttemptLocked,
+  isUnauthorized,
   isTerminalSubmitConflict,
   isTimeExpired,
   resolveRemainingSeconds,
@@ -203,5 +204,15 @@ describe('runner logic', () => {
     expect(isAttemptLocked({ status: 409, code: 'NOT_STARTED' })).toBe(false);
     expect(isAttemptLocked({ status: 409, code: 'CONFLICT' })).toBe(false);
     expect(isAttemptLocked({ status: 409, code: 'ALREADY_SUBMITTED' })).toBe(true);
+  });
+});
+
+describe('isUnauthorized', () => {
+  it('matches only a 401', () => {
+    expect(isUnauthorized({ status: 401 })).toBe(true);
+    expect(isUnauthorized({ status: 403 })).toBe(false);
+    expect(isUnauthorized({ status: 409, code: 'ALREADY_SUBMITTED' })).toBe(false);
+    expect(isUnauthorized(null)).toBe(false);
+    expect(isUnauthorized('401')).toBe(false);
   });
 });

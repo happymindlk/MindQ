@@ -106,6 +106,11 @@ export interface RunnerTest {
   write_expires_at?: string | null;
   /** Server UTC clock for client offset sync. */
   server_now?: string | null;
+  /**
+   * Client-measured round trip (ms) of the request that returned ``server_now``.
+   * Not sent by the server; the API client stamps it so the timer can add RTT/2.
+   */
+  client_rtt_ms?: number | null;
   /** Server-computed display countdown seed (UTC); null when untimed. */
   remaining_seconds?: number | null;
   /** Seconds until write lock (duration + grace); expire / auto-submit seed. */

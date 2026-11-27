@@ -1329,3 +1329,74 @@ describe('AssessmentRunner optimistic navigation', () => {
     );
   });
 });
+
+describe('AssessmentRunner session expiry (401)', () => {
+  function expiredTimedTest(): RunnerTest {
+    const now = Date.now();
+    const started = new Date(now - 61_000);
+    const expires = new Date(started.getTime() + 60_000);
+    return {
+      ...twoQuestionTest('psychometric'),
+      duration_seconds: 60,
+      timer_mode: 'strict',
+      started_at: started.toISOString(),
+      expires_at: expires.toISOString(),
+      write_expires_at: expires.toISOString(),
+      server_now: new Date(now).toISOString(),
+    };
+  }
+
+  it('hands off to onUnauthorized instead of retrying when submit returns 401', async () => {
+    const unauthorized = Object.assign(new Error('Invalid or expired token'), { status: 401, code: null });
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => {
+        throw unauthorized;
+      }),
+    };
+    const onUnauthorized = vi.fn();
+    const onLocked = vi.fn();
+    render(
+      <AssessmentRunner
+        test={expiredTimedTest()}
+        mode="live"
+        initialAnswers={{ q1: 'Alpha' }}
+        transport={transport}
+        onSubmitted={() => undefined}
+        onLocked={onLocked}
+        onUnauthorized={onUnauthorized}
+        onExit={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(onUnauthorized).toHaveBeenCalledTimes(1));
+    expect(onLocked).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: /Retry submit/ })).not.toBeInTheDocument();
+  });
+
+  it('hands off to onUnauthorized when an autosave returns 401', async () => {
+    const unauthorized = Object.assign(new Error('Invalid or expired token'), { status: 401, code: null });
+    const transport = {
+      autosave: vi.fn(async () => {
+        throw unauthorized;
+      }),
+      submit: vi.fn(async () => undefined),
+    };
+    const onUnauthorized = vi.fn();
+    render(
+      <AssessmentRunner
+        test={twoQuestionTest('psychometric')}
+        mode="live"
+        initialAnswers={{}}
+        transport={transport}
+        onSubmitted={() => undefined}
+        onLocked={() => undefined}
+        onUnauthorized={onUnauthorized}
+        onExit={() => undefined}
+      />,
+    );
+    await userEvent.click(screen.getByText('Alpha'));
+    await waitFor(() => expect(transport.autosave).toHaveBeenCalled());
+    await waitFor(() => expect(onUnauthorized).toHaveBeenCalledTimes(1));
+    expect(transport.submit).not.toHaveBeenCalled();
+  });
+});

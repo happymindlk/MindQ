@@ -121,6 +121,30 @@ export async function withRetry(attempt, { retries = 2, baseMs = 1000 } = {}) {
   }
 }
 
+const monotonicNow = () =>
+  typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+
+/**
+ * Run one request and stamp ``client_rtt_ms`` on an object payload so the
+ * runner timer can correct ``server_now`` by RTT/2. Measured per attempt, so a
+ * retried request reports the round trip of the attempt that succeeded.
+ *
+ * @template T
+ * @param {() => Promise<T>} send
+ * @returns {Promise<T>}
+ */
+async function withClientRtt(send) {
+  const started = monotonicNow();
+  const data = await send();
+  const rtt = monotonicNow() - started;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    return { ...data, client_rtt_ms: Math.max(0, Math.round(rtt)) };
+  }
+  return data;
+}
+
 export const api = {
   candidate: {
     /**
@@ -149,22 +173,25 @@ export const api = {
     getDashboard: async () => {
       return requestJson(`${API_BASE}/candidate/dashboard`, { headers: getAuthHeaders() }, 'Failed to load dashboard');
     },
-    getTest: async (assessmentId) => {
-      return requestJson(
-        `${API_BASE}/candidate/test/${assessmentId}`,
-        { headers: getAuthHeaders() },
-        'Failed to load test',
-      );
-    },
+    getTest: async (assessmentId) =>
+      withClientRtt(() =>
+        requestJson(
+          `${API_BASE}/candidate/test/${assessmentId}`,
+          { headers: getAuthHeaders() },
+          'Failed to load test',
+        ),
+      ),
     // POST /start is idempotent server-side (returns the existing attempt).
     startTest: async (assessmentId) =>
-      withRetry(async () => {
-        const res = await fetchWithTimeout(`${API_BASE}/candidate/test/${assessmentId}/start`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-        });
-        return handleResponse(res);
-      }),
+      withRetry(() =>
+        withClientRtt(async () => {
+          const res = await fetchWithTimeout(`${API_BASE}/candidate/test/${assessmentId}/start`, {
+            method: 'POST',
+            headers: getAuthHeaders(),
+          });
+          return handleResponse(res);
+        }),
+      ),
     /**
      * @param {object} data ResponseSave payload.
      * @param {{ keepalive?: boolean }} [options] ``keepalive`` lets the request

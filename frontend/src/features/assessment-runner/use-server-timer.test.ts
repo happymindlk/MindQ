@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  MAX_RTT_CORRECTION_MS,
   computeServerOffsetMs,
   remainingFromDeadline,
   useServerTimer,
@@ -11,6 +12,26 @@ describe('computeServerOffsetMs / remainingFromDeadline', () => {
     const clientNow = Date.parse('2026-11-13T12:00:00.000Z');
     const serverNow = '2026-11-13T12:00:05.000Z';
     expect(computeServerOffsetMs(serverNow, clientNow)).toBe(5000);
+  });
+
+  it('adds RTT/2 to server_now so the countdown does not run long', () => {
+    const clientNow = Date.parse('2026-11-13T12:00:00.000Z');
+    const serverNow = '2026-11-13T12:00:05.000Z';
+    // server_now is ~RTT/2 old on arrival: 400ms RTT => server is 200ms ahead of it.
+    expect(computeServerOffsetMs(serverNow, clientNow, 400)).toBe(5200);
+    const expiresAt = '2026-11-13T12:01:05.000Z';
+    expect(remainingFromDeadline(expiresAt, computeServerOffsetMs(serverNow, clientNow, 0), clientNow)).toBe(60);
+    // 2s RTT shaves the extra second off the displayed remaining time.
+    expect(remainingFromDeadline(expiresAt, computeServerOffsetMs(serverNow, clientNow, 2000), clientNow)).toBe(59);
+  });
+
+  it('ignores missing, negative, or non-finite RTT and caps outliers', () => {
+    const clientNow = Date.parse('2026-11-13T12:00:00.000Z');
+    const serverNow = '2026-11-13T12:00:00.000Z';
+    expect(computeServerOffsetMs(serverNow, clientNow, null)).toBe(0);
+    expect(computeServerOffsetMs(serverNow, clientNow, -50)).toBe(0);
+    expect(computeServerOffsetMs(serverNow, clientNow, Number.NaN)).toBe(0);
+    expect(computeServerOffsetMs(serverNow, clientNow, 10 * 60_000)).toBe(MAX_RTT_CORRECTION_MS / 2);
   });
 
   it('deducts elapsed wall-clock time when re-entering after leaving', () => {
