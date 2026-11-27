@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { fetchHrMembership } from '../lib/hr-membership';
 import { isOpsRole, resolveRole } from '../lib/auth-role';
 import { AuthContext } from './auth-context';
 
@@ -15,25 +16,6 @@ function claimsAreStale(session, membership) {
     (membership.role ?? null) !== jwtRole
     || (membership.corporate_id ?? null) !== (meta.corporate_id ?? null)
   );
-}
-
-/**
- * Source of truth for tenant membership is public.hr_users (RLS: user_id = auth.uid()).
- * JWT app_metadata.corporate_id is a cache populated by the custom access token hook
- * and can be stale until refreshSession() after SQL provisioning.
- */
-async function fetchHrMembership(userId) {
-  if (!userId) return null;
-  const { data, error } = await supabase
-    .from('hr_users')
-    .select('user_id, corporate_id, role, full_name')
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) {
-    console.error('hr_users membership fetch failed:', error.message);
-    throw error;
-  }
-  return data;
 }
 
 export function AuthProvider({ children }) {
@@ -87,7 +69,7 @@ export function AuthProvider({ children }) {
     }
 
     try {
-      const membership = await fetchHrMembership(nextUserId);
+      const membership = await fetchHrMembership(nextSession);
       setProfile(membership);
       const resolved = membership?.corporate_id || jwtCorp || null;
       setCorporateId(resolved);
@@ -105,7 +87,7 @@ export function AuthProvider({ children }) {
       }
       return resolved;
     } catch {
-      // Fall back to JWT claim if the table query fails (network / RLS misconfig).
+      // Fall back to JWT claim if the membership lookup fails (network / API down).
       setProfile(null);
       setCorporateId(jwtCorp);
       return jwtCorp;
@@ -122,7 +104,7 @@ export function AuthProvider({ children }) {
     }
 
     // Explicit refresh always re-reads hr_users (provisioning / role changes).
-    const membership = await fetchHrMembership(active.user.id);
+    const membership = await fetchHrMembership(active);
     if (membership?.corporate_id) {
       // Refresh so the custom access token hook injects corporate_id into the JWT
       // (required for RLS on corporates / packages / candidates).

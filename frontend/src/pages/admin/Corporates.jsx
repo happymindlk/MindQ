@@ -4,12 +4,13 @@ import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import PageHeader from '../../components/ui/PageHeader';
 import { useCachedQuery } from '../../hooks/use-cached-query';
+import { useAuth } from '../../context/useAuth';
 import { adminApi } from '../../lib/adminApi';
 import { cacheBustUrl } from '../../lib/cache-bust-url';
 import { invalidateQuery, setQuery } from '../../lib/query-cache';
 import { CORPORATES_QUERY_KEY } from './corporates/use-corporates';
 
-/** HR branding row from Supabase (`adminApi.getCorporate`). */
+/** Home company branding row (`adminApi.getCorporate`, ops FastAPI endpoint). */
 const HR_CORPORATE_QUERY_KEY = 'admin:hr-corporate';
 
 const DEFAULT_BRAND = '#7C3AED';
@@ -268,11 +269,12 @@ export default function Corporates() {
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
-  const corporateFetcher = useCallback(() => adminApi.getCorporate(), []);
+  const { corporateId } = useAuth();
+  const corporateFetcher = useCallback(() => adminApi.getCorporate(corporateId), [corporateId]);
   const {
     data: corporateData,
     error: loadError,
-  } = useCachedQuery(HR_CORPORATE_QUERY_KEY, corporateFetcher);
+  } = useCachedQuery(HR_CORPORATE_QUERY_KEY, corporateFetcher, { enabled: Boolean(corporateId) });
 
   const parsedColor = parseHexColor(primaryColor);
   const brandColor = parsedColor || lastValidColorRef.current;
