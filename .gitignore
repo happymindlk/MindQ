@@ -24,6 +24,9 @@ docker-compose.override.yml
 
 uvicorn.log
 backend/uvicorn.log
+# Local debug session logs (P2-11): never commit.
+debug-*.log
+.cursor/debug-*.log
 .env
 .env.*
 

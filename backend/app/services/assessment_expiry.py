@@ -28,6 +28,7 @@ from app.services.candidate_service import (
     IN_PROGRESS_STATUS,
     CandidateService,
     is_display_expired,
+    request_clock,
 )
 from app.services.session_log import MODULE_TIMEOUT, duration_from_progress, record_session_event
 
@@ -53,15 +54,15 @@ async def list_expired_in_progress(
 
     Args:
         session: Async database session.
-        now: Clock override for tests; defaults to UTC now.
+        now: Clock override for tests; defaults to the database ``now()`` so
+            app-node clock skew cannot move the deadline (P2-05).
         candidate_id: When set, only that candidate's attempts are considered.
 
     Returns:
         Pairs of ``(progress, assessment)`` that should be auto-submitted.
     """
-    clock = now or _utcnow()
     stmt = (
-        select(CandidateProgress, Assessment)
+        select(CandidateProgress, Assessment, func.now().label("db_now"))
         .join(Assessment, Assessment.id == CandidateProgress.assessment_id)
         .where(
             CandidateProgress.status == IN_PROGRESS_STATUS,
@@ -73,10 +74,18 @@ async def list_expired_in_progress(
         stmt = stmt.where(CandidateProgress.candidate_id == candidate_id)
     rows = (await session.execute(stmt)).all()
     expired: list[tuple[CandidateProgress, Assessment]] = []
-    for progress, assessment in rows:
+    for progress, assessment, db_now in rows:
+        clock = now or _aware(db_now) or _utcnow()
         if is_display_expired(assessment, progress, clock):
             expired.append((progress, assessment))
     return expired
+
+
+def _aware(value: object) -> datetime | None:
+    """Timezone-aware UTC copy of a DB timestamp; None for non-datetimes."""
+    if not isinstance(value, datetime):
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 async def finalize_one_expired(
@@ -171,7 +180,7 @@ async def finalize_expired_assessment(
 
     finalized: list[tuple[UUID, UUID]] = []
     for progress, _assessment in expired:
-        stamp = getattr(progress, "expires_at", None) or (now or _utcnow())
+        stamp = getattr(progress, "expires_at", None) or (now or request_clock(session))
         claimed = await finalize_one_expired(
             session,
             candidate=candidate,
@@ -279,7 +288,7 @@ async def finalize_expired_assessments(
                 candidate_id,
             )
             continue
-        stamp = getattr(progress, "expires_at", None) or (now or _utcnow())
+        stamp = getattr(progress, "expires_at", None) or (now or request_clock(session))
         try:
             claimed = await finalize_one_expired(
                 session,

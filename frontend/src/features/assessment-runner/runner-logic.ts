@@ -170,6 +170,14 @@ export function isTimeExpired(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as RunnerError).code === 'TIME_EXPIRED';
 }
 
+/**
+ * Whether a runner request failed because the candidate session is gone
+ * (expired or revoked JWT). The runner must hand off to login, not retry.
+ */
+export function isUnauthorized(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as RunnerError).status === 401;
+}
+
 export function isAttemptLocked(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false;
   const e = err as RunnerError;

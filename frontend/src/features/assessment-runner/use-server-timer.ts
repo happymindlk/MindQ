@@ -21,6 +21,12 @@ export interface ServerTimerOptions {
   writeExpiresAt?: string | null | undefined;
   /** ISO-8601 UTC server clock for offset: ``Date.parse(serverNow) - Date.now()``. */
   serverNow: string | null | undefined;
+  /**
+   * Round-trip time (ms) of the request that returned ``serverNow``. The
+   * response is about RTT/2 old on arrival, so RTT/2 is added to the server
+   * clock estimate (i.e. removed from the remaining time). Omit when unknown.
+   */
+  rttMs?: number | null;
   onExpire?: () => void;
   /** Fires once when the display clock hits 0 (may precede ``onExpire`` in grace). */
   onDisplayExpire?: () => void;
@@ -29,21 +35,34 @@ export interface ServerTimerOptions {
   now?: () => number;
 }
 
+/** Ignore implausible RTT samples (clock jumps, suspended tabs mid-request). */
+export const MAX_RTT_CORRECTION_MS = 30_000;
+
 /**
  * Compute client↔server clock offset in milliseconds.
  *
+ * ``server_now`` was stamped roughly half a round trip before the response
+ * arrived, so the current server time is estimated as ``serverNow + rtt / 2``.
+ * Without this correction the countdown runs long by about RTT/2.
+ *
  * @param serverNow - ISO server timestamp.
  * @param clientNowMs - Local ``Date.now()`` (or test clock).
- * @returns Offset such that ``clientNow + offset ≈ serverNow``.
+ * @param rttMs - Round trip of the request that returned ``serverNow``.
+ * @returns Offset such that ``clientNow + offset ≈ serverNow (+ rtt/2)``.
  */
 export function computeServerOffsetMs(
   serverNow: string | null | undefined,
   clientNowMs: number = Date.now(),
+  rttMs?: number | null,
 ): number {
   if (!serverNow) return 0;
   const parsed = Date.parse(serverNow);
   if (!Number.isFinite(parsed)) return 0;
-  return parsed - clientNowMs;
+  const rtt =
+    typeof rttMs === 'number' && Number.isFinite(rttMs) && rttMs > 0
+      ? Math.min(rttMs, MAX_RTT_CORRECTION_MS)
+      : 0;
+  return parsed + rtt / 2 - clientNowMs;
 }
 
 /**
@@ -83,6 +102,7 @@ export function useServerTimer({
   expiresAt,
   writeExpiresAt,
   serverNow,
+  rttMs,
   onExpire,
   onDisplayExpire,
   enabled = true,
@@ -114,7 +134,7 @@ export function useServerTimer({
   const calibrationKey = `${expiresAt ?? ''}|${writeAt ?? ''}|${serverNow ?? ''}`;
 
   const [remaining, setRemaining] = useState<number | null>(() => {
-    const offset = computeServerOffsetMs(serverNow, nowRef.current());
+    const offset = computeServerOffsetMs(serverNow, nowRef.current(), rttMs);
     return remainingFromDeadline(expiresAt, offset, nowRef.current());
   });
 
@@ -124,7 +144,7 @@ export function useServerTimer({
     const hadPriorCalibration = calibratedForRef.current !== null;
     calibratedForRef.current = calibrationKey;
     const clientNow = nowRef.current();
-    clockOffsetMsRef.current = computeServerOffsetMs(serverNow, clientNow);
+    clockOffsetMsRef.current = computeServerOffsetMs(serverNow, clientNow, rttMs);
     // Skip setState on the initial mount — useState already seeded remaining.
     if (hadPriorCalibration) {
       setRemaining(remainingFromDeadline(expiresAt, clockOffsetMsRef.current, clientNow));

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
@@ -21,8 +22,50 @@ from app.services.email import send_transactional_email
 from app.services.email_service import EmailService
 from app.sentry_init import capture_silent_failure
 from app.services import storage as storage_service
+from app.services.sent_emails import (
+    claim_email_send,
+    email_idempotency_key,
+    release_email_send,
+)
 
 logger = logging.getLogger(__name__)
+
+
+async def _send_once(
+    ctx: dict[str, Any] | None,
+    *,
+    kind: str,
+    send: Callable[[], Awaitable[Any]],
+) -> Any:
+    """Run ``send`` at most once per queued job (P2-01).
+
+    Under the ARQ worker the job's idempotency key is claimed in
+    ``sent_emails`` before SES is called; a re-run of the same job (worker
+    restart mid-send) finds the marker and skips. A falsy result or an
+    exception releases the marker so a later re-run may try again. Inline
+    runs (no Redis) have no re-run and skip the marker entirely.
+
+    Args:
+        ctx: ARQ worker context (``{}`` for inline runs).
+        kind: Email kind recorded on the marker.
+        send: Zero-arg coroutine factory that performs the SES call.
+
+    Returns:
+        The ``send`` result, or None when the send was skipped as a duplicate.
+    """
+    key = email_idempotency_key(ctx)
+    if key is None:
+        return await send()
+    if not await claim_email_send(key, kind=kind):
+        return None
+    try:
+        result = await send()
+    except BaseException:
+        await release_email_send(key)
+        raise
+    if not result:
+        await release_email_send(key)
+    return result
 
 
 def _as_uuid(value: UUID | str) -> UUID:
@@ -101,7 +144,6 @@ async def task_dispatch_candidate_invite(
         close_time: Package window end (UTC), if enforced.
         candidate_first_name: Greeting name override.
     """
-    del ctx
     # Lazy import avoids circular import: invites → enqueue → tasks → invites.
     from app.api.v1.invites import _dispatch_candidate_invite
 
@@ -110,15 +152,19 @@ async def task_dispatch_candidate_invite(
         parsed_close = close_time
     else:
         parsed_close = datetime.fromisoformat(str(close_time))
-    await _dispatch_candidate_invite(
-        candidate_email=candidate_email,
-        candidate_name=candidate_name,
-        access_code=access_code,
-        package_title=package_title,
-        corporate_name=corporate_name,
-        origin=origin,
-        close_time=parsed_close,
-        candidate_first_name=candidate_first_name,
+    await _send_once(
+        ctx,
+        kind="invite",
+        send=lambda: _dispatch_candidate_invite(
+            candidate_email=candidate_email,
+            candidate_name=candidate_name,
+            access_code=access_code,
+            package_title=package_title,
+            corporate_name=corporate_name,
+            origin=origin,
+            close_time=parsed_close,
+            candidate_first_name=candidate_first_name,
+        ),
     )
 
 
@@ -136,10 +182,13 @@ async def task_send_package_share(
         subject: Email subject.
         html_content: Rendered HTML body.
     """
-    del ctx
     try:
-        await run_in_threadpool(
-            send_transactional_email, recipient, subject, html_content
+        await _send_once(
+            ctx,
+            kind="share",
+            send=lambda: run_in_threadpool(
+                send_transactional_email, recipient, subject, html_content
+            ),
         )
     except Exception:  # noqa: BLE001 — worker / inline path must not raise
         logger.exception(
@@ -165,8 +214,13 @@ async def task_send_nudge_email(
         access_code: Candidate / package access code.
         package_title: Assessment package title.
     """
-    del ctx
-    await EmailService.send_nudge_email(email, name, access_code, package_title)
+    await _send_once(
+        ctx,
+        kind="nudge",
+        send=lambda: EmailService.send_nudge_email(
+            email, name, access_code, package_title
+        ),
+    )
 
 
 async def task_store_cached_report(
@@ -177,6 +231,11 @@ async def task_store_cached_report(
     content: bytes,
 ) -> None:
     """Persist a rendered MindQ Report PDF in object storage.
+
+    In-process helper only: it is deliberately **not** registered with the ARQ
+    worker (``TASK_FUNCTIONS``) because its ``content`` argument is raw PDF
+    bytes, which must never be pickled into Redis (P2-04). Callers spawn it
+    on the API's own loop via ``enqueue_store_cached_report``.
 
     Args:
         ctx: ARQ worker context.
@@ -354,7 +413,8 @@ TASK_FUNCTIONS = (
     task_dispatch_candidate_invite,
     task_send_package_share,
     task_send_nudge_email,
-    task_store_cached_report,
+    # task_store_cached_report is intentionally absent: PDF bytes never ride
+    # Redis job arguments (P2-04).
     task_finalize_expired_assessment,
     task_sweep_expired_assessments,
     task_reconcile_unscored,

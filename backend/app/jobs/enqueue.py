@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -85,9 +85,64 @@ def _job_id_purge(candidate_id: UUID) -> str:
     return f"purge:{candidate_id}"
 
 
-def _job_id_expire(candidate_id: UUID, assessment_id: UUID) -> str:
-    """Dedup key for one module's deferred expiry finalize."""
-    return f"expire:{candidate_id}:{assessment_id}"
+def _job_id_expire(
+    candidate_id: UUID, assessment_id: UUID, started_at: datetime | None = None
+) -> str:
+    """Dedup key for one *attempt's* deferred expiry finalize (P2-03).
+
+    The attempt's ``started_at`` epoch is part of the key: after an HR reset
+    and a re-start, the old deferred job still holds the plain
+    ``expire:{cand}:{assess}`` id until it fires, which silently dropped the
+    new attempt's exact-time finalize. The stale job is harmless when it runs
+    (the new attempt is not yet expired, so it finalizes nothing).
+    """
+    base = f"expire:{candidate_id}:{assessment_id}"
+    if started_at is None:
+        return base
+    return f"{base}:{int(started_at.timestamp())}"
+
+
+def _job_id_refresh_rerun(candidate_id: UUID, token: str) -> str:
+    """Dedup key for a follow-up refresh queued from inside a running one.
+
+    The running job still owns ``refresh:{cand}``, so a follow-up under that id
+    would be deduped. ``token`` (target input digest or time bucket) keeps one
+    pending follow-up per distinct reason.
+    """
+    return f"refresh:{candidate_id}:rerun:{token}"
+
+
+# Delay before a follow-up refresh runs, so a burst of score changes settles.
+REFRESH_RERUN_DELAY = timedelta(seconds=30)
+
+
+_BINARY_TYPES = (bytes, bytearray, memoryview)
+
+
+class BinaryJobPayloadError(TypeError):
+    """Raised when raw bytes would be pickled into a Redis job (P2-04)."""
+
+
+def _reject_binary_payload(task_name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+    """Refuse to enqueue raw bytes (rendered PDFs, uploads) through Redis.
+
+    Large binaries in job arguments bloat Redis memory and ride the pickle
+    serializer. Upload to storage first and pass only the object key.
+
+    Args:
+        task_name: Job being enqueued (for the error message).
+        args: Positional job arguments.
+        kwargs: Keyword job arguments.
+
+    Raises:
+        BinaryJobPayloadError: Any argument is ``bytes``-like.
+    """
+    for value in (*args, *kwargs.values()):
+        if isinstance(value, _BINARY_TYPES):
+            raise BinaryJobPayloadError(
+                f"refusing to enqueue {task_name} with a binary argument; "
+                "store it and pass the storage key instead"
+            )
 
 
 async def _enqueue_or_run(
@@ -117,6 +172,7 @@ async def _enqueue_or_run(
         ``await_inline`` is False.
     """
     kwargs = dict(kwargs or {})
+    _reject_binary_payload(task_name, args, kwargs)
     pool = get_arq_pool()
     if pool is None:
         logger.debug(
@@ -218,6 +274,50 @@ async def enqueue_refresh_report_synthesis(
         args=(str(candidate_id),),
         await_inline=await_inline,
     )
+
+
+async def enqueue_refresh_report_synthesis_rerun(
+    candidate_id: UUID,
+    *,
+    token: str,
+    delay: timedelta = REFRESH_RERUN_DELAY,
+) -> Any:
+    """Queue a deferred follow-up refresh after the current one (P2-03).
+
+    Called by ``refresh_report_synthesis`` when its inputs changed while it
+    ran, or when it had to skip because another AI job was in flight. Without
+    Redis this is a no-op: inline runs have no job-id dedup to lose requests
+    to, and the next report view re-queues as usual.
+
+    Args:
+        candidate_id: Candidate whose report needs another pass.
+        token: Distinguishes follow-ups (e.g. the new input digest prefix).
+        delay: ARQ ``_defer_by``.
+
+    Returns:
+        ARQ job, or None when deduped / Redis is unavailable / enqueue failed.
+    """
+    pool = get_arq_pool()
+    job_id = _job_id_refresh_rerun(candidate_id, token)
+    if pool is None:
+        logger.debug("arq_refresh_rerun_skipped_no_pool job_id=%s", job_id)
+        return None
+    try:
+        job = await pool.enqueue_job(
+            task_refresh_report_synthesis.__name__,
+            str(candidate_id),
+            _job_id=job_id,
+            _defer_by=delay,
+        )
+    except Exception:
+        logger.exception("arq_refresh_rerun_enqueue_failed job_id=%s", job_id)
+        return None
+    logger.info(
+        "arq_refresh_rerun_%s job_id=%s",
+        "deduped" if job is None else "enqueued",
+        job_id,
+    )
+    return job
 
 
 async def enqueue_candidate_invite(
@@ -406,6 +506,7 @@ async def enqueue_finalize_expired_assessment(
     assessment_id: UUID,
     *,
     defer_until: datetime,
+    started_at: datetime | None = None,
 ) -> Any:
     """Schedule exact-time auto-finalize when a timed module starts.
 
@@ -416,12 +517,14 @@ async def enqueue_finalize_expired_assessment(
         candidate_id: Candidate who started the module.
         assessment_id: Timed assessment id.
         defer_until: UTC display deadline (``progress.expires_at``).
+        started_at: Attempt start; scopes the job id to this attempt so an
+            old attempt's deferred job cannot block a post-reset restart.
 
     Returns:
         ARQ job, ``None`` when deduped or Redis is unavailable.
     """
     pool = get_arq_pool()
-    job_id = _job_id_expire(candidate_id, assessment_id)
+    job_id = _job_id_expire(candidate_id, assessment_id, started_at)
     if pool is None:
         logger.debug(
             "arq_expire_skipped_no_pool job_id=%s",

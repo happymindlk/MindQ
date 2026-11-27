@@ -31,6 +31,10 @@ class Candidate(Base):
     synthesis_attempt_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    # P2-02: set atomically when the HR package-completion email is claimed.
+    hr_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -38,5 +42,6 @@ class Candidate(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    # Active uniqueness: partial unique index uq_candidates_package_email_active
-    # (package_id, email) WHERE deleted_at IS NULL — see migration.
+    # Active uniqueness: partial unique index uq_candidates_package_lower_email_active
+    # (package_id, lower(email)) WHERE deleted_at IS NULL — see migration
+    # 20261127130000_schema_index_constraint_cleanup.sql.

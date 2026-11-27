@@ -1,6 +1,7 @@
 """Background helpers that need their own DB session."""
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Iterator
@@ -20,7 +21,8 @@ from app.services.gemini_client import background_retry_profile
 from app.services.jd_scoring import FAILED_RETRY_COOLDOWN
 from app.services.package_service import PackageService
 from app.services.technical_eval import TechnicalEvalService
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -214,15 +216,74 @@ async def notify_hr_if_package_complete(candidate_id: UUID) -> None:
             ).scalar_one_or_none()
             if not corporate or not corporate.contact_email:
                 return
-            await EmailService.send_hr_completion_email(
-                corporate.contact_email,
-                candidate_name=candidate.full_name,
-                candidate_email=candidate.email,
-                package_title=package.title if package else "assessment package",
-                hr_name=corporate.name,
-            )
+            # P2-02: claim the one-shot flag before SES so two modules
+            # finalized close together (sweep, retries, reconciler) send
+            # exactly one email.
+            if not await claim_hr_notification(session, candidate_id):
+                logger.info(
+                    "hr_completion_email_already_sent candidate_id=%s", candidate_id
+                )
+                return
+            sent = False
+            try:
+                sent = await EmailService.send_hr_completion_email(
+                    corporate.contact_email,
+                    candidate_name=candidate.full_name,
+                    candidate_email=candidate.email,
+                    package_title=package.title if package else "assessment package",
+                    hr_name=corporate.name,
+                )
+            finally:
+                if not sent:
+                    # Unclaim so the next finalize / reconciler run can retry.
+                    await release_hr_notification(session, candidate_id)
         except Exception:
             logger.exception("hr_completion_email_failed candidate_id=%s", candidate_id)
+
+
+async def claim_hr_notification(session: AsyncSession, candidate_id: UUID) -> bool:
+    """Atomically mark the HR completion email as sent (P2-02).
+
+    ``UPDATE ... WHERE hr_notified_at IS NULL RETURNING`` lets exactly one
+    concurrent caller win; the row lock serializes the rest, which then see
+    the stamp and match nothing.
+
+    Args:
+        session: Async database session (committed here).
+        candidate_id: Candidate whose package just completed.
+
+    Returns:
+        True when this caller claimed the send.
+    """
+    claimed = (
+        await session.execute(
+            update(Candidate)
+            .where(Candidate.id == candidate_id, Candidate.hr_notified_at.is_(None))
+            .values(hr_notified_at=func.now())
+            .returning(Candidate.id)
+        )
+    ).scalar_one_or_none()
+    await session.commit()
+    return claimed is not None
+
+
+async def release_hr_notification(session: AsyncSession, candidate_id: UUID) -> None:
+    """Clear a claimed HR-notified stamp after a failed send.
+
+    Args:
+        session: Async database session (committed here).
+        candidate_id: Candidate whose claim should be released.
+    """
+    try:
+        await session.rollback()
+        await session.execute(
+            update(Candidate)
+            .where(Candidate.id == candidate_id)
+            .values(hr_notified_at=None)
+        )
+        await session.commit()
+    except Exception:
+        logger.exception("hr_notification_release_failed candidate_id=%s", candidate_id)
 
 
 async def score_ai_for_candidate(
@@ -282,7 +343,12 @@ async def refresh_report_synthesis(candidate_id: UUID) -> None:
     """
     if is_ai_job_inflight(candidate_id):
         logger.info("report_synthesis_refresh_skipped_inflight candidate_id=%s", candidate_id)
+        # The request would otherwise be lost (P2-03): try again shortly.
+        await _queue_refresh_rerun(
+            candidate_id, token=f"inflight-{int(time.time()) // REFRESH_RERUN_BUCKET_SECONDS}"
+        )
         return
+    synthesized_digest: str | None = None
     with _track_ai_job(candidate_id), background_retry_profile():
         async with SessionLocal() as session:
             candidate = await CandidateService.get_candidate(session, candidate_id)
@@ -340,6 +406,7 @@ async def refresh_report_synthesis(candidate_id: UUID) -> None:
             candidate = await CandidateService.get_candidate(session, candidate_id)
             if not candidate:
                 return
+            synthesized_digest = await _input_digest(session, candidate)
             try:
                 await CandidateService.evaluate_jd_if_package_complete(session, candidate)
             except Exception:
@@ -348,6 +415,64 @@ async def refresh_report_synthesis(candidate_id: UUID) -> None:
                     extra={"candidate_id": str(candidate_id)},
                 )
     await prewarm_report_pdf(candidate_id)
+    await _rerun_if_inputs_changed(candidate_id, synthesized_digest)
+
+
+# Follow-up refreshes after an in-flight skip share one job per time bucket.
+REFRESH_RERUN_BUCKET_SECONDS = 30
+
+
+async def _input_digest(session: AsyncSession, candidate: Candidate) -> str | None:
+    """Current synthesis input digest; None on any error (never blocks a run)."""
+    from app.services.jd_scoring import JdScoringService
+
+    try:
+        return await JdScoringService.current_input_digest(session, candidate=candidate)
+    except Exception:
+        logger.exception("report_input_digest_failed candidate_id=%s", candidate.id)
+        with contextlib.suppress(Exception):
+            await session.rollback()
+        return None
+
+
+async def _queue_refresh_rerun(candidate_id: UUID, *, token: str) -> None:
+    """Queue a deferred follow-up refresh; failures are logged, never raised."""
+    from app.jobs.enqueue import enqueue_refresh_report_synthesis_rerun
+
+    try:
+        await enqueue_refresh_report_synthesis_rerun(candidate_id, token=token)
+    except Exception:
+        logger.exception("report_refresh_rerun_failed candidate_id=%s", candidate_id)
+
+
+async def _rerun_if_inputs_changed(
+    candidate_id: UUID, synthesized_digest: str | None
+) -> None:
+    """Re-queue the refresh when inputs moved while this run was synthesizing.
+
+    A ``refresh:{cand}`` requested during a running refresh is deduped by ARQ
+    (the running job owns the id), so without this the newer scores would
+    never be synthesized until someone re-opened the report (P2-03).
+
+    Args:
+        candidate_id: Candidate just refreshed.
+        synthesized_digest: Input digest the synthesis ran against (None when
+            the package had no JD / no completed modules or lookup failed).
+    """
+    if synthesized_digest is None:
+        return
+    async with SessionLocal() as session:
+        candidate = await CandidateService.get_candidate(session, candidate_id)
+        if candidate is None:
+            return
+        current = await _input_digest(session, candidate)
+    if current is None or current == synthesized_digest:
+        return
+    logger.info(
+        "report_synthesis_inputs_changed candidate_id=%s", candidate_id,
+        extra={"event": "report_synthesis_inputs_changed"},
+    )
+    await _queue_refresh_rerun(candidate_id, token=current[:16])
 
 
 async def prewarm_report_pdf(candidate_id: UUID) -> None:

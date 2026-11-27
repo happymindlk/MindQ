@@ -16,6 +16,7 @@ import {
   isAttemptLocked,
   isTerminalSubmitConflict,
   isTimeExpired,
+  isUnauthorized,
   resolveRemainingSeconds,
   resolveResumeIndex,
   resolveTopDisclaimer,
@@ -80,6 +81,11 @@ interface AssessmentRunnerProps {
    */
   onTimeoutStarted?: () => void;
   onLocked: (message: string) => void;
+  /**
+   * Fired when autosave or submit returns 401 (session expired / revoked).
+   * The local draft is left intact so the attempt resumes after re-login.
+   */
+  onUnauthorized?: () => void;
   onExit: () => void;
   exitLabel?: string;
   /** Rendered under the card; preview mode uses it for the telemetry strip. */
@@ -100,6 +106,7 @@ export function AssessmentRunner({
   onTimeExpired,
   onTimeoutStarted,
   onLocked,
+  onUnauthorized,
   onExit,
   exitLabel = 'Back to dashboard',
   renderFooter,
@@ -237,7 +244,10 @@ export function AssessmentRunner({
           expiredSucceeded = true;
         } else {
           submittedRef.current = false;
-          if (isAttemptLocked(err)) {
+          if (isUnauthorized(err) && onUnauthorized) {
+            setConfirmOpen(false);
+            onUnauthorized();
+          } else if (isAttemptLocked(err)) {
             setConfirmOpen(false);
             onLocked(errorMessage(err, 'Assessment already completed. Modifications are locked.'));
           } else {
@@ -265,6 +275,7 @@ export function AssessmentRunner({
       markExpiredComplete,
       onLocked,
       onSubmitted,
+      onUnauthorized,
       telemetry,
       test.id,
       transport,
@@ -313,6 +324,7 @@ export function AssessmentRunner({
     // without waiting for write_expires_at grace / server polling drift.
     writeExpiresAt: hasWallClock ? test.expires_at : null,
     serverNow: test.server_now,
+    rttMs: test.client_rtt_ms,
     onExpire: hasWallClock && canAutoSubmit ? onExpire : undefined,
     enabled: hasWallClock && !submitting && !timeUp,
   });
@@ -354,6 +366,9 @@ export function AssessmentRunner({
         if (isTimeExpired(err)) {
           setTimeUp(true);
           void submit('expired');
+        } else if (isUnauthorized(err) && onUnauthorized) {
+          // Retrying with a dead token cannot succeed; the draft stays local.
+          onUnauthorized();
         } else if (isAttemptLocked(err)) {
           onLocked(errorMessage(err, 'Assessment already completed. Modifications are locked.'));
         } else {
@@ -371,7 +386,7 @@ export function AssessmentRunner({
         }
       }
     },
-    [onLocked, scheduleSaveRetry, submit, telemetry, test.id, transport],
+    [onLocked, onUnauthorized, scheduleSaveRetry, submit, telemetry, test.id, transport],
   );
 
   const flushDirty = useCallback(async () => {

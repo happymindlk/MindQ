@@ -5,17 +5,23 @@ import logging
 from uuid import UUID
 
 from starlette.concurrency import run_in_threadpool
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import HRUserContext, get_current_hr_user
 from app.database import get_db
 from app.services.client_package import ClientPackageService
 from app.services.storage import (
+    LOGO_MAX_BYTES,
     LogoStorageError,
     LogoValidationError,
     upload_logo,
     validate_logo_upload,
+)
+from app.services.upload_limits import (
+    UploadTooLargeError,
+    check_content_length,
+    read_upload_capped,
 )
 
 router = APIRouter()
@@ -26,6 +32,7 @@ logger = logging.getLogger(__name__)
 async def upload_corporate_logo(
     corporate_id: UUID,
     file: UploadFile = File(...),
+    content_length: str | None = Header(None),
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -39,7 +46,15 @@ async def upload_corporate_logo(
     if corporate_id != hr.corporate_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    raw = await file.read()
+    try:
+        # P2-09: bounded chunked read instead of loading the whole upload.
+        check_content_length(content_length, LOGO_MAX_BYTES)
+        raw = await read_upload_capped(file, LOGO_MAX_BYTES)
+    except UploadTooLargeError as exc:
+        raise HTTPException(
+            status_code=413,
+            detail="Logo must be 2 MB or smaller",
+        ) from exc
     try:
         filename, content_type = validate_logo_upload(
             file.content_type, raw, file.filename, corporate_id=corporate_id

@@ -1,0 +1,50 @@
+# MindQ API (Uvicorn) — systemd unit (reference template, P2-12).
+#
+# Install: /etc/systemd/system/mindq.service, then
+#          `systemctl daemon-reload && systemctl enable --now mindq`.
+# Paths below assume the layout in infra/README.md; adjust per host.
+# Secrets live in the EnvironmentFile (mode 0600, owned by root), never here.
+
+[Unit]
+Description=MindQ API (Uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=mindq
+Group=mindq
+WorkingDirectory=/opt/mindq/backend
+EnvironmentFile=/etc/mindq/mindq.env
+Environment=PYTHONUNBUFFERED=1
+Environment=WEB_CONCURRENCY=2
+Environment=FORWARDED_ALLOW_IPS=127.0.0.1
+
+# Loopback only: Nginx is the sole ingress. Graceful shutdown (30s) gives
+# in-flight submits time to finish; TimeoutStopSec leaves 10s of headroom
+# before systemd escalates to SIGKILL.
+ExecStart=/opt/mindq/backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8000 \
+    --workers ${WEB_CONCURRENCY} \
+    --timeout-graceful-shutdown 30 \
+    --proxy-headers --forwarded-allow-ips=${FORWARDED_ALLOW_IPS}
+
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=40
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+
+StandardOutput=append:/var/log/mindq/api.log
+StandardError=append:/var/log/mindq/api.log
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/mindq/backend/data /var/log/mindq
+
+[Install]
+WantedBy=multi-user.target

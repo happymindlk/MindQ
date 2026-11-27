@@ -38,7 +38,7 @@ async def _dispatch_candidate_invite(
     origin: str,
     close_time: datetime | None = None,
     candidate_first_name: str | None = None,
-) -> None:
+) -> bool:
     """ARQ / inline worker for one candidate invite; never raises silently.
 
     Args:
@@ -50,6 +50,9 @@ async def _dispatch_candidate_invite(
         origin: Absolute frontend origin for the portal link.
         close_time: Package assessment window end (UTC), if enforced.
         candidate_first_name: Greeting name; defaults to ``Candidate`` in SES helper.
+
+    Returns:
+        True when SES accepted the message.
     """
     clean_email = clean_recipient_email(candidate_email)
     link = _assessment_invite_link(access_code, origin=origin)
@@ -77,7 +80,7 @@ async def _dispatch_candidate_invite(
             redact_access_code(access_code),
             redact_link(link),
         )
-        return
+        return False
     if not sent:
         logger.error(
             "[INVITE FAILED] Candidate=%s Code=%s Link=%s "
@@ -86,6 +89,7 @@ async def _dispatch_candidate_invite(
             redact_access_code(access_code),
             redact_link(link),
         )
+    return bool(sent)
 
 
 @router.post(

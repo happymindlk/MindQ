@@ -1,0 +1,18 @@
+# MindQ API + worker logs — logrotate (reference template, P2-12).
+# Install: /etc/logrotate.d/mindq   (test with `logrotate -d /etc/logrotate.d/mindq`).
+#
+# systemd holds the files open via StandardOutput=append:, so copytruncate is
+# used instead of a signal-based reopen. Nginx logs are rotated by the distro's
+# own /etc/logrotate.d/nginx.
+
+/var/log/mindq/*.log {
+    daily
+    rotate 14
+    maxsize 100M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+    su mindq mindq
+}

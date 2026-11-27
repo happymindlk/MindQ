@@ -44,9 +44,12 @@ def _progress(*, started_seconds_ago, status="IN_PROGRESS", duration_seconds=180
     )
 
 
-def _result_all(rows):
+def _result_all(rows, *, db_now=NOW):
+    """Mock result; ``.all()`` rows carry the selected DB ``now()`` (P2-05)."""
     result = MagicMock()
-    result.all.return_value = rows
+    result.all.return_value = [
+        (*r, db_now) if isinstance(r, tuple) and len(r) == 2 else r for r in rows
+    ]
     result.scalars.return_value.all.return_value = [
         r[0] if isinstance(r, tuple) else r for r in rows
     ]

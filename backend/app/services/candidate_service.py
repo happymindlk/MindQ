@@ -270,6 +270,50 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# ``session.info`` key holding the database ``now()`` read by the last gate
+# query on this session (P2-05).
+DB_NOW_INFO_KEY = "mindq_db_now"
+
+
+def _remember_db_now(session: AsyncSession, value: Any) -> None:
+    """Stash the gate query's database ``now()`` on the session.
+
+    Args:
+        session: Session the gate query ran on.
+        value: The ``func.now()`` column from that query.
+    """
+    info = getattr(session, "info", None)
+    if isinstance(info, dict) and isinstance(value, datetime):
+        info[DB_NOW_INFO_KEY] = (
+            value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        )
+
+
+def request_clock(session: AsyncSession) -> datetime:
+    """Database clock read by this session's last gate query (P2-05).
+
+    Expiry, launchability and the sweep compare against Postgres ``now()``
+    rather than each app node's clock, so skew between API hosts cannot move
+    a candidate's deadline. ``load_runner_context`` / ``_gate_autosave`` /
+    ``list_expired_in_progress`` select ``func.now()`` alongside the row they
+    already load (no extra round trip) and record it here; follow-on code in
+    the same request (``submit_test``, ``ensure_started``, the ``/start``
+    response) reuses it. Falls back to the app clock when no gate ran.
+
+    Args:
+        session: Request / job session.
+
+    Returns:
+        Timezone-aware UTC instant.
+    """
+    info = getattr(session, "info", None)
+    if isinstance(info, dict):
+        value = info.get(DB_NOW_INFO_KEY)
+        if isinstance(value, datetime):
+            return value
+    return _utcnow()
+
+
 class CandidateService:
     @staticmethod
     async def login(
@@ -535,7 +579,8 @@ class CandidateService:
         """Wipe responses, progress, reports, and evaluations so the candidate can retake.
 
         Clears module answers, attempt timers (including ``expires_at``), scores,
-        cached report snapshots / JD narrative, and ``logged_in_at``. Invite
+        cached report snapshots / JD narrative, ``logged_in_at`` and
+        ``hr_notified_at``. Invite
         identity (email, access_code, package) is kept.
 
         Args:
@@ -586,6 +631,8 @@ class CandidateService:
             delete(CandidateEvaluation).where(CandidateEvaluation.candidate_id == candidate_id)
         )
         candidate.logged_in_at = None
+        # A retake must notify HR again when the package re-completes (P2-02).
+        candidate.hr_notified_at = None
         await session.commit()
         await session.refresh(candidate)
         return candidate
@@ -912,6 +959,7 @@ class CandidateService:
                 CandidateProgress,
                 Package.open_time,
                 Package.close_time,
+                func.now().label("db_now"),
             )
             .join(Package, Package.id == Assessment.package_id)
             .outerjoin(
@@ -935,7 +983,8 @@ class CandidateService:
         row = (await session.execute(stmt)).first()
         if row is None:
             raise AssessmentNotFoundError()
-        assessment, progress, open_time, close_time = row
+        assessment, progress, open_time, close_time, db_now = row
+        _remember_db_now(session, db_now)
         if for_update and progress is not None:
             # Lock the progress row in a separate query so concurrent
             # start/autosave/submit still serialize when a row exists.
@@ -949,7 +998,7 @@ class CandidateService:
             open_time,
             close_time,
             progress.started_at if progress is not None else None,
-            _utcnow(),
+            request_clock(session),
         )
         answers: dict[str, Any] = {}
         if include_answers:
@@ -1073,7 +1122,9 @@ class CandidateService:
                     if commit:
                         await session.commit()
             return progress
-        started = _utcnow()
+        # DB clock from the preceding gate query, so the deadline is on the
+        # same clock every later gate compares against (P2-05).
+        started = request_clock(session)
         duration = assessment_duration_seconds(assessment)
         deadline = display_expires_at(started, duration)
         if progress is None:
@@ -1146,6 +1197,7 @@ class CandidateService:
                 Package.open_time,
                 Package.close_time,
                 question_ok,
+                func.now().label("db_now"),
             )
             .join(Package, Package.id == Assessment.package_id)
             .join(
@@ -1174,19 +1226,21 @@ class CandidateService:
                 raise AssessmentNotFoundError()
             raise AssessmentNotStartedError()
 
-        assessment, progress, open_time, close_time, in_bank = row
+        assessment, progress, open_time, close_time, in_bank, db_now = row
+        _remember_db_now(session, db_now)
         if not in_bank:
             raise UnknownQuestionError()
         ensure_not_submitted(progress)
+        clock = request_clock(session)
         ensure_module_launchable(
             open_time,
             close_time,
             progress.started_at,
-            _utcnow(),
+            clock,
         )
         if progress.started_at is None:
             raise AssessmentNotStartedError()
-        if is_strict_expired(assessment, progress, _utcnow()):
+        if is_strict_expired(assessment, progress, clock):
             raise AssessmentTimeExpiredError()
         return assessment, progress
 
@@ -1368,7 +1422,7 @@ class CandidateService:
         ):
             raise AssessmentNotStartedError()
 
-        now = _utcnow()
+        now = request_clock(session)
         accept_pending = not is_strict_expired(assessment, progress, now)
         if accept_pending and pending_responses:
             await CandidateService._upsert_pending_responses(
