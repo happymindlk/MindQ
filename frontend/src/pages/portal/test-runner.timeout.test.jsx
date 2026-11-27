@@ -193,13 +193,16 @@ describe('TestRunner timeout completion lifecycle', () => {
     vi.setSystemTime(startedAt);
 
     seedDashboard();
-    vi.mocked(api.candidate.getTest).mockResolvedValue(startedPayload());
-
     const locked = Object.assign(new Error('Assessment already completed. Modifications are locked.'), {
       status: 409,
-      code: null,
+      code: 'ALREADY_SUBMITTED',
     });
+    // First GET loads the runner; the second is the COMPLETED confirmation.
+    vi.mocked(api.candidate.getTest)
+      .mockResolvedValueOnce(startedPayload())
+      .mockRejectedValueOnce(locked);
     vi.mocked(api.candidate.submitTest).mockRejectedValue(locked);
+    localStorage.setItem(`assessment_attempt_cand-1_${TEST_ID}`, '{"q1":"Alpha"}');
 
     renderPortalRunner();
     expect(await screen.findByRole('timer')).toBeInTheDocument();
@@ -221,5 +224,37 @@ describe('TestRunner timeout completion lifecycle', () => {
       vi.advanceTimersByTime(TIMEOUT_AUTO_EXIT_MS);
     });
     expect(navigate).toHaveBeenCalledWith('/portal/dashboard', { replace: true });
+    // Confirmed COMPLETED: the local backup is cleared.
+    expect(localStorage.getItem(`assessment_attempt_cand-1_${TEST_ID}`)).toBeNull();
+  });
+
+  it('keeps the draft and offers Retry when ALREADY_SUBMITTED cannot be confirmed (P1-01)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const startedAt = new Date('2026-11-19T12:00:00.000Z');
+    vi.setSystemTime(startedAt);
+
+    seedDashboard();
+    const locked = Object.assign(new Error('Assessment already completed. Modifications are locked.'), {
+      status: 409,
+      code: 'ALREADY_SUBMITTED',
+    });
+    // Confirmation GET says the module is still IN_PROGRESS.
+    vi.mocked(api.candidate.getTest)
+      .mockResolvedValueOnce(startedPayload())
+      .mockResolvedValueOnce(startedPayload({ status: 'IN_PROGRESS' }));
+    vi.mocked(api.candidate.submitTest).mockRejectedValue(locked);
+    localStorage.setItem(`assessment_attempt_cand-1_${TEST_ID}`, '{"q1":"Alpha"}');
+
+    renderPortalRunner();
+    expect(await screen.findByRole('timer')).toBeInTheDocument();
+
+    await act(async () => {
+      vi.setSystemTime(new Date(startedAt.getTime() + 4000));
+      vi.advanceTimersByTime(4000);
+    });
+
+    expect(await screen.findByRole('button', { name: /Retry submit/ })).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Submitted' })).not.toBeInTheDocument();
+    expect(localStorage.getItem(`assessment_attempt_cand-1_${TEST_ID}`)).toBe('{"q1":"Alpha"}');
   });
 });

@@ -29,6 +29,69 @@ def is_schema_drift_error(exc: BaseException) -> bool:
     )
 
 
+# Postgres' default name for candidate_progress UNIQUE (candidate_id, assessment_id)
+# (initial_schema.sql declares it unnamed).
+PROGRESS_UNIQUE_CONSTRAINT = "candidate_progress_candidate_id_assessment_id_key"
+
+
+def is_progress_unique_violation(exc: BaseException) -> bool:
+    """True only for a duplicate ``candidate_progress`` (candidate, assessment) row.
+
+    That is the one IntegrityError meaning "another request already created /
+    completed this attempt". Every other constraint failure in the submit
+    transaction means the commit rolled back and nothing was saved.
+
+    Args:
+        exc: SQLAlchemy ``IntegrityError`` (or driver error).
+
+    Returns:
+        True for SQLSTATE 23505 on the progress unique constraint.
+    """
+    orig = getattr(exc, "orig", None) or exc
+    candidates = [orig, getattr(orig, "__cause__", None)]
+    sqlstate = None
+    constraint = None
+    for err in candidates:
+        if err is None:
+            continue
+        sqlstate = sqlstate or getattr(err, "sqlstate", None) or getattr(err, "pgcode", None)
+        constraint = constraint or getattr(err, "constraint_name", None)
+        diag = getattr(err, "diag", None)
+        if diag is not None:
+            constraint = constraint or getattr(diag, "constraint_name", None)
+    if sqlstate is not None and sqlstate != "23505":
+        return False
+    if constraint:
+        return constraint == PROGRESS_UNIQUE_CONSTRAINT
+    # Driver did not expose the name: fall back to the message text.
+    return PROGRESS_UNIQUE_CONSTRAINT in str(exc)
+
+
+#: Deadlock detected / serialization failure: the transaction was rolled
+#: back by Postgres and is safe to retry from the start.
+RETRYABLE_TXN_SQLSTATES = frozenset({"40P01", "40001"})
+
+
+def is_deadlock_error(exc: BaseException) -> bool:
+    """True for SQLSTATE 40P01 (deadlock) / 40001 (serialization failure).
+
+    Args:
+        exc: SQLAlchemy or driver exception.
+
+    Returns:
+        True when re-running the whole transaction may succeed.
+    """
+    orig = getattr(exc, "orig", None)
+    for err in (orig, getattr(orig, "__cause__", None), exc):
+        if err is None:
+            continue
+        code = getattr(err, "sqlstate", None) or getattr(err, "pgcode", None)
+        if code in RETRYABLE_TXN_SQLSTATES:
+            return True
+    text = str(exc).lower()
+    return "deadlock detected" in text
+
+
 def is_transient_db_error(exc: BaseException) -> bool:
     """True for disconnects, pooler timeouts, and prepared-statement drops.
 
@@ -44,6 +107,8 @@ def is_transient_db_error(exc: BaseException) -> bool:
     orig = getattr(exc, "orig", None)
     sqlstate = getattr(orig, "sqlstate", None) if orig is not None else None
     if getattr(exc, "connection_invalidated", False):
+        return True
+    if is_deadlock_error(exc):
         return True
     if "prepared statement" in text or sqlstate == "26000":
         return True
@@ -98,6 +163,10 @@ class AssessmentTimeExpiredError(Exception):
 
     def __init__(self) -> None:
         super().__init__(self.detail)
+        # Set by autosave when it finalized the module itself; the route then
+        # queues scoring (and report synthesis when the package is complete).
+        self.auto_finalized = False
+        self.package_complete = False
 
 
 class AssessmentNotStartedError(Exception):
@@ -143,6 +212,7 @@ class UnknownQuestionError(Exception):
 class AssessmentAlreadySubmittedError(Exception):
     """Writes and retakes are locked after a candidate submits."""
 
+    code = "ALREADY_SUBMITTED"
     detail = "Assessment already completed. Modifications are locked."
 
     def __init__(self) -> None:

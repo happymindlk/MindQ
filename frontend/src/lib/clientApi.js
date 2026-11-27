@@ -110,7 +110,13 @@ export const clientApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email }),
     });
-    if (!res.ok) throw new Error(await readError(res, 'Could not send code'));
+    if (!res.ok) {
+      const err = new Error(await readError(res, 'Could not send code'));
+      err.status = res.status;
+      const retryAfter = Number.parseInt(res.headers?.get?.('Retry-After') || '', 10);
+      err.retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 0;
+      throw err;
+    }
     const payload = await res.json();
     if (!payload?.temp_token) {
       throw new Error('Verification did not return a session. Request a new code.');
@@ -186,17 +192,30 @@ export const clientApi = {
    * @returns {Promise<import('./download-response').ZipDownloadResult>}
    */
   async downloadPackageReportsZip(packageId, packageTitle = '', { signal } = {}) {
-    const res = await clientRequest(
-      `/api/v1/client/packages/${encodeURIComponent(packageId)}/reports-zip`,
-      'Failed to download reports',
-      { signal },
-    );
-    const filename = await saveAttachmentResponse(res, reportsZipFilename(packageTitle));
-    return {
-      filename,
-      succeeded: Number(res.headers.get('x-report-zip-count') || 0),
-      failed: Number(res.headers.get('x-report-zip-failed') || 0),
-    };
+    // The server caps each ZIP (memory bound) and points at the next part with
+    // X-Report-Zip-Next-Offset; save every part in order.
+    const base = `/api/v1/client/packages/${encodeURIComponent(packageId)}/reports-zip`;
+    let offset = 0;
+    let parts = 0;
+    let succeeded = 0;
+    let failed = 0;
+    let filename = '';
+    for (;;) {
+      const res = await clientRequest(
+        offset > 0 ? `${base}?offset=${offset}` : base,
+        'Failed to download reports',
+        { signal },
+      );
+      const saved = await saveAttachmentResponse(res, reportsZipFilename(packageTitle));
+      parts += 1;
+      if (!filename) filename = saved;
+      succeeded += Number(res.headers.get('x-report-zip-count') || 0);
+      failed += Number(res.headers.get('x-report-zip-failed') || 0);
+      const next = Number.parseInt(res.headers.get('x-report-zip-next-offset') || '', 10);
+      if (!Number.isFinite(next) || next <= offset) break;
+      offset = next;
+    }
+    return parts > 1 ? { filename, succeeded, failed, parts } : { filename, succeeded, failed };
   },
 
   async getBlindReview(packageToken) {

@@ -21,7 +21,10 @@ class PackageModule(Base):
         Uuid, ForeignKey("packages.id", ondelete="CASCADE"), primary_key=True
     )
     global_module_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("global_modules.id", ondelete="RESTRICT"), primary_key=True
+        Uuid,
+        ForeignKey("global_modules.id", ondelete="RESTRICT"),
+        primary_key=True,
+        index=True,
     )
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # Eager JSONB snapshot of master questions for this cart row.

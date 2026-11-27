@@ -124,23 +124,35 @@ async def record_session_event(
     return row
 
 
+#: Upper bound for one session-log page (P1-17).
+SESSION_LOG_MAX_LIMIT = 2000
+
+
 async def list_session_logs_for_candidate(
     session: AsyncSession,
     candidate_id: UUID,
+    *,
+    limit: int = 500,
+    offset: int = 0,
 ) -> list[CandidateSessionLog]:
-    """Return chronological session logs for one candidate.
+    """Return chronological session logs for one candidate (one page).
 
     Args:
         session: Async database session.
         candidate_id: Candidate whose audit trail to load.
+        limit: Max rows (capped at ``SESSION_LOG_MAX_LIMIT``).
+        offset: Rows to skip.
 
     Returns:
         Rows ordered by ``occurred_at`` ascending.
     """
+    limit = max(1, min(int(limit), SESSION_LOG_MAX_LIMIT))
     result = await session.execute(
         select(CandidateSessionLog)
         .where(CandidateSessionLog.candidate_id == candidate_id)
-        .order_by(CandidateSessionLog.occurred_at.asc())
+        .order_by(CandidateSessionLog.occurred_at.asc(), CandidateSessionLog.id)
+        .limit(limit)
+        .offset(max(0, int(offset)))
     )
     return list(result.scalars().all())
 

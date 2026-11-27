@@ -242,6 +242,35 @@ describe('clientApi.downloadPackageReportsZip', () => {
     expect(anchor.click).toHaveBeenCalledOnce();
   });
 
+  it('follows X-Report-Zip-Next-Offset and saves every part', async () => {
+    fetch
+      .mockResolvedValueOnce(
+        zipResponse({
+          'content-disposition': 'attachment; filename="MindQ Reports - Big (part 1).zip"',
+          'x-report-zip-count': '100',
+          'x-report-zip-failed': '0',
+          'x-report-zip-next-offset': '100',
+        }),
+      )
+      .mockResolvedValueOnce(
+        zipResponse({
+          'content-disposition': 'attachment; filename="MindQ Reports - Big (part 2).zip"',
+          'x-report-zip-count': '40',
+          'x-report-zip-failed': '2',
+        }),
+      );
+
+    await expect(clientApi.downloadPackageReportsZip('pkg-1', 'Big')).resolves.toEqual({
+      filename: 'MindQ Reports - Big (part 1).zip',
+      succeeded: 140,
+      failed: 2,
+      parts: 2,
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[1][0]).toMatch(/reports-zip\?offset=100$/);
+    expect(anchor.download).toBe('MindQ Reports - Big (part 2).zip');
+  });
+
   it('surfaces a 404 when the package has no completed reports', async () => {
     fetch.mockResolvedValue(zipResponse({}, { ok: false, status: 404 }));
     await expect(clientApi.downloadPackageReportsZip('pkg-1')).rejects.toThrow(

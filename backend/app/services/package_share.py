@@ -25,6 +25,8 @@ from app.services.email import (
     render_package_share_html,
 )
 
+from app.services.email import redact_access_code, redact_link
+
 logger = logging.getLogger(__name__)
 
 
@@ -224,8 +226,8 @@ async def share_package(
     logger.info(
         "[INVITE DISPATCHED] Candidate=%s Code=%s Link=%s",
         recipient,
-        package.access_code,
-        candidate_link,
+        redact_access_code(package.access_code),
+        redact_link(candidate_link),
     )
     # Open enrollment before SES so a delivery failure cannot undo accept.
     if not package.allow_open_enrollment:

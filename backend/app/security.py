@@ -32,6 +32,52 @@ _INSECURE_JWT_SECRETS = frozenset(
 )
 
 
+def production_config_warnings(settings: Settings) -> list[str]:
+    """Risky-but-bootable settings, logged as warnings at startup (P1-14/15).
+
+    These are warnings, not boot refusals, so servers deployed before the
+    variables were documented keep serving. Set them, then they go quiet.
+
+    Args:
+        settings: Loaded application settings.
+
+    Returns:
+        Human-readable warning messages (empty when the config is clean).
+    """
+    from urllib.parse import urlparse
+
+    from app.config import KNOWN_ENVIRONMENTS
+
+    warnings: list[str] = []
+    env = (settings.ENVIRONMENT or "").strip().lower()
+    if env not in KNOWN_ENVIRONMENTS:
+        warnings.append(
+            f"ENVIRONMENT={settings.ENVIRONMENT!r} is not one of "
+            f"{sorted(KNOWN_ENVIRONMENTS)}; it is treated as non-production"
+        )
+    if settings.is_production and settings.DEBUG:
+        warnings.append(
+            "ENVIRONMENT=production with DEBUG=true: API docs are public and "
+            "weak-secret checks are skipped; set DEBUG=false"
+        )
+    if not settings.DEBUG:
+        if env == "development":
+            warnings.append(
+                "DEBUG=false but ENVIRONMENT is unset ('development'); set "
+                "ENVIRONMENT=production (or qa/staging) explicitly"
+            )
+        frontend = (settings.FRONTEND_URL or "").strip()
+        host = (urlparse(frontend).hostname or "").lower()
+        if not frontend:
+            warnings.append(
+                "FRONTEND_URL is not set; invite links fall back to the default "
+                "Pages URL in production. Set FRONTEND_URL to the public app origin"
+            )
+        elif host in {"localhost", "127.0.0.1", "0.0.0.0"}:
+            warnings.append(f"FRONTEND_URL={frontend!r} points at localhost with DEBUG=false")
+    return warnings
+
+
 def assert_production_ready(settings: Settings) -> None:
     """Refuse to boot when DEBUG is off and secrets / CORS look like local defaults.
 
@@ -41,6 +87,8 @@ def assert_production_ready(settings: Settings) -> None:
     Raises:
         RuntimeError: When production configuration is unsafe.
     """
+    for message in production_config_warnings(settings):
+        logger.warning(message, extra={"event": "unsafe_config_warning"})
     if settings.DEBUG:
         return
 
@@ -98,22 +146,205 @@ def assert_production_ready(settings: Settings) -> None:
     if errors:
         raise RuntimeError("Unsafe production configuration:\n- " + "\n- ".join(errors))
 
+    if not settings.redis_url_has_password:
+        # Warning, not a boot refusal, so a deploy that predates Redis auth
+        # keeps serving. Rotate REDIS_URL to redis://:<password>@host ASAP.
+        logger.warning(
+            "REDIS_URL has no password; Redis must require auth because ARQ "
+            "unpickles job payloads (see docker-compose.yml / DEPLOYMENT.md)",
+            extra={"event": "redis_unauthenticated"},
+        )
+
+
+def _retry_after_seconds(oldest: float, window_seconds: float, now: float) -> int:
+    """Seconds until the oldest hit falls out of the window (at least 1)."""
+    return max(1, int(window_seconds - (now - oldest)) + 1)
+
+
+def _raise_too_many_requests(
+    *,
+    detail: str,
+    retry_after: int,
+    bucket: str,
+    identity: str,
+) -> None:
+    """Log a blocked auth attempt and raise HTTP 429 with Retry-After."""
+    logger.warning(
+        "auth_rate_limited",
+        extra={
+            "event": "auth_rate_limited",
+            "bucket": bucket,
+            "identity": identity,
+            "retry_after": retry_after,
+            "detail": detail,
+        },
+    )
+    raise HTTPException(
+        status_code=429,
+        detail=detail,
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Shared rate-limit store (Redis)
+# ---------------------------------------------------------------------------
+#
+# Limiters keep a synchronous API (``check`` / ``assert_allowed`` / ...) so
+# every route call site stays unchanged. When a Redis store is configured
+# (``configure_rate_limit_store`` at app startup) budgets are shared across
+# every worker and node; otherwise, and for 30s after any Redis error, they
+# fall back to a per-process window. Redis calls use 250ms timeouts, so a
+# Redis problem costs at most one short stall before the breaker opens.
+
+# Sliding-window log in a sorted set. Atomic, uses Redis' clock (immune to
+# app-node skew), and sets a TTL so idle keys evict themselves.
+#   mode "hit":   count, refuse at max, else record this hit
+#   mode "peek":  count only (AuthFailureLimiter.assert_allowed)
+#   mode "add":   record without checking (AuthFailureLimiter.record_failure)
+# Returns {allowed (1/0), count, oldest_score_ms, now_ms}.
+_SLIDING_WINDOW_LUA = """
+local key = KEYS[1]
+local window_ms = tonumber(ARGV[1])
+local max_hits = tonumber(ARGV[2])
+local mode = ARGV[3]
+local member = ARGV[4]
+local t = redis.call('TIME')
+local now_ms = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now_ms - window_ms)
+local count = redis.call('ZCARD', key)
+if mode ~= 'add' and count >= max_hits then
+  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
+  return {0, count, tonumber(oldest[2]) or now_ms, now_ms}
+end
+if mode ~= 'peek' then
+  redis.call('ZADD', key, now_ms, member)
+  redis.call('PEXPIRE', key, window_ms)
+  count = count + 1
+end
+return {1, count, 0, now_ms}
+"""
+
+_KEY_PREFIX = "mindq:rl:"
+_BREAKER_SECONDS = 30.0
+
+
+class _RateLimitStore:
+    """Process-wide handle to the shared Redis store with a circuit breaker."""
+
+    def __init__(self) -> None:
+        self.client = None
+        self._script = None
+        self._down_until = 0.0
+
+    def configure(self, client) -> None:
+        self.client = client
+        self._script = client.register_script(_SLIDING_WINDOW_LUA) if client else None
+        self._down_until = 0.0
+
+    def run(self, key: str, window_seconds: float, max_hits: int, mode: str):
+        """Run the window script; ``None`` means "use the local fallback"."""
+        if self._script is None or time.monotonic() < self._down_until:
+            return None
+        try:
+            allowed, count, oldest_ms, now_ms = self._script(
+                keys=[_KEY_PREFIX + key],
+                args=[int(window_seconds * 1000), int(max_hits), mode, uuid.uuid4().hex],
+            )
+            return int(allowed), int(count), float(oldest_ms), float(now_ms)
+        except Exception as exc:  # redis.RedisError, timeouts, script errors
+            self._down_until = time.monotonic() + _BREAKER_SECONDS
+            logger.warning(
+                "rate_limit_store_unavailable",
+                extra={
+                    "event": "rate_limit_store_unavailable",
+                    "error_type": type(exc).__name__,
+                    "fallback_seconds": _BREAKER_SECONDS,
+                },
+            )
+            return None
+
+    def delete(self, key: str) -> None:
+        if self.client is None or time.monotonic() < self._down_until:
+            return
+        try:
+            self.client.delete(_KEY_PREFIX + key)
+        except Exception:
+            self._down_until = time.monotonic() + _BREAKER_SECONDS
+
+
+_store = _RateLimitStore()
+
+
+def configure_rate_limit_store(redis_url: str | None) -> bool:
+    """Point every limiter at a shared Redis (call once at app startup).
+
+    Args:
+        redis_url: ``REDIS_URL``; ``None`` / empty keeps per-process limits.
+
+    Returns:
+        True when the shared store is active.
+    """
+    if not redis_url:
+        _store.configure(None)
+        return False
+    import redis
+
+    client = redis.Redis.from_url(
+        redis_url,
+        socket_connect_timeout=0.25,
+        socket_timeout=0.25,
+        health_check_interval=30,
+    )
+    _store.configure(client)
+    logger.info("rate_limit_store_configured", extra={"event": "rate_limit_store_configured"})
+    return True
+
+
+def disable_rate_limit_store() -> None:
+    """Return to per-process limits (shutdown / tests)."""
+    client = _store.client
+    _store.configure(None)
+    if client is not None:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+def _retry_after_ms(oldest_ms: float, window_seconds: float, now_ms: float) -> int:
+    return max(1, int((window_seconds * 1000 - (now_ms - oldest_ms)) / 1000) + 1)
+
+
+# Local fallback: drop idle keys once a dict grows past this many entries.
+_LOCAL_PRUNE_THRESHOLD = 5000
+
+
+def _prune_local(hits: dict[str, list[float]], now: float, window_seconds: float) -> None:
+    """Evict keys whose newest hit is outside the window (caller holds lock)."""
+    if len(hits) < _LOCAL_PRUNE_THRESHOLD:
+        return
+    cutoff = now - window_seconds
+    for key in [k for k, v in hits.items() if not v or v[-1] <= cutoff]:
+        hits.pop(key, None)
+
 
 class RateLimiter:
-    """In-process fixed-window rate limiter.
+    """Sliding-window rate limiter shared across workers/nodes via Redis.
 
-    Suitable for a single FastAPI worker. When running multiple instances, back
-    this with a shared store (Redis) — counters otherwise multiply by instance count.
+    Falls back to a per-process window when no Redis store is configured or
+    Redis is failing (see ``configure_rate_limit_store``).
     """
 
-    def __init__(self, max_requests: int, window_seconds: float) -> None:
+    def __init__(self, max_requests: int, window_seconds: float, *, name: str = "") -> None:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
+        self.name = name or f"rl{id(self)}"
         self._hits: dict[str, list[float]] = defaultdict(list)
         self._lock = Lock()
 
     def reset(self) -> None:
-        """Clear all buckets (tests only)."""
+        """Clear all local buckets (tests only)."""
         with self._lock:
             self._hits.clear()
 
@@ -121,55 +352,166 @@ class RateLimiter:
         """Raise HTTP 429 when ``key`` exceeds the window budget.
 
         Args:
-            key: Client identity (usually IP + route bucket).
+            key: Client identity (usually route bucket + IP or user id).
 
         Raises:
             HTTPException: Status 429 when the limit is exceeded.
         """
+        bucket = key.split(":", 1)[0] if ":" in key else key
+        shared = _store.run(f"{self.name}:{key}", self.window_seconds, self.max_requests, "hit")
+        if shared is not None:
+            allowed, _count, oldest_ms, now_ms = shared
+            if not allowed:
+                _raise_too_many_requests(
+                    detail="Too many requests. Try again later.",
+                    retry_after=_retry_after_ms(oldest_ms, self.window_seconds, now_ms),
+                    bucket=bucket,
+                    identity=key,
+                )
+            return
+
         now = time.monotonic()
         with self._lock:
-            bucket = list(self._hits.get(key, []))
+            _prune_local(self._hits, now, self.window_seconds)
             cutoff = now - self.window_seconds
-            kept = [t for t in bucket if t > cutoff]
+            kept = [t for t in self._hits.get(key, []) if t > cutoff]
             if len(kept) >= self.max_requests:
                 self._hits[key] = kept
-                raise HTTPException(status_code=429, detail="Too many requests. Try again later.")
+                oldest = min(kept) if kept else now
+                _raise_too_many_requests(
+                    detail="Too many requests. Try again later.",
+                    retry_after=_retry_after_seconds(oldest, self.window_seconds, now),
+                    bucket=bucket,
+                    identity=key,
+                )
             kept.append(now)
             self._hits[key] = kept
 
 
-# Auth-adjacent: ~10 attempts / 15 minutes (OWASP-style).
-login_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
+class AuthFailureLimiter:
+    """Sliding-window counter for failed auth attempts (wrong password/OTP).
+
+    Call :meth:`assert_allowed` before processing a request so identities that
+    already burned the budget get 429, and :meth:`record_failure` on each
+    failure. Failures expire with the window; a success does not wipe them,
+    so one valid account cannot reset the budget for a shared IP.
+    """
+
+    def __init__(self, max_failures: int, window_seconds: float, *, name: str = "") -> None:
+        self.max_failures = max_failures
+        self.window_seconds = window_seconds
+        self.name = name or f"af{id(self)}"
+        self._hits: dict[str, list[float]] = defaultdict(list)
+        self._lock = Lock()
+
+    def reset(self) -> None:
+        """Clear all local buckets (tests only)."""
+        with self._lock:
+            self._hits.clear()
+
+    def clear(self, key: str) -> None:
+        """Drop recorded failures for ``key`` (admin unlock / tests)."""
+        _store.delete(f"{self.name}:{key}")
+        with self._lock:
+            self._hits.pop(key, None)
+
+    def assert_allowed(self, key: str) -> None:
+        """Raise HTTP 429 when ``key`` already has too many recent failures.
+
+        Args:
+            key: Client identity (usually ``bucket:ip``).
+
+        Raises:
+            HTTPException: Status 429 when the failure budget is exhausted.
+        """
+        bucket = key.split(":", 1)[0] if ":" in key else key
+        shared = _store.run(f"{self.name}:{key}", self.window_seconds, self.max_failures, "peek")
+        if shared is not None:
+            allowed, _count, oldest_ms, now_ms = shared
+            if not allowed:
+                _raise_too_many_requests(
+                    detail="Too many failed login attempts. Try again later.",
+                    retry_after=_retry_after_ms(oldest_ms, self.window_seconds, now_ms),
+                    bucket=bucket,
+                    identity=key,
+                )
+            return
+
+        now = time.monotonic()
+        with self._lock:
+            kept = [t for t in self._hits.get(key, []) if t > now - self.window_seconds]
+            self._hits[key] = kept
+            if len(kept) >= self.max_failures:
+                oldest = min(kept)
+                _raise_too_many_requests(
+                    detail="Too many failed login attempts. Try again later.",
+                    retry_after=_retry_after_seconds(oldest, self.window_seconds, now),
+                    bucket=bucket,
+                    identity=key,
+                )
+
+    def record_failure(self, key: str) -> None:
+        """Append a failed attempt for ``key`` inside the sliding window.
+
+        Args:
+            key: Client identity (usually ``bucket:ip``).
+        """
+        shared = _store.run(f"{self.name}:{key}", self.window_seconds, self.max_failures, "add")
+        if shared is not None:
+            count = shared[1]
+        else:
+            now = time.monotonic()
+            with self._lock:
+                _prune_local(self._hits, now, self.window_seconds)
+                kept = [t for t in self._hits.get(key, []) if t > now - self.window_seconds]
+                kept.append(now)
+                self._hits[key] = kept
+                count = len(kept)
+        logger.info(
+            "auth_failure_recorded",
+            extra={
+                "event": "auth_failure_recorded",
+                "identity": key,
+                "failure_count": count,
+                "max_failures": self.max_failures,
+            },
+        )
+
+
+# Candidate/HR verify IP shield: 5 attempts / minute (OWASP-style auth surface).
+login_limiter = RateLimiter(max_requests=5, window_seconds=60, name="login_limiter")
 # Public capability URLs / spam surfaces: 60 / minute per IP.
-public_limiter = RateLimiter(max_requests=60, window_seconds=60)
+public_limiter = RateLimiter(max_requests=60, window_seconds=60, name="public_limiter")
 # Endpoints that can trigger paid Gemini calls or PDF rendering (denial-of-wallet).
-report_limiter = RateLimiter(max_requests=20, window_seconds=10 * 60)
+report_limiter = RateLimiter(max_requests=20, window_seconds=10 * 60, name="report_limiter")
 # Bulk ZIP export packages many PDFs in one request; keep the budget tight so
 # a single HR user cannot queue unbounded WeasyPrint work.
-reports_zip_limiter = RateLimiter(max_requests=5, window_seconds=10 * 60)
+reports_zip_limiter = RateLimiter(max_requests=5, window_seconds=10 * 60, name="reports_zip_limiter")
 # Report JSON views are database-only (Gemini runs in background tasks with
 # its own cooldown), so they get a budget that covers narrative polling.
-report_view_limiter = RateLimiter(max_requests=120, window_seconds=10 * 60)
+report_view_limiter = RateLimiter(max_requests=120, window_seconds=10 * 60, name="report_view_limiter")
 # Outbound email triggers (nudges, invites): stop HR accounts being used as a spam relay.
-email_limiter = RateLimiter(max_requests=30, window_seconds=60 * 60)
+email_limiter = RateLimiter(max_requests=30, window_seconds=60 * 60, name="email_limiter")
 # Admin password step. Each accepted attempt can send mail, so this is separate
 # from candidate/client login. Per-address send caps live in Postgres.
-admin_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
-# OTP guesses. The 3-strike lock is stored on the challenge row; this only
+admin_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60, name="admin_otp_limiter")
+# OTP guesses. The challenge-row lock is the primary control; this only
 # slows a single IP that is cycling stolen temp tokens.
-admin_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
+admin_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60, name="admin_otp_verify_limiter")
 # Forgot-password emails — keep tight to limit SES abuse / inbox flooding.
-admin_forgot_password_limiter = RateLimiter(max_requests=5, window_seconds=15 * 60)
-# Candidate OTP request/verify mirror the admin budgets; per-email send caps
-# and the 3-strike lock live on the challenge row.
-candidate_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
-candidate_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
-# HR/client OTP mirrors the candidate budgets; per-user send caps and the
-# 3-strike lock live on the hr_login_challenges row.
-hr_otp_limiter = RateLimiter(max_requests=10, window_seconds=15 * 60)
-hr_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=15 * 60)
+admin_forgot_password_limiter = RateLimiter(max_requests=5, window_seconds=15 * 60, name="admin_forgot_password_limiter")
+# Candidate OTP request: 5 / minute per IP; email key uses the same budget.
+candidate_otp_limiter = RateLimiter(max_requests=5, window_seconds=60, name="candidate_otp_limiter")
+candidate_otp_email_limiter = RateLimiter(max_requests=5, window_seconds=60, name="candidate_otp_email_limiter")
+# Candidate OTP verify IP burst shield; consecutive wrong codes lock on the row.
+candidate_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=60, name="candidate_otp_verify_limiter")
+# HR/client OTP send: 5 / minute per IP (inbox flooding / bot spam).
+hr_otp_limiter = RateLimiter(max_requests=5, window_seconds=60, name="hr_otp_limiter")
+hr_otp_verify_limiter = RateLimiter(max_requests=20, window_seconds=60, name="hr_otp_verify_limiter")
+# HR login failures: 5 wrong OTP submits / minute / IP before 429.
+hr_login_failure_limiter = AuthFailureLimiter(max_failures=5, window_seconds=60, name="hr_login_failure_limiter")
 # Invites are legitimately bulk (a hiring round), so the budget is higher than nudges.
-invite_limiter = RateLimiter(max_requests=200, window_seconds=60 * 60)
+invite_limiter = RateLimiter(max_requests=200, window_seconds=60 * 60, name="invite_limiter")
 
 
 def client_ip(request: Request, config: Settings | None = None) -> str:

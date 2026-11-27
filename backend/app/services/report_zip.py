@@ -16,6 +16,9 @@ from app.services.report_pdf import REPORT_FILE_PREFIX, sanitize_report_name
 
 # Bound WeasyPrint fan-out so bulk ZIP never pegs every CPU core at once.
 ZIP_RENDER_CONCURRENCY = 3
+#: Reports per ZIP response. Every PDF is held in memory until the ZIP is
+#: streamed, so larger packages are served in parts via ``offset`` (P1-17).
+ZIP_MAX_REPORTS = 100
 _ZIP_STREAM_CHUNK = 64 * 1024
 
 
@@ -70,19 +73,21 @@ def reports_zip_filename(package_title: str | None) -> str:
     return f"{REPORT_FILE_PREFIX}s - {title}.zip"
 
 
-def zip_content_disposition(package_title: str | None) -> str:
+def zip_content_disposition(package_title: str | None, part: int | None = None) -> str:
     """Build ``Content-Disposition`` for a package reports ZIP.
 
     Args:
         package_title: Package display title (untrusted).
+        part: 1-based part number when the export is split, else None.
 
     Returns:
         Header value with an ASCII fallback and an RFC 5987 UTF-8 filename.
     """
     title = sanitize_report_name(package_title, fallback="Assessment Suite")
     ascii_title = " ".join(title.encode("ascii", "ignore").decode("ascii").split()) or "Assessment Suite"
-    filename = f"{REPORT_FILE_PREFIX}s - {title}.zip"
-    ascii_filename = f"{REPORT_FILE_PREFIX}s - {ascii_title}.zip"
+    suffix = f" (part {part})" if part else ""
+    filename = f"{REPORT_FILE_PREFIX}s - {title}{suffix}.zip"
+    ascii_filename = f"{REPORT_FILE_PREFIX}s - {ascii_title}{suffix}.zip"
     return f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{quote(filename)}'
 
 

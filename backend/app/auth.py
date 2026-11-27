@@ -52,6 +52,32 @@ def _bearer(authorization: str | None) -> str:
     return authorization.split(" ", 1)[1].strip()
 
 
+def candidate_id_from_authorization(authorization: str | None) -> UUID | None:
+    """Verified candidate id from an optional ``Authorization`` header.
+
+    For endpoints where auth is optional (support form): never raises, and
+    returns None for a missing, malformed, expired or non-candidate token.
+
+    Args:
+        authorization: Raw ``Authorization`` header value.
+
+    Returns:
+        The token's candidate id, or None.
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(
+            token, settings.SECRET_KEY, algorithms=["HS256"], audience=CANDIDATE_AUDIENCE
+        )
+        if payload.get("typ") != "candidate":
+            return None
+        return UUID(payload["sub"])
+    except (jwt.PyJWTError, KeyError, ValueError, TypeError):
+        return None
+
+
 async def get_current_candidate(
     authorization: str | None = Header(None),
     db: AsyncSession = Depends(get_db),

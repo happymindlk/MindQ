@@ -12,7 +12,7 @@ class HRUser(Base):
 
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     corporate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     full_name: Mapped[str] = mapped_column(String(255), nullable=True)
     role: Mapped[str] = mapped_column(String(20), default="hr", nullable=False)

@@ -6,6 +6,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import Button from '../../components/ui/Button';
 import { api } from '../../api/client';
 import { writeDraft, clearDraft, hydrateAttemptAnswers } from '../../lib/assessment-draft';
+import { getCandidateId } from '../../lib/candidate-identity';
 import {
   ASSESSMENT_TIMEOUT_MESSAGE,
   AssessmentRunner,
@@ -23,11 +24,32 @@ import {
 } from '../../features/candidate-dashboard/module-status';
 
 const LOCKED_DETAIL = 'Assessment already completed. Modifications are locked.';
+const SUBMIT_UNCONFIRMED_DETAIL =
+  'We could not confirm your submission. Your answers are still saved on this device; please retry.';
+
+/**
+ * After a 409 ALREADY_SUBMITTED, confirm with the server that the module really
+ * is COMPLETED before the local draft (the only backup) is deleted.
+ *
+ * @param {string} assessmentId
+ * @returns {Promise<boolean>}
+ */
+async function confirmModuleCompleted(assessmentId) {
+  try {
+    const data = await api.candidate.getTest(assessmentId);
+    return String(data?.status || '').toUpperCase() === 'COMPLETED';
+  } catch (err) {
+    // GET /test answers a completed module with 409 ALREADY_SUBMITTED.
+    return err?.status === 409 && err?.code === 'ALREADY_SUBMITTED';
+  }
+}
 /** Prefer dashboard-prefetch hits for the instruction screen (avoid a redundant cold GET). */
 const TEST_PREFETCH_STALE_MS = 60000;
 
 function isAssessmentLocked(err) {
-  return (err?.status === 409 && err?.code !== 'TIME_EXPIRED') || err?.message === LOCKED_DETAIL;
+  // Only ALREADY_SUBMITTED (or the legacy code-less 409) means "completed".
+  const locked409 = err?.status === 409 && (err?.code === 'ALREADY_SUBMITTED' || !err?.code);
+  return locked409 || err?.message === LOCKED_DETAIL;
 }
 
 function deferWork(work) {
@@ -72,7 +94,9 @@ function syncDashboardModule(assessmentId, status, test) {
 export default function TestRunner() {
   const { testId } = useParams();
   const navigate = useNavigate();
-  const candidateId = typeof window !== 'undefined' ? localStorage.getItem('candidateId') : null;
+  // From the token's `sub` claim, so the draft backup never silently turns off
+  // when the separate `candidateId` storage key is missing.
+  const candidateId = useMemo(() => getCandidateId(), []);
   const cacheKey = candidateTestKey(testId);
 
   // A cached payload only paints the instruction screen. Started attempts wait
@@ -195,8 +219,8 @@ export default function TestRunner() {
 
   const transport = useMemo(
     () => ({
-      autosave: async (payload) => {
-        await api.candidate.autosave(payload);
+      autosave: async (payload, options) => {
+        await api.candidate.autosave(payload, options);
       },
       submit: async ({ responses, total_module_duration_seconds }) => {
         let result;
@@ -207,22 +231,20 @@ export default function TestRunner() {
             total_module_duration_seconds ?? null,
           );
         } catch (err) {
-          // Server already auto-submitted / expired: treat as successful finalize
-          // so the timeout completion screen can show Submitted / Back to Dashboard.
-          const status = err?.status;
-          if (status === 400 || status === 409) {
-            result = {
-              status,
-              package_complete: false,
-              company_name: null,
-            };
+          // Only an explicit ALREADY_SUBMITTED (server-confirmed COMPLETED) is
+          // treated as success. Every other error keeps the local draft.
+          if (err?.status === 409 && err?.code === 'ALREADY_SUBMITTED') {
+            if (!(await confirmModuleCompleted(testId))) {
+              const unconfirmed = new Error(SUBMIT_UNCONFIRMED_DETAIL);
+              unconfirmed.code = 'SUBMIT_UNCONFIRMED';
+              throw unconfirmed;
+            }
+            result = { status: 409, package_complete: false, company_name: null };
           } else {
             throw err;
           }
         }
-        if (result.status === 200 || result.status === 400 || result.status === 409) {
-          markSubmitFinalized(result);
-        }
+        markSubmitFinalized(result);
         return result;
       },
     }),

@@ -22,6 +22,7 @@ from app.models.candidate_login_challenge import CandidateLoginChallenge
 from app.models.package import Package
 from app.schemas.candidate import CandidateOtpChallengeResponse
 from app.services.admin_otp import (
+    discard_challenge,
     OTP_TTL,
     SEND_WINDOW,
     apply_otp_attempt,
@@ -251,15 +252,16 @@ async def _recent_sends(db: AsyncSession, email: str, now: datetime) -> list[dat
     )
 
 
-async def _supersede_open(db: AsyncSession, email: str, now: datetime) -> None:
-    rows = (
-        await db.execute(
-            select(CandidateLoginChallenge).where(
-                CandidateLoginChallenge.email == email,
-                CandidateLoginChallenge.consumed_at.is_(None),
-            )
-        )
-    ).scalars().all()
+async def _supersede_open(
+    db: AsyncSession, email: str, now: datetime, *, keep_id: UUID | None = None
+) -> None:
+    query = select(CandidateLoginChallenge).where(
+        CandidateLoginChallenge.email == email,
+        CandidateLoginChallenge.consumed_at.is_(None),
+    )
+    if keep_id is not None:
+        query = query.where(CandidateLoginChallenge.id != keep_id)
+    rows = (await db.execute(query)).scalars().all()
     for row in rows:
         if row.locked_until is not None and _aware(row.locked_until) > now:
             continue
@@ -321,33 +323,44 @@ async def request_candidate_otp(
         )
         raise CandidateOtpError(429, detail)
 
-    await _supersede_open(db, normalized_email, now)
     challenge_id = uuid4()
     otp = generate_otp()
-    row = CandidateLoginChallenge(
-        id=challenge_id,
-        email=normalized_email,
-        access_code=code_value,
-        otp_hash=hash_otp(challenge_id, otp),
-        expires_at=now + OTP_TTL,
-        attempt_count=0,
-        created_at=now,
+    db.add(
+        CandidateLoginChallenge(
+            id=challenge_id,
+            email=normalized_email,
+            access_code=code_value,
+            otp_hash=hash_otp(challenge_id, otp),
+            expires_at=now + OTP_TTL,
+            attempt_count=0,
+            created_at=now,
+        )
     )
-    db.add(row)
+    # Commit BEFORE calling SES: this ends the transaction, releases the
+    # advisory lock, and returns the pooled connection, so a slow or
+    # throttled SES cannot pin DB connections during a login burst. The
+    # committed row also makes a concurrent request hit the send cooldown.
     try:
-        await db.flush()
-        await send_candidate_otp_email(normalized_email, otp)
         await db.commit()
     except ProgrammingError:
         await db.rollback()
         raise
+
+    try:
+        await send_candidate_otp_email(normalized_email, otp)
     except Exception as exc:
-        await db.rollback()
         logger.error(
             "candidate_otp_delivery_failed",
             extra={"event": "candidate_otp_delivery_failed", "error_type": type(exc).__name__},
         )
+        # Undo the unsent challenge so it neither works nor counts toward the
+        # send cap / cooldown (same outcome as the old rollback).
+        await discard_challenge(db, CandidateLoginChallenge, challenge_id)
         raise CandidateOtpError(503, _MAIL_FAILED) from exc
+
+    # Only invalidate earlier codes once the new one is delivered.
+    await _supersede_open(db, normalized_email, now, keep_id=challenge_id)
+    await db.commit()
 
     logger.info(
         "candidate_otp_issued",

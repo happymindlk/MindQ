@@ -22,7 +22,12 @@ from app.security import (
     admin_otp_verify_limiter,
     enforce_rate_limit,
 )
-from app.services.admin_otp import AdminLoginError, start_admin_login, verify_admin_otp
+from app.services.admin_otp import (
+    LOCKOUT_MINUTES,
+    AdminLoginError,
+    start_admin_login,
+    verify_admin_otp,
+)
 from app.services.admin_password import (
     AdminPasswordError,
     change_admin_password,
@@ -33,7 +38,10 @@ router = APIRouter()
 
 
 def _http(exc: AdminLoginError) -> HTTPException:
-    return HTTPException(status_code=exc.status_code, detail=exc.detail)
+    headers = None
+    if exc.status_code == 429:
+        headers = {"Retry-After": str(max(1, int(LOCKOUT_MINUTES) * 60))}
+    return HTTPException(status_code=exc.status_code, detail=exc.detail, headers=headers)
 
 
 def _password_http(exc: AdminPasswordError) -> HTTPException:
@@ -85,7 +93,8 @@ async def admin_verify_otp(
 ):
     """Exchange a temp token and a one-time code for the admin session.
 
-    Three wrong codes lock the sign-in for 15 minutes. A correct code works once.
+    Five wrong codes lock the sign-in for the configured lockout window.
+    A correct code works once.
 
     Args:
         body: Temp token and six-digit code.

@@ -9,11 +9,12 @@ safe to call from every web worker via row locks + status transitions.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
@@ -32,8 +33,10 @@ from app.services.session_log import MODULE_TIMEOUT, duration_from_progress, rec
 
 logger = logging.getLogger("app.assessment_expiry")
 
-# Periodic sweep interval for the in-process background loop / ARQ cron.
+# Periodic sweep interval for the dev-only in-process loop (ARQ cron runs at :00/:30).
 EXPIRY_SWEEP_INTERVAL_SECONDS = 45
+# Rows finalized per sweep; the next cron tick picks up any remainder.
+EXPIRY_SWEEP_BATCH_LIMIT = 100
 
 
 def _utcnow() -> datetime:
@@ -189,32 +192,71 @@ async def finalize_expired_assessment(
     return finalized
 
 
+async def claim_expired_in_progress(
+    session: AsyncSession,
+    *,
+    now: datetime | None = None,
+    limit: int = EXPIRY_SWEEP_BATCH_LIMIT,
+) -> list[CandidateProgress]:
+    """Lock up to ``limit`` expired ``IN_PROGRESS`` rows, skipping busy ones.
+
+    Uses the partial index on ``expires_at`` (status = IN_PROGRESS) instead of
+    loading every in-progress attempt. ``SKIP LOCKED`` passes over rows that an
+    autosave / submit currently holds; that request finalizes them itself, or
+    the next sweep does. The locks only last until the first per-row commit;
+    double-finalize is prevented by ``submit_test``'s own ``FOR UPDATE``.
+
+    Args:
+        session: Async database session.
+        now: Clock override for tests; defaults to the database ``now()`` so
+            app-node clock skew cannot move the deadline.
+        limit: Max rows per sweep.
+
+    Returns:
+        Locked progress rows, earliest deadline first.
+    """
+    cutoff = now if now is not None else func.now()
+    stmt = (
+        select(CandidateProgress)
+        .where(
+            CandidateProgress.status == IN_PROGRESS_STATUS,
+            CandidateProgress.expires_at.is_not(None),
+            CandidateProgress.expires_at <= cutoff,
+        )
+        .order_by(CandidateProgress.expires_at)
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def finalize_expired_assessments(
     session: AsyncSession,
     *,
     now: datetime | None = None,
     enqueue: bool = True,
+    limit: int = EXPIRY_SWEEP_BATCH_LIMIT,
 ) -> list[tuple[UUID, UUID]]:
-    """Idempotently complete every expired ``IN_PROGRESS`` timed attempt.
+    """Idempotently complete expired ``IN_PROGRESS`` timed attempts (one batch).
 
     Uses the same scoring / Gemini / PDF pipeline as a normal candidate
-    submit (``enqueue_finalize_and_score_ai``). Concurrent sweeps and a
-    simultaneous candidate click are serialized by ``submit_test``'s
-    ``FOR UPDATE`` lock and the ``IN_PROGRESS`` → ``COMPLETED`` transition.
+    submit (``enqueue_finalize_and_score_ai``). Each row is isolated: an
+    error on one attempt is logged and the sweep moves on.
 
     Args:
         session: Async database session (``submit_test`` commits per row).
         now: Clock override for tests.
         enqueue: When True, queue post-submit scoring for each new completion.
+        limit: Max rows handled in this batch.
 
     Returns:
         ``(candidate_id, assessment_id)`` pairs newly marked completed.
     """
-    expired = await list_expired_in_progress(session, now=now)
+    expired = await claim_expired_in_progress(session, now=now, limit=limit)
     if not expired:
         return []
 
-    candidate_ids = {progress.candidate_id for progress, _ in expired}
+    candidate_ids = {progress.candidate_id for progress in expired}
     candidates = (
         await session.execute(
             select(Candidate).where(
@@ -226,38 +268,52 @@ async def finalize_expired_assessments(
     by_id = {c.id: c for c in candidates}
 
     finalized: list[tuple[UUID, UUID]] = []
-    for progress, _assessment in expired:
-        candidate = by_id.get(progress.candidate_id)
+    for progress in expired:
+        candidate_id = progress.candidate_id
+        assessment_id = progress.assessment_id
+        candidate = by_id.get(candidate_id)
         if candidate is None:
             logger.warning(
                 "expiry_skip_missing_candidate progress_id=%s candidate_id=%s",
                 progress.id,
-                progress.candidate_id,
+                candidate_id,
             )
             continue
         stamp = getattr(progress, "expires_at", None) or (now or _utcnow())
-        claimed = await finalize_one_expired(
-            session,
-            candidate=candidate,
-            assessment_id=progress.assessment_id,
-            completed_at=stamp,
-        )
-        if not claimed:
+        try:
+            claimed = await finalize_one_expired(
+                session,
+                candidate=candidate,
+                assessment_id=assessment_id,
+                completed_at=stamp,
+            )
+            if not claimed:
+                continue
+            finalized.append((candidate.id, assessment_id))
+            if enqueue:
+                await enqueue_finalize_and_score_ai(candidate.id, assessment_id)
+        except Exception:
+            # One poisoned row (closed package, deleted module, ...) must
+            # never stop the rest of the batch.
+            logger.exception(
+                "expiry_finalize_row_failed candidate_id=%s assessment_id=%s",
+                candidate_id,
+                assessment_id,
+                extra={"event": "expiry_finalize_row_failed"},
+            )
+            with contextlib.suppress(Exception):
+                await session.rollback()
             continue
-        pair = (candidate.id, progress.assessment_id)
-        finalized.append(pair)
-        if enqueue:
-            await enqueue_finalize_and_score_ai(candidate.id, progress.assessment_id)
         logger.info(
             "assessment_auto_finalized candidate_id=%s assessment_id=%s",
             candidate.id,
-            progress.assessment_id,
+            assessment_id,
         )
     return finalized
 
 
 async def ensure_expired_assessments_finalized() -> int:
-    """Best-effort sweep in its own session (safe before dashboard reads).
+    """Best-effort sweep in its own session (ARQ cron / ops endpoint).
 
     Returns:
         Number of assessments newly finalized, or 0 on failure.

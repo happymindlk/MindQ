@@ -14,6 +14,8 @@ from app.services.email import (
     send_transactional_email_async,
 )
 
+from app.services.email import redact_access_code, redact_link
+
 logger = logging.getLogger("app.email_service")
 
 
@@ -84,13 +86,13 @@ class EmailService:
         """
         clean_email = clean_recipient_email(email)
         link = _assessment_invite_link(access_code, origin=origin)
-        # Always logged (even before SES is attempted) so QA testers can open
-        # the assessment when SES sandbox throttles/drops the invite.
+        # Logged before SES is attempted; the PIN and link query are masked
+        # (P1-15). Testers read the code from the Client Portal instead.
         logger.info(
             "[INVITE DISPATCHED] Candidate=%s Code=%s Link=%s",
             clean_email or email,
-            access_code,
-            link,
+            redact_access_code(access_code),
+            redact_link(link),
         )
         package_name = (package_title or "").strip() or "Assessment"
         company = (corporate_name or "").strip() or "Your hiring organization"
@@ -116,8 +118,8 @@ class EmailService:
             logger.exception(
                 "[INVITE FAILED] Candidate=%s Code=%s Link=%s",
                 clean_email or email,
-                access_code,
-                link,
+                redact_access_code(access_code),
+                redact_link(link),
             )
             if raise_on_error:
                 raise
@@ -126,17 +128,17 @@ class EmailService:
             logger.info(
                 "[INVITE SENT] Candidate=%s Code=%s MessageId=%s Link=%s",
                 clean_email or email,
-                access_code,
+                redact_access_code(access_code),
                 result.get("MessageId") or result.get("id"),
-                link,
+                redact_link(link),
             )
             return True
         logger.error(
             "[INVITE FAILED] Candidate=%s Code=%s Link=%s result=None "
             "(SES not configured or rejected; see SES logs above)",
             clean_email or email,
-            access_code,
-            link,
+            redact_access_code(access_code),
+            redact_link(link),
         )
         return False
 

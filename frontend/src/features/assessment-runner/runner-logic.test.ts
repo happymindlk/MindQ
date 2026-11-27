@@ -187,11 +187,21 @@ describe('runner logic', () => {
     expect(hasContent(0)).toBe(true);
   });
 
-  it('treats 400/409 finalize conflicts as terminal submit success', () => {
-    expect(isTerminalSubmitConflict({ status: 409, code: null })).toBe(true);
+  it('treats only explicit ALREADY_SUBMITTED / TIME_EXPIRED as terminal submit success', () => {
+    expect(isTerminalSubmitConflict({ status: 409, code: 'ALREADY_SUBMITTED' })).toBe(true);
     expect(isTerminalSubmitConflict({ status: 409, code: 'TIME_EXPIRED' })).toBe(true);
-    expect(isTerminalSubmitConflict({ status: 400, message: 'expired' })).toBe(true);
+    // Unconfirmed conflicts must keep the draft and offer Retry.
+    expect(isTerminalSubmitConflict({ status: 409, code: null })).toBe(false);
+    expect(isTerminalSubmitConflict({ status: 409, code: 'NOT_STARTED' })).toBe(false);
+    expect(isTerminalSubmitConflict({ status: 400, message: 'expired' })).toBe(false);
+    expect(isTerminalSubmitConflict({ status: 0, code: 'TIMEOUT' })).toBe(false);
     expect(isTerminalSubmitConflict({ status: 500 })).toBe(false);
     expect(isTerminalSubmitConflict(new Error('network'))).toBe(false);
+  });
+
+  it('does not show the completed-lock screen for NOT_STARTED or CONFLICT', () => {
+    expect(isAttemptLocked({ status: 409, code: 'NOT_STARTED' })).toBe(false);
+    expect(isAttemptLocked({ status: 409, code: 'CONFLICT' })).toBe(false);
+    expect(isAttemptLocked({ status: 409, code: 'ALREADY_SUBMITTED' })).toBe(true);
   });
 });

@@ -801,7 +801,7 @@ describe('AssessmentRunner strict expiry', () => {
   it('treats 409 already-submitted on expiry as successful timeout completion', async () => {
     const locked = Object.assign(new Error('Assessment already completed. Modifications are locked.'), {
       status: 409,
-      code: null,
+      code: 'ALREADY_SUBMITTED',
     });
     const transport = {
       autosave: vi.fn(async () => undefined),
@@ -837,7 +837,7 @@ describe('AssessmentRunner strict expiry', () => {
     expect(screen.queryByRole('button', { name: /Retry submit/ })).not.toBeInTheDocument();
   });
 
-  it('treats 400 expired conflict on expiry as successful timeout completion', async () => {
+  it('does not treat an unconfirmed 400/409 on expiry as completion (keeps Retry)', async () => {
     const expired = Object.assign(new Error('Assessment window expired'), {
       status: 400,
       code: null,
@@ -853,9 +853,9 @@ describe('AssessmentRunner strict expiry', () => {
     renderRunner(expiredTest(), transport, 'live', { onTimeExpired, onLocked });
 
     expect(await screen.findByText(ASSESSMENT_TIMEOUT_MESSAGE)).toBeInTheDocument();
-    await waitFor(() => expect(onTimeExpired).toHaveBeenCalledTimes(1));
-    expect(onLocked).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Return to Dashboard' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /Retry submit/ })).toBeInTheDocument();
+    expect(onTimeExpired).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Return to Dashboard' })).not.toBeInTheDocument();
   });
 
   it('falls back to onSubmitted when onTimeExpired is not provided (preview)', async () => {
@@ -1235,6 +1235,73 @@ describe('AssessmentRunner optimistic navigation', () => {
     expect(onExit).toHaveBeenCalledTimes(1);
     expect(transport.autosave).toHaveBeenCalledTimes(1);
     resolveSave?.();
+  });
+
+  it('retries a failed autosave on a 2s backoff while the candidate stays put (P1-03)', async () => {
+    vi.useFakeTimers();
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    transport.autosave
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockRejectedValueOnce(new Error('network down'));
+    renderRunner(twoQuestionTest(), transport, 'live');
+    fireEvent.click(screen.getByRole('radio', { name: /Alpha/ }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/Connection issue — retrying save/i)).toBeInTheDocument();
+
+    // First retry after 2s with no navigation or interaction.
+    await act(async () => {
+      vi.advanceTimersByTime(1999);
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(2);
+
+    // Second retry backs off to 4s, then succeeds and clears the banner.
+    await act(async () => {
+      vi.advanceTimersByTime(3999);
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(3);
+    expect(screen.queryByText(/Connection issue — retrying save/i)).not.toBeInTheDocument();
+
+    // Nothing left dirty: no further retries fire.
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  it('flushes unsaved answers with keepalive on pagehide (P1-04)', async () => {
+    const transport = {
+      autosave: vi.fn(async () => undefined),
+      submit: vi.fn(async () => undefined),
+    };
+    renderRunner(twoQuestionTest(), transport, 'live');
+    fireEvent.click(screen.getByRole('radio', { name: /Beta/ }));
+    // Still inside the 300ms debounce window when the tab closes.
+    expect(transport.autosave).not.toHaveBeenCalled();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('pagehide'));
+    });
+    expect(transport.autosave).toHaveBeenCalledTimes(1);
+    expect(transport.autosave).toHaveBeenCalledWith(
+      expect.objectContaining({ question_id: 'q1', response: { answer: 'Beta' } }),
+      { keepalive: true },
+    );
   });
 
   it('keeps a failed background save queued and retries it on the next navigation', async () => {

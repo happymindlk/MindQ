@@ -10,7 +10,7 @@ import asyncio
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import ProgrammingError
@@ -52,6 +52,7 @@ from app.security import (
 from app.services.client_package import ClientPackageService
 from app.services.report_pdf import render_report, report_filename, serve_report_pdf
 from app.services.report_zip import (
+    ZIP_MAX_REPORTS,
     ZIP_RENDER_CONCURRENCY,
     ZipReportEntry,
     iter_reports_zip,
@@ -138,9 +139,8 @@ async def client_dashboard(
     Returns:
         Corporate branding and package-grouped candidate metrics.
     """
-    from app.services.assessment_expiry import ensure_expired_assessments_finalized
-
-    await ensure_expired_assessments_finalized()
+    # Expired attempts are finalized by the ARQ cron (every 30s), not here:
+    # a synchronous sweep on every HR refresh multiplied DB load.
     try:
         return await ClientPackageService.get_client_dashboard(db, client.corporate_id)
     except LookupError as exc:
@@ -165,9 +165,8 @@ async def client_pipeline(
     Returns:
         Pending / Scoring / Completed rows. No psychometric item data.
     """
-    from app.services.assessment_expiry import ensure_expired_assessments_finalized
-
-    await ensure_expired_assessments_finalized()
+    # Expired attempts are finalized by the ARQ cron (every 30s), not here:
+    # a synchronous sweep on every HR refresh multiplied DB load.
     try:
         return await ClientPackageService.list_client_pipeline(db, client.corporate_id)
     except ProgrammingError as exc:
@@ -274,6 +273,7 @@ async def client_package_reports_zip(
     package_id: UUID,
     client: ClientUserContext = Depends(get_current_client_user),
     db: AsyncSession = Depends(get_db),
+    offset: int = Query(0, ge=0),
 ) -> StreamingResponse:
     """Download every completed MindQ Report in a package as one ZIP.
 
@@ -303,6 +303,17 @@ async def client_package_reports_zip(
 
     if not candidates:
         raise HTTPException(status_code=404, detail="No completed reports to download")
+
+    # Memory cap: at most ZIP_MAX_REPORTS PDFs per response. Larger packages
+    # are fetched in parts (X-Report-Zip-Next-Offset) in a stable order.
+    total_candidates = len(candidates)
+    if offset >= total_candidates:
+        raise HTTPException(status_code=404, detail="No more reports to download")
+    candidates = candidates[offset : offset + ZIP_MAX_REPORTS]
+    next_offset = offset + len(candidates)
+    has_more = next_offset < total_candidates
+    split = total_candidates > ZIP_MAX_REPORTS
+    part = offset // ZIP_MAX_REPORTS + 1 if split else None
 
     # Bound WeasyPrint concurrency; each worker uses its own DB session so
     # AsyncSession is never shared across concurrent tasks.
@@ -353,18 +364,23 @@ async def client_package_reports_zip(
         len(entries),
         len(failures),
     )
+    headers = {
+        "Content-Disposition": zip_content_disposition(package.title, part),
+        "Access-Control-Expose-Headers": (
+            "Content-Disposition, X-Report-Zip-Count, X-Report-Zip-Failed, "
+            "X-Report-Zip-Total, X-Report-Zip-Next-Offset"
+        ),
+        "X-Report-Zip-Count": str(len(entries)),
+        "X-Report-Zip-Failed": str(len(failures)),
+        "X-Report-Zip-Total": str(total_candidates),
+        "Cache-Control": "private, no-store",
+    }
+    if has_more:
+        headers["X-Report-Zip-Next-Offset"] = str(next_offset)
     return StreamingResponse(
         iter_reports_zip(entries),
         media_type="application/zip",
-        headers={
-            "Content-Disposition": zip_content_disposition(package.title),
-            "Access-Control-Expose-Headers": (
-                "Content-Disposition, X-Report-Zip-Count, X-Report-Zip-Failed"
-            ),
-            "X-Report-Zip-Count": str(len(entries)),
-            "X-Report-Zip-Failed": str(len(failures)),
-            "Cache-Control": "private, no-store",
-        },
+        headers=headers,
     )
 
 

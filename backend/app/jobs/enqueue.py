@@ -16,6 +16,7 @@ from app.jobs.tasks import (
     task_refresh_report_synthesis,
     task_send_nudge_email,
     task_send_package_share,
+    task_purge_candidate_report_files,
     task_store_cached_report,
 )
 
@@ -77,6 +78,11 @@ def _job_id_nudge(candidate_id: UUID) -> str:
 def _job_id_store_report(corporate_id: UUID, candidate_id: UUID, cache_key: str) -> str:
     """Dedup key for one content-addressed PDF cache upload."""
     return f"store_report:{corporate_id}:{candidate_id}:{cache_key[:24]}"
+
+
+def _job_id_purge(candidate_id: UUID) -> str:
+    """Dedup key for one erased candidate's storage purge."""
+    return f"purge:{candidate_id}"
 
 
 def _job_id_expire(candidate_id: UUID, assessment_id: UUID) -> str:
@@ -332,8 +338,19 @@ async def enqueue_store_cached_report(
     candidate_id: UUID,
     cache_key: str,
     content: bytes,
-) -> Any:
-    """Queue a rendered PDF upload to the private reports bucket.
+) -> asyncio.Task[Any]:
+    """Upload a rendered PDF to the private reports bucket in the background.
+
+    Used by the on-demand Download miss path (``render_report``) so the HTTP
+    handler can return bytes without waiting on object storage. Post-submit
+    package completion does **not** call this — ``finalize_and_score_ai`` →
+    ``prewarm_report_pdf`` uses ``render_and_store_report`` to sync-store the
+    PDF (and upsert ``candidate_reports``) before HR ever clicks Download.
+
+    The upload always runs in-process and never goes through Redis: PDF bytes
+    must not be pickled into job arguments. The object is a content-addressed
+    cache, so a lost upload (process restart) only costs a re-render on the
+    next Download.
 
     Args:
         corporate_id: Tenant id used as the object prefix.
@@ -342,7 +359,7 @@ async def enqueue_store_cached_report(
         content: PDF bytes.
 
     Returns:
-        ARQ job, ``None`` when deduped, or inline result.
+        The spawned background ``asyncio.Task``.
     """
 
     async def _run() -> None:
@@ -350,11 +367,37 @@ async def enqueue_store_cached_report(
             {}, corporate_id, candidate_id, cache_key, content
         )
 
+    return _spawn_inline(
+        _run,
+        task_name=_job_id_store_report(corporate_id, candidate_id, cache_key),
+    )
+
+
+async def enqueue_purge_candidate_report_files(
+    corporate_id: UUID, candidate_id: UUID
+) -> Any:
+    """Queue the right-to-erasure storage purge with retries (P1-16).
+
+    Without Redis the purge runs as an in-process background task (one
+    attempt; a failure is logged at ERROR and sent to Sentry).
+
+    Args:
+        corporate_id: Tenant id (object prefix).
+        candidate_id: Erased candidate id.
+
+    Returns:
+        ARQ job, ``None`` when deduped, or the spawned Task.
+    """
+
+    async def _run() -> None:
+        await task_purge_candidate_report_files({}, corporate_id, candidate_id)
+
     return await _enqueue_or_run(
-        task_name=task_store_cached_report.__name__,
+        task_name=task_purge_candidate_report_files.__name__,
         coroutine_factory=_run,
-        job_id=_job_id_store_report(corporate_id, candidate_id, cache_key),
-        args=(str(corporate_id), str(candidate_id), cache_key, content),
+        job_id=_job_id_purge(candidate_id),
+        args=(str(corporate_id), str(candidate_id)),
+        await_inline=False,
     )
 
 

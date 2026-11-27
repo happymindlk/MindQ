@@ -173,7 +173,10 @@ async def test_submit_drops_pending_answers_for_unknown_questions(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_concurrent_first_submit_maps_to_already_submitted(monkeypatch):
+    # Untimed module: timed ones now require POST /start first (P0-03), so the
+    # no-progress-row race is only reachable when there is no duration.
     assessment = _assessment([{"id": "q1", "type": "mcq"}])
+    assessment.duration_seconds = None
     monkeypatch.setattr(
         CandidateService, "require_writable_assessment", AsyncMock(return_value=(assessment, None))
     )
@@ -183,7 +186,10 @@ async def test_concurrent_first_submit_maps_to_already_submitted(monkeypatch):
     session = AsyncMock()
     session.add = MagicMock()
     session.execute = AsyncMock(return_value=rows)
-    session.commit = AsyncMock(side_effect=IntegrityError("insert", {}, Exception("duplicate key")))
+    dup = Exception("duplicate key")
+    dup.sqlstate = "23505"
+    dup.constraint_name = "candidate_progress_candidate_id_assessment_id_key"
+    session.commit = AsyncMock(side_effect=IntegrityError("insert", {}, dup))
 
     with pytest.raises(AssessmentAlreadySubmittedError):
         await CandidateService.submit_test(

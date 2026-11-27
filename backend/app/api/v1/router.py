@@ -15,6 +15,7 @@ from .admin_ops import router as admin_ops_router
 from .admin_auth import router as admin_auth_router
 from .hr_auth import router as hr_auth_router
 from .library import router as library_router
+from .debug import router as debug_router
 
 api_router = APIRouter()
 # Most HR admin CRUD (packages list / candidates) is served by Supabase via
@@ -40,3 +41,4 @@ api_router.include_router(client_router, prefix="/client", tags=["client"])
 api_router.include_router(chat_router, prefix="/chat", tags=["chat"])
 api_router.include_router(support_router, prefix="/support", tags=["support"])
 api_router.include_router(track_router, prefix="/track", tags=["track"])
+api_router.include_router(debug_router, prefix="/debug", tags=["debug"])

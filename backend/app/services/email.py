@@ -125,12 +125,23 @@ def _is_localhost_origin(origin: str) -> bool:
     return host in _LOCALHOST_HOSTS
 
 
+def _is_trusted_origin(origin: str) -> bool:
+    """True when ``origin`` is one of our allowed CORS origins."""
+    try:
+        from app.main import is_origin_allowed  # lazy: app.main imports routes
+    except Exception:  # pragma: no cover - partial imports in odd test setups
+        return False
+    return is_origin_allowed(origin)
+
+
 def resolve_frontend_origin(request: Request | None = None) -> str:
     """Public React app origin (no trailing slash).
 
-    Priority: ``settings.FRONTEND_URL`` → request ``Origin`` / ``Referer`` →
-    production Pages URL. Localhost settings are honoured when explicitly set
-    so local email previews still work; blank settings fall through.
+    Priority: ``settings.FRONTEND_URL`` → ``PORTAL_URL`` → (outside
+    production only) request ``Origin`` / ``Referer`` when it is one of our
+    allowed CORS origins → production Pages URL. With
+    ``ENVIRONMENT=production`` request headers are never used, so a crafted
+    ``Origin`` cannot point invite emails at another site (P1-15).
 
     Args:
         request: Optional incoming request used for Origin / Referer fallback.
@@ -150,19 +161,51 @@ def resolve_frontend_origin(request: Request | None = None) -> str:
         if parsed_portal.scheme and parsed_portal.netloc:
             return f"{parsed_portal.scheme}://{parsed_portal.netloc}"
 
-    if request is not None:
+    if request is not None and not settings.is_production:
         origin = (request.headers.get("origin") or "").rstrip("/")
-        if origin and not _is_localhost_origin(origin):
+        if origin and not _is_localhost_origin(origin) and _is_trusted_origin(origin):
             return origin
         referer = (request.headers.get("referer") or "").strip()
         if referer:
             parsed = urlparse(referer)
-            if parsed.scheme and parsed.netloc and not _is_localhost_origin(
-                f"{parsed.scheme}://{parsed.netloc}"
+            ref_origin = f"{parsed.scheme}://{parsed.netloc}"
+            if (
+                parsed.scheme
+                and parsed.netloc
+                and not _is_localhost_origin(ref_origin)
+                and _is_trusted_origin(ref_origin)
             ):
-                return f"{parsed.scheme}://{parsed.netloc}"
+                return ref_origin
 
     return PRODUCTION_FRONTEND_URL
+
+
+def redact_access_code(code: str | None) -> str:
+    """Mask a candidate/package access PIN for logs (keeps the last 2 chars).
+
+    Args:
+        code: Access code, or None.
+
+    Returns:
+        e.g. ``***-1`` for ``HM-ABCDEF-1``; ``***`` when too short to hint.
+    """
+    value = (code or "").strip()
+    return f"***{value[-2:]}" if len(value) > 4 else "***"
+
+
+def redact_link(link: str | None) -> str:
+    """Strip the query string (which carries the access code) from a link.
+
+    Args:
+        link: Portal / invite URL.
+
+    Returns:
+        ``scheme://host/path`` with no query or fragment.
+    """
+    if not link:
+        return ""
+    parts = urlparse(link)
+    return f"{parts.scheme}://{parts.netloc}{parts.path}" if parts.netloc else "<link>"
 
 
 def frontend_origin(request: Request | None = None) -> str:
@@ -269,6 +312,21 @@ def _light_email_shell(body_html: str, *, origin: str | None = None) -> str:
 </body></html>"""
 
 
+def _boto_timeouts():
+    from botocore.config import Config
+
+    # Short, explicit limits: boto3's defaults (60s connect + 60s read with
+    # legacy retries) let one slow SES call hold a request for minutes.
+    return Config(
+        connect_timeout=3,
+        read_timeout=5,
+        retries={"max_attempts": 2, "mode": "standard"},
+    )
+
+
+SES_CLIENT_CONFIG = _boto_timeouts()
+
+
 def _ses_client():
     """Build a boto3 SES client from settings / the default credential chain."""
     import boto3
@@ -279,7 +337,7 @@ def _ses_client():
     if key and secret:
         kwargs["aws_access_key_id"] = key
         kwargs["aws_secret_access_key"] = secret
-    return boto3.client("ses", **kwargs)
+    return boto3.client("ses", config=SES_CLIENT_CONFIG, **kwargs)
 
 
 def _source_address(from_addr: str | None) -> str:
@@ -683,64 +741,14 @@ def render_admin_otp_html(otp: str) -> str:
     return render_universal_otp_html("Admin Portal", otp)
 
 
-def _otp_log_fallback_enabled() -> bool:
-    """True when a failed SES OTP may be logged for QA/staging testing.
-
-    Non-production means ``ENVIRONMENT != 'production'`` or ``DEBUG`` is on.
-    In production (``ENVIRONMENT=production`` and ``DEBUG=false``) the code
-    is never written to logs and delivery failures keep raising.
-    """
-    environment = (getattr(settings, "ENVIRONMENT", "") or "").strip().lower()
-    return environment != "production" or bool(getattr(settings, "DEBUG", False))
-
-
-def _log_otp_fallback(
-    to_email: str, otp: str, exc: BaseException, *, portal_name: str
-) -> None:
-    """Log a prominent banner carrying the OTP after an SES failure (QA only).
-
-    Args:
-        to_email: Inbox the code was meant for.
-        otp: Six-digit verification code.
-        exc: SES / mailer failure that triggered the fallback.
-        portal_name: Portal the code unlocks (for the action line).
-    """
-    banner = "\n".join(
-        [
-            "",
-            "=" * 70,
-            "  !!!  SES DELIVERY FAILED - QA/STAGING OTP FALLBACK  !!!",
-            "  (ENVIRONMENT != 'production' or DEBUG - never enable in prod)",
-            "=" * 70,
-            f"  Recipient : {to_email}",
-            f"  Portal    : {portal_name}",
-            f"  OTP CODE  : {otp}",
-            f"  Error     : {type(exc).__name__}: {exc}",
-            f"  Action    : enter the OTP code above on the {portal_name} login screen.",
-            "=" * 70,
-            "",
-        ]
-    )
-    logger.warning(banner)
-
-
-def _log_admin_otp_fallback(to_email: str, otp: str, exc: BaseException) -> None:
-    """Log the QA fallback banner for an admin OTP (see ``_log_otp_fallback``)."""
-    _log_otp_fallback(to_email, otp, exc, portal_name="Admin Portal")
-
-
 async def _send_portal_otp_email(
     to_email: str, otp: str, *, portal_name: str, subject: str
 ) -> None:
-    """Deliver a portal OTP through SES with the QA log fallback.
+    """Deliver a portal OTP through SES.
 
-    Production: delivery failures raise so the caller can discard the
-    challenge instead of issuing a temp token nobody can complete.
-
-    QA/staging (non-production): SES failures (e.g. sandbox ``MessageRejected``
-    for an unverified recipient) are caught, the code is logged in a prominent
-    banner for testers, and the function returns successfully so the
-    login-challenge transaction is committed, not rolled back.
+    Delivery failures always raise so the caller discards the challenge
+    instead of issuing a temp token nobody can complete. The code itself is
+    never written to logs, in any environment (P1-14).
 
     Args:
         to_email: Inbox that requested sign-in.
@@ -749,8 +757,8 @@ async def _send_portal_otp_email(
         subject: Message subject line.
 
     Raises:
-        RuntimeError: In production, when the mailer is not configured or
-            rejected the message.
+        RuntimeError: When the mailer is not configured or rejected the
+            message.
     """
     try:
         result = await send_transactional_email_async(
@@ -761,15 +769,13 @@ async def _send_portal_otp_email(
         )
         if not result:
             raise RuntimeError("Verification email was not sent")
-    except Exception as exc:  # noqa: BLE001 - re-raised in production below
-        if _otp_log_fallback_enabled():
-            logger.exception(
-                "%s OTP SES delivery failed; using QA log fallback to=%s",
-                portal_name,
-                to_email,
-            )
-            _log_otp_fallback(to_email, otp, exc, portal_name=portal_name)
-            return
+    except Exception as exc:  # noqa: BLE001 - normalized and re-raised below
+        logger.error(
+            "%s OTP SES delivery failed error=%s",
+            portal_name,
+            type(exc).__name__,
+            extra={"event": "otp_delivery_failed", "portal": portal_name},
+        )
         if isinstance(exc, RuntimeError):
             raise
         raise RuntimeError(f"Verification email was not sent: {exc}") from exc

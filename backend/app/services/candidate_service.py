@@ -20,6 +20,7 @@ from app.exceptions import (
     AssessmentNotStartedError,
     AssessmentTimeExpiredError,
     UnknownQuestionError,
+    is_progress_unique_violation,
 )
 from app.models.assessment import Assessment
 from app.models.candidate import Candidate
@@ -546,6 +547,17 @@ class CandidateService:
             the transaction is committed.
         """
         candidate_id = candidate.id
+        # Lock progress rows FIRST, in the same order autosave / submit use
+        # (progress FOR UPDATE, then responses). Deleting responses first
+        # inverted that order and could deadlock (40P01) against a candidate
+        # who is answering while HR clicks Reset. ORDER BY id keeps the lock
+        # order deterministic across this candidate's modules.
+        await session.execute(
+            select(CandidateProgress.id)
+            .where(CandidateProgress.candidate_id == candidate_id)
+            .order_by(CandidateProgress.id)
+            .with_for_update()
+        )
         await session.execute(
             delete(CandidateResponse).where(CandidateResponse.candidate_id == candidate_id)
         )
@@ -771,39 +783,53 @@ class CandidateService:
 
     @staticmethod
     async def get_candidates(
-        session: AsyncSession, corporate_id: UUID | None = None, package_id: UUID | None = None
+        session: AsyncSession,
+        corporate_id: UUID | None = None,
+        package_id: UUID | None = None,
+        *,
+        limit: int = 500,
+        offset: int = 0,
     ):
-        from app.services.assessment_expiry import ensure_expired_assessments_finalized
+        """Candidate tracker rows in a fixed number of queries (no N+1, P1-17).
 
-        # So Admin/HR overviews show Completed for timed-out attempts without
-        # waiting for the candidate to reopen the assessment link.
-        await ensure_expired_assessments_finalized()
+        Timed-out attempts flip to Completed via the ARQ expiry cron (30s);
+        no synchronous sweep on this HR/admin read path.
+        """
+        from app.services.progress_summary import (
+            ProgressSummary,
+            assessment_counts,
+            progress_summaries,
+        )
+
         stmt = select(Candidate).where(Candidate.deleted_at.is_(None))
         if corporate_id:
             stmt = stmt.where(Candidate.corporate_id == corporate_id)
         if package_id:
             stmt = stmt.where(Candidate.package_id == package_id)
+        stmt = stmt.order_by(Candidate.created_at.desc(), Candidate.id).limit(limit).offset(offset)
         candidates = (await session.execute(stmt)).scalars().all()
+
+        package_ids = {c.package_id for c in candidates}
+        packages = (
+            {
+                p.id: p
+                for p in (
+                    await session.execute(select(Package).where(Package.id.in_(package_ids)))
+                ).scalars().all()
+            }
+            if package_ids
+            else {}
+        )
+        totals = await assessment_counts(session, package_ids)
+        summaries = await progress_summaries(session, [c.id for c in candidates])
 
         tracker = []
         for cand in candidates:
-            pkg = (
-                await session.execute(select(Package).where(Package.id == cand.package_id))
-            ).scalars().first()
-            total = len(
-                (
-                    await session.execute(
-                        select(Assessment.id).where(Assessment.package_id == cand.package_id)
-                    )
-                ).scalars().all()
-            )
-            progresses = (
-                await session.execute(
-                    select(CandidateProgress).where(CandidateProgress.candidate_id == cand.id)
-                )
-            ).scalars().all()
-            completed = sum(1 for p in progresses if p.status == COMPLETED_STATUS)
-            in_progress = sum(1 for p in progresses if p.status == "IN_PROGRESS")
+            pkg = packages.get(cand.package_id)
+            total = totals.get(cand.package_id, 0)
+            summary = summaries.get(cand.id, ProgressSummary())
+            completed = summary.completed
+            in_progress = summary.in_progress
 
             status = "not_started"
             if total > 0 and completed == total:
@@ -811,11 +837,12 @@ class CandidateService:
             elif completed > 0 or in_progress > 0 or cand.logged_in_at:
                 status = "in_progress"
 
-            scores = [float(p.score) for p in progresses if p.score is not None]
             cand.package_title = pkg.title if pkg else "Unknown Package"
             cand.status = status
             cand.progress = f"{completed}/{total}"
-            cand.score = f"{round(sum(scores) / len(scores), 1)}%" if scores else "-"
+            cand.score = (
+                f"{round(summary.avg_score, 1)}%" if summary.avg_score is not None else "-"
+            )
             tracker.append(cand)
         return tracker
 
@@ -1183,17 +1210,24 @@ class CandidateService:
                 save_data.assessment_id,
                 str(save_data.question_id),
             )
-        except AssessmentTimeExpiredError:
+        except AssessmentTimeExpiredError as exc:
             # Reject this write; finalize with pre-expiry answers only.
             try:
-                await CandidateService.submit_test(
-                    session,
-                    candidate,
-                    save_data.assessment_id,
-                    pending_responses=None,
+                _progress, package_complete, _company, _title = (
+                    await CandidateService.submit_test(
+                        session,
+                        candidate,
+                        save_data.assessment_id,
+                        pending_responses=None,
+                    )
                 )
             except AssessmentAlreadySubmittedError:
                 pass
+            else:
+                # The caller must queue scoring for this finalize (the
+                # expiry sweep only sees IN_PROGRESS rows and will skip it).
+                exc.auto_finalized = True
+                exc.package_complete = package_complete
             raise
 
         elapsed = _elapsed_decimal(save_data.elapsed_seconds)
@@ -1314,6 +1348,9 @@ class CandidateService:
         Returns:
             Tuple of (progress row, package_complete flag, company_name,
             assessment_title).
+
+        Raises:
+            AssessmentNotStartedError: Timed module was never started.
         """
         # Skip the questions JSONB bank unless we may accept pending answers.
         assessment, progress = await CandidateService.require_writable_assessment(
@@ -1323,6 +1360,14 @@ class CandidateService:
             for_update=True,
             include_questions=bool(pending_responses),
         )
+        # A timed module must be armed via POST /start before it can be
+        # submitted; otherwise there is no deadline and answers prepared
+        # offline from GET /test would be accepted with unlimited time.
+        if assessment_duration_seconds(assessment) and (
+            progress is None or progress.started_at is None
+        ):
+            raise AssessmentNotStartedError()
+
         now = _utcnow()
         accept_pending = not is_strict_expired(assessment, progress, now)
         if accept_pending and pending_responses:
@@ -1379,9 +1424,13 @@ class CandidateService:
         try:
             await session.commit()
         except IntegrityError as exc:
-            # A concurrent first-time submit inserted the progress row first.
             await session.rollback()
-            raise AssessmentAlreadySubmittedError() from exc
+            # Only a duplicate progress row means a concurrent first-time
+            # submit won. Any other constraint failure rolled the answers
+            # back, so re-raise (503) and let the client keep its draft.
+            if is_progress_unique_violation(exc):
+                raise AssessmentAlreadySubmittedError() from exc
+            raise
 
         package_complete, company_name = await CandidateService.get_submit_meta(
             session, candidate

@@ -76,42 +76,76 @@ def _user_id_from_payload(payload: Any) -> UUID | None:
         return None
 
 
+# Auth Admin list paging. GoTrue may cap per_page below this; the loop copes.
+_LIST_PAGE_SIZE = 1000
+# Hard stop so a misbehaving API cannot loop forever (= 200k users at 1000/page).
+_LIST_MAX_PAGES = 200
+
+
+def _users_from_listing(listed: Any) -> list[Any]:
+    """Normalize ``list_users`` responses (list, dict, or model) to a list."""
+    if isinstance(listed, list):
+        return listed
+    if isinstance(listed, dict):
+        users = listed.get("users") or listed.get("data") or []
+    else:
+        users = getattr(listed, "users", None) or getattr(listed, "data", None) or []
+    if not isinstance(users, list):
+        raise SupabaseAdminError("Auth Admin list_users returned an unexpected shape")
+    return users
+
+
 def _lookup_user_id_by_email(client: Any, email: str) -> UUID | None:
-    """Find an existing Auth user id by email (already-registered invite).
+    """Find an existing Auth user id by email, scanning every page.
+
+    The Python Auth Admin SDK has no email filter, so this pages through
+    ``list_users`` until the email matches or the pages run out. Earlier code
+    read only page 1 (so users past the first page looked "not found") and
+    turned API failures into ``None`` (so an Auth outage looked like "not
+    registered"). Both now behave correctly: not found -> None, failure ->
+    ``SupabaseAdminError`` (callers map that to 503).
 
     Args:
         client: Service-role supabase client.
         email: Normalized email.
 
     Returns:
-        Matching user UUID, or None if listing is unsupported / empty.
+        Matching user UUID, or None when no Auth user has that email.
+
+    Raises:
+        SupabaseAdminError: The Admin API is unavailable, errored, or returned
+            an unexpected response.
     """
     admin = getattr(getattr(client, "auth", None), "admin", None)
-    if admin is None:
-        return None
-    lister = getattr(admin, "list_users", None)
+    lister = getattr(admin, "list_users", None) if admin is not None else None
     if not callable(lister):
-        return None
-    try:
-        listed = lister()
-    except TypeError:
-        listed = lister(page=1, per_page=200)
-    except Exception:
-        return None
+        raise SupabaseAdminError("Supabase Auth Admin list_users is unavailable")
 
-    users = listed
-    if isinstance(listed, dict):
-        users = listed.get("users") or listed.get("data") or []
-    else:
-        users = getattr(listed, "users", None) or getattr(listed, "data", None) or listed
-    if not isinstance(users, list):
-        return None
     target = email.lower()
-    for row in users:
-        row_email = str(_as_dict(row).get("email") or getattr(row, "email", "") or "").lower()
-        if row_email == target:
-            return _user_id_from_payload(row)
-    return None
+    largest_page = 0
+    for page in range(1, _LIST_MAX_PAGES + 1):
+        try:
+            listed = lister(page=page, per_page=_LIST_PAGE_SIZE)
+        except SupabaseAdminError:
+            raise
+        except Exception as exc:
+            message = str(exc).strip() or type(exc).__name__
+            raise SupabaseAdminError(f"Auth user lookup failed: {message[:300]}") from exc
+        users = _users_from_listing(listed)
+        if not users:
+            return None
+        for row in users:
+            row_email = str(_as_dict(row).get("email") or getattr(row, "email", "") or "").lower()
+            if row_email == target:
+                return _user_id_from_payload(row)
+        # A page shorter than the largest one seen is the last page (works even
+        # if the server caps per_page below _LIST_PAGE_SIZE).
+        largest_page = max(largest_page, len(users))
+        if len(users) < largest_page:
+            return None
+    raise SupabaseAdminError(
+        f"Auth user lookup exceeded {_LIST_MAX_PAGES} pages without finishing"
+    )
 
 
 _ALREADY_REGISTERED_MARKERS = ("already registered", "already been registered", "already exists", "email_exists")
@@ -150,9 +184,8 @@ def find_auth_user_id_by_email(email: str) -> UUID | None:
         The Auth user UUID, or None when no Auth user has that email.
 
     Raises:
-        SupabaseAdminError: Auth Admin is not configured or listing failed
-            in a way that cannot be distinguished from "no such user" is
-            surfaced by the underlying lookup returning None.
+        SupabaseAdminError: Auth Admin is not configured, or the lookup failed
+            (never reported as "no such user").
     """
     normalized = _normalize_email(email)
     client = _admin_client()
@@ -300,7 +333,10 @@ def invite_hr_user_by_email(email: str, redirect_to: str | None = None) -> UUID:
         except TypeError:
             response = client.auth.admin.invite_user_by_email(normalized, options)
     except Exception as exc:
-        existing = _lookup_user_id_by_email(client, normalized)
+        try:
+            existing = _lookup_user_id_by_email(client, normalized)
+        except SupabaseAdminError:
+            existing = None  # report the original invite failure below
         if existing is not None:
             return existing
         message = str(exc).strip() or "Auth invite failed"

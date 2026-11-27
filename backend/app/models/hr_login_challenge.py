@@ -24,7 +24,7 @@ class HrLoginChallenge(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("hr_users.user_id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("hr_users.user_id", ondelete="CASCADE"), nullable=False, index=True
     )
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     otp_hash: Mapped[str] = mapped_column(Text, nullable=False, default="")

@@ -28,7 +28,6 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.concurrency import run_in_threadpool
 
 from app.config import settings
 from app.database import SessionLocal
@@ -47,6 +46,7 @@ from app.schemas.jd_evaluation import (
     ReportNarrative,
 )
 from app.services.gemini_client import (
+    run_gemini_call,
     GeminiUnavailable,
     extract_usage,
     generate_content_sync,
@@ -1265,7 +1265,7 @@ class JdScoringService:
 
         try:
             evaluation, model, usage = await asyncio.wait_for(
-                run_in_threadpool(
+                run_gemini_call(
                     score_against_jd_with_model,
                     job_description=jd,
                     candidate_name=candidate_name,

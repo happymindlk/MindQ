@@ -27,13 +27,13 @@ class CandidateReport(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     corporate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     package_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("packages.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("packages.id", ondelete="CASCADE"), nullable=False, index=True
     )
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     pdf_cache_key: Mapped[str | None] = mapped_column(Text, nullable=True)

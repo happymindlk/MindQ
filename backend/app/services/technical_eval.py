@@ -23,7 +23,7 @@ from app.models.candidate_response import CandidateResponse
 from app.prompts.technical_eval import SYSTEM_INSTRUCTION, build_user_prompt
 from app.schemas.technical_eval import TECHNICAL_ITEM_JSON_SCHEMA, TechnicalItemEvaluation
 from app.services.client_package import PSYCHOMETRIC
-from app.services.gemini_client import GeminiUnavailable, generate_content_sync
+from app.services.gemini_client import GeminiUnavailable, generate_content_sync, run_gemini_call
 from app.services.scoring import _extract_answer
 
 logger = logging.getLogger(__name__)
@@ -327,7 +327,7 @@ class TechnicalEvalService:
             try:
                 # The SDK call blocks for the whole retry/fallback window; keep it
                 # off the event loop so other requests are served meanwhile.
-                evaluation = await asyncio.to_thread(
+                evaluation = await run_gemini_call(
                     evaluate_item, question=question, answer=answer, complete=complete
                 )
             except Exception as exc:

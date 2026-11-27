@@ -173,15 +173,19 @@ export function isTimeExpired(err: unknown): boolean {
 export function isAttemptLocked(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false;
   const e = err as RunnerError;
-  return e.status === 409 && e.code !== 'TIME_EXPIRED';
+  // Only "already submitted" locks the attempt. TIME_EXPIRED, NOT_STARTED and
+  // a server-side CONFLICT (constraint error) are recoverable, not a
+  // "completed" lock screen. A code-less 409 is the legacy lock message.
+  return e.status === 409 && (e.code === 'ALREADY_SUBMITTED' || !e.code);
 }
 
 /**
  * Whether a submit error means the attempt is already finalized on the server.
  *
- * Covers ``200``-equivalent conflicts: server auto-submit / already completed
- * (``409``) and expired-window rejects (``400`` / ``TIME_EXPIRED``). Timeout
- * UX must treat these as successful completion, not a lock-screen redirect.
+ * Only explicit server codes count: ``ALREADY_SUBMITTED`` (the progress row is
+ * COMPLETED) and ``TIME_EXPIRED``. A bare 400/409, timeout, 5xx or
+ * ``NOT_STARTED`` means nothing is confirmed saved, so the runner must show
+ * Retry and keep the local draft.
  *
  * @param err - Thrown API error (may carry ``status`` / ``code``).
  * @returns True when the client should show the timeout completion screen.
@@ -189,6 +193,6 @@ export function isAttemptLocked(err: unknown): boolean {
 export function isTerminalSubmitConflict(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false;
   const e = err as RunnerError;
-  if (e.status === 409 || e.status === 400) return true;
+  if (e.code === 'ALREADY_SUBMITTED') return true;
   return isTimeExpired(e);
 }

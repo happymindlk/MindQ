@@ -281,10 +281,11 @@ async def test_email_service_senders_sanitize_recipients(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_admin_otp_falls_back_to_log_in_qa(monkeypatch, caplog):
-    """SES sandbox rejection must not raise (or roll back) outside production."""
-    monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", "qa")
-    monkeypatch.setattr("app.services.email.settings.DEBUG", True)
+@pytest.mark.parametrize("environment,debug", [("qa", True), ("staging", False), ("development", True)])
+async def test_admin_otp_never_logged_and_raises_in_any_env(monkeypatch, caplog, environment, debug):
+    """P1-14: an SES failure raises everywhere and the code never reaches logs."""
+    monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", environment)
+    monkeypatch.setattr("app.services.email.settings.DEBUG", debug)
 
     async def _rejected(*_args, **_kwargs):
         raise RuntimeError("SES rejected the email: MessageRejected: not verified")
@@ -293,14 +294,13 @@ async def test_admin_otp_falls_back_to_log_in_qa(monkeypatch, caplog):
         "app.services.email.send_transactional_email_async", _rejected
     )
 
-    with caplog.at_level(logging.WARNING, logger="app.email"):
-        result = await send_admin_otp_email("ops@mindq.test", "482916")
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(RuntimeError, match="MessageRejected"):
+            await send_admin_otp_email("ops@mindq.test", "482916")
 
-    assert result is None
     logged = "\n".join(record.getMessage() for record in caplog.records)
-    assert "QA/STAGING OTP FALLBACK" in logged
-    assert "482916" in logged
-    assert "ops@mindq.test" in logged
+    assert "482916" not in logged
+    assert "OTP FALLBACK" not in logged
 
 
 @pytest.mark.asyncio
@@ -340,8 +340,10 @@ async def test_candidate_invite_logs_dispatch_even_when_ses_fails(monkeypatch, c
     assert ok is False
     logged = "\n".join(record.getMessage() for record in caplog.records)
     assert "[INVITE DISPATCHED] Candidate=pat@example.com" in logged
-    assert "Code=AP-TEST-9" in logged
-    assert "Link=https://qa.app.mindqtalent.com/portal?code=AP-TEST-9" in logged
+    # P1-15: the access PIN is masked and the link loses its ?code= query.
+    assert "AP-TEST-9" not in logged
+    assert "Code=***-9" in logged
+    assert "Link=https://qa.app.mindqtalent.com/portal " in logged + " "
     assert "[INVITE FAILED]" in logged
 
 
@@ -454,7 +456,7 @@ async def test_candidate_otp_sender_uses_universal_template(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_candidate_otp_falls_back_to_log_in_qa(monkeypatch, caplog):
+async def test_candidate_otp_never_logged_on_ses_failure(monkeypatch, caplog):
     monkeypatch.setattr("app.services.email.settings.ENVIRONMENT", "qa")
     monkeypatch.setattr("app.services.email.settings.DEBUG", True)
 
@@ -463,14 +465,13 @@ async def test_candidate_otp_falls_back_to_log_in_qa(monkeypatch, caplog):
 
     monkeypatch.setattr("app.services.email.send_transactional_email_async", _rejected)
 
-    with caplog.at_level(logging.WARNING, logger="app.email"):
-        result = await send_candidate_otp_email("ada@example.com", "482916")
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(RuntimeError, match="MessageRejected"):
+            await send_candidate_otp_email("ada@example.com", "482916")
 
-    assert result is None
     logged = "\n".join(record.getMessage() for record in caplog.records)
-    assert "QA/STAGING OTP FALLBACK" in logged
-    assert "482916" in logged
-    assert "Candidate Portal" in logged
+    assert "482916" not in logged
+    assert "Candidate Portal OTP SES delivery failed" in logged
 
 
 @pytest.mark.asyncio

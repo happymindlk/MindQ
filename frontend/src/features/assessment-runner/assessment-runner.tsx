@@ -40,6 +40,10 @@ const TEXT_AUTOSAVE_MS = 800;
 
 const TEXT_QUESTION_TYPES = new Set(['crt', 'open', 'open_ended']);
 
+/** Background retry for failed autosaves: 2s, 4s, 8s, ... capped at 30s. */
+export const SAVE_RETRY_BASE_MS = 2000;
+export const SAVE_RETRY_MAX_MS = 30000;
+
 function autosaveDelayForType(questionType: string | undefined): number {
   return questionType && TEXT_QUESTION_TYPES.has(questionType)
     ? TEXT_AUTOSAVE_MS
@@ -50,8 +54,13 @@ function blockClipboard(event: ClipboardEvent | MouseEvent) {
   event.preventDefault();
 }
 
+export interface AutosaveOptions {
+  /** Let the request outlive the page (pagehide / tab close flush). */
+  keepalive?: boolean;
+}
+
 export interface RunnerTransport {
-  autosave: (payload: ResponseSavePayload) => Promise<void>;
+  autosave: (payload: ResponseSavePayload, options?: AutosaveOptions) => Promise<void>;
   submit: (body: ResponseSubmitPayload) => Promise<void>;
 }
 
@@ -118,6 +127,11 @@ export function AssessmentRunner({
   /** Bumped to drop pending / in-flight autosave work before auto-submit. */
   const autosaveEpochRef = useRef(0);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Pending background retry after a failed autosave (P1-03). */
+  const saveRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveRetryDelayRef = useRef(SAVE_RETRY_BASE_MS);
+  /** Latest flushDirty, so the retry timer never calls a stale closure. */
+  const flushDirtyRef = useRef<() => Promise<void>>(async () => undefined);
   const timerStopRef = useRef<(() => void) | null>(null);
   const lastAdvanceAtRef = useRef(0);
   const lastOpenConfirmAtRef = useRef(0);
@@ -132,11 +146,35 @@ export function AssessmentRunner({
     }
   }, []);
 
+  const clearSaveRetryTimer = useCallback(() => {
+    if (saveRetryTimerRef.current !== null) {
+      clearTimeout(saveRetryTimerRef.current);
+      saveRetryTimerRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Retry dirty answers on an exponential backoff while saves keep failing,
+   * so a brief network drop recovers even if the candidate stays on one
+   * question. One timer at a time; reset to 2s after any successful save.
+   */
+  const scheduleSaveRetry = useCallback(() => {
+    if (saveRetryTimerRef.current !== null || submittedRef.current) return;
+    const delay = saveRetryDelayRef.current;
+    saveRetryDelayRef.current = Math.min(delay * 2, SAVE_RETRY_MAX_MS);
+    saveRetryTimerRef.current = setTimeout(() => {
+      saveRetryTimerRef.current = null;
+      if (submittedRef.current) return;
+      void flushDirtyRef.current().catch(() => undefined);
+    }, delay);
+  }, []);
+
   const cancelPendingAutosave = useCallback(() => {
     autosaveEpochRef.current += 1;
     dirtyRef.current.clear();
     clearDebounceTimer();
-  }, [clearDebounceTimer]);
+    clearSaveRetryTimer();
+  }, [clearDebounceTimer, clearSaveRetryTimer]);
 
   const allowAction = useCallback((stampRef: { current: number }) => {
     const now = performance.now();
@@ -306,6 +344,7 @@ export function AssessmentRunner({
         });
         if (autosaveEpochRef.current !== epoch || submittedRef.current) return;
         // Successful save clears error-only feedback; routine saves stay silent.
+        saveRetryDelayRef.current = SAVE_RETRY_BASE_MS;
         setSaveError(false);
       } catch (err) {
         if (autosaveEpochRef.current !== epoch || submittedRef.current) return;
@@ -317,6 +356,8 @@ export function AssessmentRunner({
           void submit('expired');
         } else if (isAttemptLocked(err)) {
           onLocked(errorMessage(err, 'Assessment already completed. Modifications are locked.'));
+        } else {
+          scheduleSaveRetry();
         }
       } finally {
         inFlightSaveRef.current.delete(questionId);
@@ -330,7 +371,7 @@ export function AssessmentRunner({
         }
       }
     },
-    [onLocked, submit, telemetry, test.id, transport],
+    [onLocked, scheduleSaveRetry, submit, telemetry, test.id, transport],
   );
 
   const flushDirty = useCallback(async () => {
@@ -339,6 +380,34 @@ export function AssessmentRunner({
     // Draft lives in localStorage; a failed save must never block navigation.
     await Promise.allSettled(Array.from(dirtyRef.current).map((id) => saveQuestion(id)));
   }, [clearDebounceTimer, saveQuestion]);
+  flushDirtyRef.current = flushDirty;
+
+  /**
+   * Tab close / refresh / navigation away: send every unsaved answer with
+   * ``keepalive`` so the browser finishes the request after the page is gone
+   * (a normal fetch is cancelled on unload). In-flight saves are re-sent too,
+   * because the browser may cancel those as well. Fire-and-forget.
+   */
+  const flushOnPageHide = useCallback(() => {
+    if (submittedRef.current || mode !== 'live') return;
+    clearDebounceTimer();
+    const ids = new Set([...dirtyRef.current, ...inFlightSaveRef.current]);
+    ids.forEach((questionId) => {
+      const answer = answersRef.current[questionId];
+      if (!hasContent(answer)) return;
+      void transport
+        .autosave(
+          {
+            assessment_id: test.id,
+            question_id: questionId,
+            response: { answer },
+            elapsed_seconds: telemetry.elapsedFor(questionId),
+          },
+          { keepalive: true },
+        )
+        .catch(() => undefined);
+    });
+  }, [clearDebounceTimer, mode, telemetry, test.id, transport]);
 
   // Debounced answer writes + immediate flush on Next/Prev, exit, hide, reconnect.
   // Rapid clicks reset one timer so the latest answer wins as a single payload.
@@ -368,7 +437,7 @@ export function AssessmentRunner({
     const onHidden = () => {
       if (document.visibilityState === 'hidden') flushDirtyInBackground();
     };
-    const onPageHide = () => flushDirtyInBackground();
+    const onPageHide = () => flushOnPageHide();
     window.addEventListener('offline', onOffline);
     window.addEventListener('online', onOnline);
     window.addEventListener('pagehide', onPageHide);
@@ -379,15 +448,16 @@ export function AssessmentRunner({
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onHidden);
     };
-  }, [flushDirty, flushDirtyInBackground]);
+  }, [flushDirty, flushDirtyInBackground, flushOnPageHide]);
 
   // Only clear the debounce timer on unmount — not when flush callbacks change
   // identity, or a pending debounce would be cancelled before it can fire.
   useEffect(
     () => () => {
       clearDebounceTimer();
+      clearSaveRetryTimer();
     },
-    [clearDebounceTimer],
+    [clearDebounceTimer, clearSaveRetryTimer],
   );
 
   const handleChange = (value: AnswerValue) => {

@@ -15,11 +15,13 @@ from app.schemas.candidate import (
     CandidateResponse,
 )
 from app.security import (
+    candidate_otp_email_limiter,
     candidate_otp_limiter,
     candidate_otp_verify_limiter,
     enforce_rate_limit,
     login_limiter,
 )
+from app.services.admin_otp import LOCKOUT_MINUTES
 from app.services.candidate_otp import (
     CandidateOtpError,
     request_candidate_otp,
@@ -46,6 +48,19 @@ def _raise_package_window(exc: Exception) -> NoReturn:
     raise exc
 
 
+def _otp_http(exc: CandidateOtpError) -> HTTPException:
+    """Map OTP service errors to HTTP; attach Retry-After on 429 lockouts."""
+    headers = None
+    if exc.status_code == 429:
+        retry_after = getattr(exc, "retry_after", None) or int(LOCKOUT_MINUTES) * 60
+        headers = {"Retry-After": str(max(1, int(retry_after)))}
+        logger.warning(
+            "candidate_auth_blocked",
+            extra={"event": "candidate_auth_blocked", "detail": exc.detail},
+        )
+    return HTTPException(status_code=exc.status_code, detail=exc.detail, headers=headers)
+
+
 @router.post("/otp/send", response_model=CandidateOtpChallengeResponse)
 async def send_candidate_otp(
     body: CandidateAuthOtpSendRequest,
@@ -67,6 +82,10 @@ async def send_candidate_otp(
         ``otp_required`` plus the temp token required at verify.
     """
     enforce_rate_limit(candidate_otp_limiter, request, "candidate_otp_send")
+    # Per-recipient cap so rotating IPs cannot email-bomb one address.
+    candidate_otp_email_limiter.check(
+        f"candidate_otp_send:email:{str(body.email).strip().lower()}"
+    )
     device_id, _browser = device_headers(request)
     try:
         return await request_candidate_otp(
@@ -76,7 +95,7 @@ async def send_candidate_otp(
             device_id=device_id,
         )
     except CandidateOtpError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        raise _otp_http(exc) from exc
     except (PackageNotOpenError, PackageClosedError) as exc:
         _raise_package_window(exc)
 
@@ -112,7 +131,7 @@ async def verify_candidate_otp(
             access_code=body.access_code,
         )
     except CandidateOtpError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        raise _otp_http(exc) from exc
     try:
         candidate, is_new = await CandidateService.login(db, body)
     except (PackageNotOpenError, PackageClosedError) as exc:
