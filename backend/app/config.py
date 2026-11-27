@@ -5,18 +5,35 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict, NoDecode
 
 
+KNOWN_ENVIRONMENTS = frozenset({"development", "qa", "staging", "production"})
+
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "MindQ Psychometric Assessment Platform"
-    # Default True so local/CI boots with example secrets. Production MUST set DEBUG=false
-    # (assert_production_ready refuses weak secrets / localhost CORS when False).
-    DEBUG: bool = True
-    # Deployment environment: "development" | "staging" | "qa" | "production".
-    # Non-production enables QA fallbacks (e.g. logging a failed-SES admin OTP
-    # to the server log). Production MUST set ENVIRONMENT=production + DEBUG=false.
+    # Semantic API version reported by ``GET /health`` and Sentry ``release``.
+    APP_VERSION: str = "1.0.0"
+    # Safe default: False. A deploy that forgets DEBUG gets the fail-closed
+    # production checks (assert_production_ready), not open docs/debug routes.
+    # Local dev sets DEBUG=true in backend/.env (see .env.example); tests pin
+    # it in tests/conftest.py and CI.
+    DEBUG: bool = False
+    # Deployment environment: one of KNOWN_ENVIRONMENTS. Production MUST set
+    # ENVIRONMENT=production + DEBUG=false. Servers with DEBUG=false should set
+    # this explicitly (a boot warning fires while it is left as "development").
     ENVIRONMENT: str = "development"
+    # Optional Sentry DSN. Blank/unset → error tracking stays off (boot still succeeds).
+    SENTRY_DSN: str = ""
 
     # Postgres (async driver). Defaults to the local Supabase stack.
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres"
+    # Per-process SQLAlchemy pool limits (see app/database.py for the math).
+    # Web = each uvicorn worker; worker = each ARQ process.
+    DB_POOL_SIZE: int = 10
+    DB_MAX_OVERFLOW: int = 10
+    DB_WORKER_POOL_SIZE: int = 5
+    DB_WORKER_MAX_OVERFLOW: int = 5
+    # "web" | "worker". Blank = auto-detect (the `arq` CLI => worker).
+    DB_PROCESS_ROLE: str = ""
 
     # Secret used to SIGN candidate access tokens (distinct from Supabase's JWT secret).
     SECRET_KEY: str = "dev-secret-key-change-in-production"
@@ -38,7 +55,7 @@ class Settings(BaseSettings):
     # Optional S3-compatible fallback for logos + private report archives.
     # Prefer native Supabase Storage above. Accepts R2_*, AWS_S3_*, and the common
     # Supabase docs names AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY when used as
-    # Storage gateway credentials (those same names are also read by SES below --
+    # Storage gateway credentials (those same names are also read by SES below —
     # prefer AWS_S3_* if you need both email and storage keys).
     R2_ACCESS_KEY_ID: str = Field(
         default="",
@@ -88,20 +105,20 @@ class Settings(BaseSettings):
     ADMIN_NOTIFICATION_EMAIL: str = "muhamadnas44@gmail.com"
     # Candidate Technical Support inbox (SES destination for support tickets).
     SUPPORT_EMAIL: str = "support@mindqtalent.com"
-    # Legacy alias -- prefer ADMIN_NOTIFICATION_EMAIL.
+    # Legacy alias — prefer ADMIN_NOTIFICATION_EMAIL.
     BETA_ACCESS_ADMIN_EMAIL: str = ""
     # Comma-separated emails that skip waitlist and auto-provision into the
     # local "acme" test tenant (e.g. "dev@example.com,qa@example.com").
     # NoDecode: pydantic-settings otherwise JSON-parses list env values first.
     AUTO_APPROVE_EMAILS: Annotated[list[str], NoDecode] = []
     # Public origin of the React app (no trailing slash). Invite emails link to
-    # `{FRONTEND_URL}/assessment?code=…`. Blank → request Origin → production.
+    # `{FRONTEND_URL}/portal?code=…`. Blank → request Origin → production.
     FRONTEND_URL: str = ""
     # Candidate-facing portal URL used in notification emails (legacy; prefer FRONTEND_URL).
     PORTAL_URL: str = ""
 
     GEMINI_API_KEY: str = ""
-    # Stable (pinned) Gemini model ID -- never *-latest / *-preview / *-exp.
+    # Stable (pinned) Gemini model ID — never *-latest / *-preview / *-exp.
     # New Gemini API keys cannot call gemini-2.5-*; Google returns 404 NOT_FOUND.
     GEMINI_MODEL: str = "gemini-3.5-flash"
     # Comma-separated chain tried in order once a model exhausts retries on 429/503.
@@ -110,6 +127,9 @@ class Settings(BaseSettings):
     GEMINI_FALLBACK_MODELS: str = "gemini-3.6-flash,gemini-3.5-flash-lite"
     # Per-attempt HTTP timeout so submit/report never hang forever on a slow call.
     GEMINI_TIMEOUT_SECONDS: float = 30.0
+    # Threads in the dedicated Gemini executor (per process). Extra calls queue
+    # instead of occupying the shared AnyIO pool used by PDF / SES / S3.
+    GEMINI_MAX_CONCURRENCY: int = 4
     # Total generate_content attempts per model (free-tier 429 / transient errors).
     GEMINI_MAX_RETRIES: int = 3
     # Background jobs have no user waiting, so they ride out capacity spikes longer.
@@ -128,12 +148,17 @@ class Settings(BaseSettings):
     NUDGE_AFTER_HOURS: int = 24
 
     # Durable ARQ job queue (Redis). Web process enqueues; a separate
-    # `arq app.jobs.worker.WorkerSettings` process consumes.
+    # `arq app.jobs.worker.WorkerSettings` process consumes. Redis MUST require
+    # auth (ARQ unpickles job payloads): use `redis://:<password>@host:6379/0`
+    # or `rediss://user:<password>@host:6379/0`. See docker-compose.yml.
     REDIS_URL: str = "redis://localhost:6379/0"
     ARQ_MAX_JOBS: int = 10
     # Gemini technical + JD synthesis + WeasyPrint prewarm can exceed a few minutes.
     ARQ_JOB_TIMEOUT: int = 300
     ARQ_MAX_TRIES: int = 3
+    # Reconciler cron re-queues COMPLETED attempts with no score_details that
+    # finished within this many hours. Raise once for a one-off backfill.
+    SCORING_RECONCILE_LOOKBACK_HOURS: int = 72
 
     # Accepts a comma-separated string or a JSON / Python list in env / code.
     # NoDecode: pydantic-settings otherwise JSON-parses list env values first.
@@ -146,8 +171,8 @@ class Settings(BaseSettings):
     # Header set by the edge proxy with the verified client IP (e.g. CF-Connecting-IP).
     # Only honoured when TRUSTED_PROXY_HOPS > 0.
     CLIENT_IP_HEADER: str = ""
-    # OTP 3-strike lockout minutes. None → resolve via auth_lockout_minutes
-    # (1 in qa/staging/DEBUG, else 5). Set AUTH_LOCKOUT_MINUTES to override.
+    # OTP strike lockout minutes. None → resolve via auth_lockout_minutes
+    # (1 in qa/staging/DEBUG, else 10). Set AUTH_LOCKOUT_MINUTES to override.
     AUTH_LOCKOUT_MINUTES: int | None = None
 
     model_config = SettingsConfigDict(
@@ -190,6 +215,16 @@ class Settings(BaseSettings):
         return []
 
     @property
+    def redis_url_has_password(self) -> bool:
+        """True when ``REDIS_URL`` carries a password (``redis://:pass@host``)."""
+        from urllib.parse import urlparse
+
+        try:
+            return bool(urlparse((self.REDIS_URL or "").strip()).password)
+        except ValueError:
+            return False
+
+    @property
     def auto_approve_email_set(self) -> set[str]:
         """Lowercased emails eligible for local auto-provisioning."""
         return set(self.AUTO_APPROVE_EMAILS)
@@ -205,14 +240,14 @@ class Settings(BaseSettings):
 
         Returns:
             Explicit ``AUTH_LOCKOUT_MINUTES`` when set; otherwise 1 minute for
-            qa/staging or DEBUG, and 5 minutes everywhere else.
+            qa/staging or DEBUG, and 10 minutes everywhere else.
         """
         if self.AUTH_LOCKOUT_MINUTES is not None:
             return max(1, int(self.AUTH_LOCKOUT_MINUTES))
         env = (self.ENVIRONMENT or "").strip().lower()
         if env in {"qa", "staging"} or self.DEBUG:
             return 1
-        return 5
+        return 10
 
     @property
     def cors_origins_list(self) -> list[str]:

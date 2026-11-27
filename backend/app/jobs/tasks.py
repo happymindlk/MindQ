@@ -2,15 +2,24 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from arq import Retry
+from arq.worker import func
 from starlette.concurrency import run_in_threadpool
 
-from app.services.background import finalize_and_score_ai, refresh_report_synthesis
+from app.config import settings
+from app.services.background import (
+    ScoringFailedError,
+    finalize_and_score_ai,
+    find_unscored_completed,
+    refresh_report_synthesis,
+)
 from app.services.email import send_transactional_email
 from app.services.email_service import EmailService
+from app.sentry_init import capture_silent_failure
 from app.services import storage as storage_service
 
 logger = logging.getLogger(__name__)
@@ -28,13 +37,29 @@ async def task_finalize_and_score_ai(
 ) -> None:
     """Score a submitted module, then run Gemini / HR email / PDF prewarm.
 
+    Under the ARQ worker a core-scoring failure raises ``arq.Retry`` with
+    linear backoff until ``ARQ_MAX_TRIES``; the last failure is re-raised so
+    the job is recorded as failed (the reconciler cron re-queues it later).
+    Inline runs (no Redis, ``ctx == {}``) log and return, as before.
+
     Args:
-        ctx: ARQ worker context (unused; kept for the ARQ calling convention).
+        ctx: ARQ worker context (``job_try`` present when run by the worker).
         candidate_id: Candidate who submitted.
         assessment_id: Assessment that was submitted.
+
+    Raises:
+        arq.Retry: Scoring failed and retries remain.
+        ScoringFailedError: Scoring failed on the final ARQ try.
     """
-    del ctx
-    await finalize_and_score_ai(_as_uuid(candidate_id), _as_uuid(assessment_id))
+    job_try = ctx.get("job_try") if ctx else None
+    try:
+        await finalize_and_score_ai(_as_uuid(candidate_id), _as_uuid(assessment_id))
+    except ScoringFailedError:
+        if job_try is None:
+            return  # inline fallback: already logged; reconciler covers it
+        if job_try < settings.ARQ_MAX_TRIES:
+            raise Retry(defer=timedelta(seconds=30 * job_try))
+        raise
 
 
 async def task_refresh_report_synthesis(
@@ -214,6 +239,115 @@ async def task_sweep_expired_assessments(ctx: dict[str, Any]) -> int:
     return await ensure_expired_assessments_finalized()
 
 
+async def task_reconcile_unscored(ctx: dict[str, Any]) -> int:
+    """Re-queue scoring for COMPLETED attempts that have no ``score_details``.
+
+    Safety net for P0-01/P0-02: lost enqueues, exhausted retries, worker
+    restarts. Uses the same ``finalize:{cand}:{assess}`` job id as submit, so
+    a job that is already queued or retrying is not duplicated.
+
+    Args:
+        ctx: ARQ worker context; ``ctx["redis"]`` is the worker's pool.
+
+    Returns:
+        Number of jobs newly enqueued.
+    """
+    from app.jobs.enqueue import _job_id_finalize
+
+    pairs = await find_unscored_completed(
+        lookback=timedelta(hours=settings.SCORING_RECONCILE_LOOKBACK_HOURS)
+    )
+    if not pairs:
+        return 0
+    redis = ctx["redis"]
+    enqueued = 0
+    for candidate_id, assessment_id in pairs:
+        try:
+            job = await redis.enqueue_job(
+                task_finalize_and_score_ai.__name__,
+                str(candidate_id),
+                str(assessment_id),
+                _job_id=_job_id_finalize(candidate_id, assessment_id),
+            )
+        except Exception:
+            logger.exception(
+                "scoring_reconcile_enqueue_failed candidate_id=%s assessment_id=%s",
+                candidate_id,
+                assessment_id,
+            )
+            continue
+        if job is not None:
+            enqueued += 1
+    logger.warning(
+        "scoring_reconcile_found unscored=%d enqueued=%d",
+        len(pairs),
+        enqueued,
+        extra={"event": "scoring_reconcile_found"},
+    )
+    return enqueued
+
+
+# Right-to-erasure purge gets more attempts than the global ARQ_MAX_TRIES:
+# a transient storage outage must not leave a deleted candidate's PDFs behind.
+PURGE_MAX_TRIES = 6
+PURGE_RETRY_BASE_SECONDS = 60
+
+
+async def task_purge_candidate_report_files(
+    ctx: dict[str, Any],
+    corporate_id: UUID | str,
+    candidate_id: UUID | str,
+) -> int:
+    """Delete every stored report object for an erased candidate (P1-16).
+
+    Runs the strict purge in a worker thread. A storage error raises
+    ``arq.Retry`` with linear backoff (60s, 120s, ...) up to
+    ``PURGE_MAX_TRIES``; the final failure is logged at ERROR and sent to
+    Sentry so ops can finish the erasure by hand.
+
+    Args:
+        ctx: ARQ worker context (``job_try`` present under the worker).
+        corporate_id: Tenant id (object prefix).
+        candidate_id: Erased candidate id.
+
+    Returns:
+        Number of object keys deleted.
+
+    Raises:
+        arq.Retry: Storage failed and attempts remain.
+        StoragePurgeError: Storage failed on the final attempt.
+    """
+    job_try = ctx.get("job_try") if ctx else None
+    corp, cand = _as_uuid(corporate_id), _as_uuid(candidate_id)
+    try:
+        deleted = await run_in_threadpool(
+            storage_service.purge_candidate_report_files, corp, cand, strict=True
+        )
+    except storage_service.StoragePurgeError as exc:
+        if job_try is not None and job_try < PURGE_MAX_TRIES:
+            logger.warning(
+                "erasure_purge_retry candidate_id=%s try=%s", cand, job_try,
+                extra={"event": "erasure_purge_retry"},
+            )
+            raise Retry(defer=timedelta(seconds=PURGE_RETRY_BASE_SECONDS * job_try)) from exc
+        logger.error(
+            "erasure_purge_failed candidate_id=%s corporate_id=%s tries=%s",
+            cand, corp, job_try,
+            extra={"event": "erasure_purge_failed"},
+        )
+        capture_silent_failure(
+            "erasure_purge_failed", exc, candidate_id=str(cand), corporate_id=str(corp)
+        )
+        if job_try is None:
+            return 0  # inline fallback: already reported, never crash the caller
+        raise
+    logger.info(
+        "erasure_purge_done candidate_id=%s deleted=%s", cand, deleted,
+        extra={"event": "erasure_purge_done"},
+    )
+    return deleted
+
+
 TASK_FUNCTIONS = (
     task_finalize_and_score_ai,
     task_refresh_report_synthesis,
@@ -223,4 +357,6 @@ TASK_FUNCTIONS = (
     task_store_cached_report,
     task_finalize_expired_assessment,
     task_sweep_expired_assessments,
+    task_reconcile_unscored,
+    func(task_purge_candidate_report_files, max_tries=PURGE_MAX_TRIES),
 )

@@ -1,14 +1,15 @@
 from datetime import datetime, timezone
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_db
+from app.database import get_db, retry_on_deadlock
 from app.auth import get_current_hr_user, HRUserContext, is_ops_role
-from app.jobs.enqueue import enqueue_nudge_email
+from starlette.concurrency import run_in_threadpool
+from app.jobs.enqueue import enqueue_nudge_email, enqueue_purge_candidate_report_files
 from app.schemas.session_log import CandidateSessionLogItem, CandidateSessionLogListResponse
 from app.services.candidate_service import CandidateService
 from app.services.package_service import PackageService
-from app.services.session_log import list_session_logs_for_candidate
+from app.services.session_log import SESSION_LOG_MAX_LIMIT, list_session_logs_for_candidate
 from app.services import storage as storage_service
 from app.security import email_limiter, enforce_user_rate_limit
 
@@ -20,6 +21,8 @@ async def get_candidate_session_logs(
     candidate_id: UUID,
     hr: HRUserContext = Depends(get_current_hr_user),
     db: AsyncSession = Depends(get_db),
+    limit: int = Query(500, ge=1, le=SESSION_LOG_MAX_LIMIT),
+    offset: int = Query(0, ge=0),
 ):
     """Return chronological login / device / module timing audit rows.
 
@@ -39,7 +42,7 @@ async def get_candidate_session_logs(
     if not is_ops_role(hr.role) and candidate.corporate_id != hr.corporate_id:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
-    rows = await list_session_logs_for_candidate(db, candidate_id)
+    rows = await list_session_logs_for_candidate(db, candidate_id, limit=limit, offset=offset)
     return CandidateSessionLogListResponse(
         items=[CandidateSessionLogItem.model_validate(row) for row in rows]
     )
@@ -100,8 +103,14 @@ async def reset_candidate_assessment(
     if not is_ops_role(hr.role) and candidate.corporate_id != hr.corporate_id:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    await CandidateService.reset_assessment(db, candidate)
-    storage_service.purge_cached_reports(candidate.corporate_id, candidate.id)
+    await retry_on_deadlock(
+        lambda: CandidateService.reset_assessment(db, candidate), session=db
+    )
+    # boto3 is synchronous: run it in a worker thread so a slow bucket
+    # cannot stall every candidate autosave on this worker (P1-11).
+    await run_in_threadpool(
+        storage_service.purge_cached_reports, candidate.corporate_id, candidate.id
+    )
     # Marker so clients can invalidate local drafts / caches after an admin reset.
     reset_at = datetime.now(timezone.utc).isoformat()
     return {
@@ -178,5 +187,7 @@ async def erase_candidate(
     corporate_id, candidate_id = await CandidateService.erase_candidate(
         db, candidate, admin_user_id=hr.user_id
     )
-    storage_service.purge_candidate_report_files(corporate_id, candidate_id)
+    # DB rows are already gone; the PDFs are deleted by a retrying job so a
+    # transient storage error cannot leave them behind (P1-16).
+    await enqueue_purge_candidate_report_files(corporate_id, candidate_id)
     return Response(status_code=204)

@@ -1,3 +1,9 @@
+import os
+
+# Settings default DEBUG=False (safe for deploys). Tests use the local example
+# secrets, so pin DEBUG on before the app (and its Settings) is imported.
+os.environ.setdefault("DEBUG", "true")
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport

@@ -463,7 +463,15 @@ async def test_nudge_and_store_enqueue_helpers():
     await enqueue_nudge_email(
         "a@ex.com", "A", "HM-1", "Pack", candidate_id=candidate_id
     )
-    await enqueue_store_cached_report(corporate_id, candidate_id, "abc123", b"%PDF")
+    with patch(
+        "app.jobs.enqueue.task_store_cached_report", new=AsyncMock()
+    ) as store_task:
+        spawned = await enqueue_store_cached_report(
+            corporate_id, candidate_id, "abc123", b"%PDF"
+        )
+        await spawned
+    # PDF bytes are uploaded in-process, never pickled into a Redis job.
+    store_task.assert_awaited_once()
     await enqueue_candidate_invite(
         candidate_email="a@ex.com",
         candidate_name="A",
@@ -476,6 +484,5 @@ async def test_nudge_and_store_enqueue_helpers():
     names = [c.args[0] for c in pool.enqueue_job.await_args_list]
     assert names == [
         "task_send_nudge_email",
-        "task_store_cached_report",
         "task_dispatch_candidate_invite",
     ]

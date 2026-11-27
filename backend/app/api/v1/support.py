@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import candidate_id_from_authorization
 from app.config import settings
 from app.database import get_db
 from app.models.candidate import Candidate
@@ -30,13 +31,21 @@ async def _resolve_candidate_link(
     access_code: str | None,
     email: str,
 ) -> tuple[UUID | None, UUID | None]:
-    """Resolve ``(candidate_id, corporate_id)`` from id, access code, or email.
+    """Resolve ``(candidate_id, corporate_id)`` for ticket linkage.
+
+    Only proofs the submitter actually holds are trusted:
+
+    1. ``candidate_id`` from a **verified candidate token** (never the body).
+    2. An access code (+ email to pick the invited candidate).
+
+    An email alone, or a raw UUID in the body, links nothing: anyone could
+    otherwise file tickets into another tenant's queue.
 
     Args:
         db: Async database session.
-        candidate_id: Optional client-supplied candidate id.
+        candidate_id: Candidate id taken from a verified bearer token, or None.
         access_code: Package or candidate access code from the form/URL.
-        email: Submitter email used as a secondary match key.
+        email: Submitter email, used only together with an access code.
 
     Returns:
         Pair of nullable UUIDs for ticket linkage.
@@ -94,21 +103,6 @@ async def _resolve_candidate_link(
         ).scalars().first()
         if by_candidate_code:
             return by_candidate_code.id, by_candidate_code.corporate_id
-
-    if email_norm:
-        by_email = (
-            await db.execute(
-                select(Candidate)
-                .where(
-                    func.lower(Candidate.email) == email_norm,
-                    Candidate.deleted_at.is_(None),
-                )
-                .order_by(Candidate.logged_in_at.desc().nullslast())
-                .limit(1)
-            )
-        ).scalars().first()
-        if by_email:
-            return by_email.id, by_email.corporate_id
 
     return None, None
 
@@ -198,10 +192,15 @@ async def submit_support_ticket(
 ):
     """Persist a candidate (or anonymous) technical-support report and email ops.
 
-    Auth is optional. Candidate/corporate are auto-linked from ``candidate_id``,
-    ``access_code`` / ``package_code``, or submitter ``email`` when possible.
+    Auth is optional. Candidate/corporate are linked from a verified candidate
+    bearer token, or from ``access_code`` / ``package_code`` (+ email). A
+    ``candidate_id`` in the body is ignored (kept in the schema so older
+    clients do not get a 422).
     """
     enforce_rate_limit(public_limiter, request, "support_submit")
+    token_candidate_id = candidate_id_from_authorization(
+        request.headers.get("authorization")
+    )
 
     access_code = (body.access_code or body.package_code or "").strip() or None
     description = (body.description or body.details or "").strip()
@@ -213,7 +212,7 @@ async def submit_support_ticket(
 
     candidate_id, corporate_id = await _resolve_candidate_link(
         db,
-        candidate_id=body.candidate_id,
+        candidate_id=token_candidate_id,
         access_code=access_code,
         email=str(body.email),
     )

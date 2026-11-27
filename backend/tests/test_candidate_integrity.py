@@ -94,7 +94,10 @@ def test_raise_integrity_409_contract():
     with pytest.raises(HTTPException) as exc:
         _raise_integrity(AssessmentAlreadySubmittedError())
     assert exc.value.status_code == 409
-    assert exc.value.detail == "Assessment already completed. Modifications are locked."
+    assert exc.value.detail == {
+        "code": "ALREADY_SUBMITTED",
+        "message": "Assessment already completed. Modifications are locked.",
+    }
 
 
 def test_raise_integrity_404_contract():
@@ -343,7 +346,12 @@ async def test_get_test_409_when_already_submitted(candidate_client, monkeypatch
     monkeypatch.setattr(CandidateService, "load_runner_context", load_context)
     response = await client.get(f"/api/v1/candidate/test/{assessment_id}")
     assert response.status_code == 409
-    assert response.json() == {"detail": "Assessment already completed. Modifications are locked."}
+    assert response.json() == {
+        "detail": {
+            "code": "ALREADY_SUBMITTED",
+            "message": "Assessment already completed. Modifications are locked.",
+        }
+    }
 
 
 @pytest.mark.asyncio
@@ -363,7 +371,12 @@ async def test_autosave_409_when_already_submitted(candidate_client, monkeypatch
         },
     )
     assert response.status_code == 409
-    assert response.json() == {"detail": "Assessment already completed. Modifications are locked."}
+    assert response.json() == {
+        "detail": {
+            "code": "ALREADY_SUBMITTED",
+            "message": "Assessment already completed. Modifications are locked.",
+        }
+    }
 
 
 @pytest.mark.asyncio
@@ -445,7 +458,12 @@ async def test_submit_409_when_already_submitted(candidate_client, monkeypatch):
     monkeypatch.setattr(CandidateService, "submit_test", submit)
     response = await client.post(f"/api/v1/candidate/test/{assessment_id}/submit")
     assert response.status_code == 409
-    assert response.json() == {"detail": "Assessment already completed. Modifications are locked."}
+    assert response.json() == {
+        "detail": {
+            "code": "ALREADY_SUBMITTED",
+            "message": "Assessment already completed. Modifications are locked.",
+        }
+    }
 
 
 @pytest.mark.asyncio

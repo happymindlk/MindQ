@@ -20,6 +20,7 @@ from botocore.client import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import settings
+from app.sentry_init import capture_silent_failure
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +167,16 @@ def _logo_object_key(corporate_id: UUID, filename: str) -> str:
     return f"{corporate_id}/{safe_name}"
 
 
+# Explicit timeouts (boto3 defaults: 60s connect + 60s read, legacy retries).
+# read_timeout is per socket read, not the whole transfer; 15s leaves room for
+# multi-MB report PDFs on a slow gateway while still failing fast on a hang.
+_S3_TIMEOUTS = dict(
+    connect_timeout=3,
+    read_timeout=15,
+    retries={"max_attempts": 2, "mode": "standard"},
+)
+
+
 def _s3_client():
     """Build an S3 client pointed at the configured R2 / Supabase S3 endpoint.
 
@@ -187,7 +198,11 @@ def _s3_client():
             aws_access_key_id=settings.R2_ACCESS_KEY_ID,
             aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
             region_name=region,
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                **_S3_TIMEOUTS,
+            ),
         )
 
     return boto3.client(
@@ -196,7 +211,7 @@ def _s3_client():
         aws_access_key_id=settings.R2_ACCESS_KEY_ID,
         aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
         region_name=region,
-        config=Config(signature_version="s3v4"),
+        config=Config(signature_version="s3v4", **_S3_TIMEOUTS),
     )
 
 
@@ -258,6 +273,7 @@ def upload_report(
         return key
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - archiving is best-effort
         logger.warning("Report storage upload failed for %s: %s", key, exc)
+        capture_silent_failure("report_archive_upload_failed", exc, key=key)
         return None
 
 
@@ -300,9 +316,11 @@ def fetch_cached_report(corporate_id: UUID, candidate_id: UUID, cache_key: str) 
         code = str((exc.response or {}).get("Error", {}).get("Code") or "")
         if code not in _MISSING_OBJECT_CODES:
             logger.warning("Cached report read failed for %s: %s", key, exc)
+            capture_silent_failure("report_cache_read_failed", exc, key=key)
         return None
     except (BotoCoreError, Exception) as exc:  # noqa: BLE001 - cache is best-effort
         logger.warning("Cached report read failed for %s: %s", key, exc)
+        capture_silent_failure("report_cache_read_failed", exc, key=key)
         return None
 
 
@@ -339,21 +357,44 @@ def store_cached_report(
         )
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - cache is best-effort
         logger.warning("Cached report upload failed for %s: %s", key, exc)
+        capture_silent_failure("report_cache_upload_failed", exc, key=key)
         return None
 
     try:
-        listing = client.list_objects_v2(
-            Bucket=bucket, Prefix=_cached_report_prefix(corporate_id, candidate_id)
+        prefix_keys = _list_object_keys(
+            client, bucket, _cached_report_prefix(corporate_id, candidate_id)
         )
-        stale_keys = [
-            item["Key"]
-            for item in listing.get("Contents", [])
-            if item.get("Key") and item["Key"] != key
-        ]
+        stale_keys = [k for k in prefix_keys if k != key]
         _delete_object_keys(client, bucket, stale_keys)
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - pruning is best-effort
         logger.warning("Cached report prune failed for %s: %s", key, exc)
+        capture_silent_failure("report_cache_prune_failed", exc, key=key)
     return key
+
+
+def _list_object_keys(client: object, bucket: str, prefix: str) -> list[str]:
+    """Every key under ``prefix``, following continuation tokens.
+
+    ``list_objects_v2`` returns at most 1000 keys per call; a single call
+    silently missed anything past that (P1-17).
+
+    Args:
+        client: boto3 S3 client.
+        bucket: Bucket name.
+        prefix: Key prefix.
+
+    Returns:
+        All matching object keys.
+    """
+    keys: list[str] = []
+    kwargs: dict[str, str] = {"Bucket": bucket, "Prefix": prefix}
+    while True:
+        listing = client.list_objects_v2(**kwargs)
+        keys.extend(item["Key"] for item in listing.get("Contents", []) if item.get("Key"))
+        token = listing.get("NextContinuationToken")
+        if not listing.get("IsTruncated") or not token:
+            return keys
+        kwargs["ContinuationToken"] = token
 
 
 def _delete_object_keys(client: object, bucket: str, keys: list[str]) -> int:
@@ -379,19 +420,31 @@ def _delete_object_keys(client: object, bucket: str, keys: list[str]) -> int:
     return deleted
 
 
-def purge_cached_reports(corporate_id: UUID, candidate_id: UUID) -> int:
+class StoragePurgeError(RuntimeError):
+    """A strict purge could not confirm every report object was deleted."""
+
+
+def purge_cached_reports(
+    corporate_id: UUID, candidate_id: UUID, *, strict: bool = False
+) -> int:
     """Delete all cached report PDFs for a candidate under their storage prefix.
 
-    Best-effort: missing bucket config or storage errors are logged and treated
-    as zero deletions so callers (e.g. assessment reset) can still succeed.
+    Best-effort by default: missing bucket config or storage errors are logged
+    and treated as zero deletions so callers (e.g. assessment reset) can still
+    succeed. With ``strict=True`` (right-to-erasure) a storage error raises so
+    the purge job retries instead of leaving PDFs behind.
 
     Args:
         corporate_id: Tenant id used as the object prefix.
         candidate_id: Candidate id used as the second path segment.
+        strict: Raise :class:`StoragePurgeError` on storage failures.
 
     Returns:
         Number of object keys requested for deletion (0 when nothing to purge
         or storage is unavailable).
+
+    Raises:
+        StoragePurgeError: ``strict`` and listing / deleting failed.
     """
     if not _reports_bucket_safe():
         return 0
@@ -399,21 +452,21 @@ def purge_cached_reports(corporate_id: UUID, candidate_id: UUID) -> int:
     prefix = _cached_report_prefix(corporate_id, candidate_id)
     try:
         client = _s3_client()
-        listing = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
-        keys = [
-            item["Key"]
-            for item in listing.get("Contents", [])
-            if item.get("Key")
-        ]
+        keys = _list_object_keys(client, bucket, prefix)
         if not keys:
             return 0
         return _delete_object_keys(client, bucket, keys)
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - purge is best-effort
+        if strict:
+            raise StoragePurgeError(f"Cached report purge failed for {prefix}") from exc
         logger.warning("Cached report purge failed for %s: %s", prefix, exc)
+        capture_silent_failure("report_cache_purge_failed", exc, prefix=prefix)
         return 0
 
 
-def purge_legacy_archived_reports(corporate_id: UUID, candidate_id: UUID) -> int:
+def purge_legacy_archived_reports(
+    corporate_id: UUID, candidate_id: UUID, *, strict: bool = False
+) -> int:
     """Delete legacy flat archive keys ``{corp}/{cand}.pdf`` and ``.html``.
 
     These keys are written by ``upload_report`` and sit outside the cached-report
@@ -437,28 +490,42 @@ def purge_legacy_archived_reports(corporate_id: UUID, candidate_id: UUID) -> int
         client = _s3_client()
         return _delete_object_keys(client, bucket, keys)
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001 - purge is best-effort
+        if strict:
+            raise StoragePurgeError(
+                f"Legacy report archive purge failed for {corporate_id}/{candidate_id}"
+            ) from exc
         logger.warning(
             "Legacy report archive purge failed for %s/%s: %s",
             corporate_id,
             candidate_id,
             exc,
         )
+        capture_silent_failure(
+            "report_archive_purge_failed", exc, corporate_id=str(corporate_id)
+        )
         return 0
 
 
-def purge_candidate_report_files(corporate_id: UUID, candidate_id: UUID) -> int:
+def purge_candidate_report_files(
+    corporate_id: UUID, candidate_id: UUID, *, strict: bool = False
+) -> int:
     """Remove every stored report object for a candidate (cache + legacy archives).
 
     Args:
         corporate_id: Tenant id used as the object prefix.
         candidate_id: Candidate whose report objects should be erased.
+        strict: Raise on storage failure (erasure job retries) instead of
+            logging and returning 0.
 
     Returns:
         Combined count of keys requested for deletion.
+
+    Raises:
+        StoragePurgeError: ``strict`` and any purge step failed.
     """
-    return purge_cached_reports(corporate_id, candidate_id) + purge_legacy_archived_reports(
-        corporate_id, candidate_id
-    )
+    return purge_cached_reports(
+        corporate_id, candidate_id, strict=strict
+    ) + purge_legacy_archived_reports(corporate_id, candidate_id, strict=strict)
 
 
 def _logo_upload_failure_detail(exc: BaseException) -> str:
@@ -676,4 +743,5 @@ def get_report_download_url(
         )
     except (BotoCoreError, ClientError, Exception) as exc:  # noqa: BLE001
         logger.warning("Report presign failed for %s: %s", key, exc)
+        capture_silent_failure("report_presign_failed", exc, key=key)
         return None

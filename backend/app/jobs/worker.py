@@ -10,10 +10,18 @@ from sqlalchemy import text
 from app.config import settings
 from app.database import engine
 from app.jobs.settings import redis_settings_from_url
-from app.jobs.tasks import TASK_FUNCTIONS, task_sweep_expired_assessments
+from app.jobs.tasks import (
+    TASK_FUNCTIONS,
+    task_reconcile_unscored,
+    task_sweep_expired_assessments,
+)
 from app.observability import configure_logging
+from app.sentry_init import init_sentry
+from app.services.gemini_client import shutdown_gemini_executor
 
 configure_logging(debug=settings.DEBUG)
+# Sentry was defined but never initialized; no-op unless SENTRY_DSN is set.
+init_sentry(settings)
 logger = logging.getLogger(__name__)
 
 
@@ -43,6 +51,7 @@ async def on_shutdown(ctx: dict[str, Any]) -> None:
         ctx: ARQ worker context dict.
     """
     del ctx
+    shutdown_gemini_executor()
     await engine.dispose()
     logger.info("arq_worker_stopped", extra={"event": "arq_worker_stopped"})
 
@@ -54,6 +63,13 @@ class WorkerSettings:
     # Safety net every minute; exact-time finalize is deferred at module start.
     cron_jobs = [
         cron(task_sweep_expired_assessments, second={0, 30}, run_at_startup=True),
+        # Re-queue COMPLETED-but-unscored attempts every 5 minutes.
+        cron(
+            task_reconcile_unscored,
+            minute=set(range(0, 60, 5)),
+            second=15,
+            run_at_startup=True,
+        ),
     ]
     redis_settings = redis_settings_from_url()
     max_jobs = settings.ARQ_MAX_JOBS

@@ -5,10 +5,12 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from app.database import SessionLocal
 from app.models.assessment import Assessment
+from app.models.candidate import Candidate
 from app.models.candidate_progress import CandidateProgress
 from app.models.candidate_response import CandidateResponse
 from app.models.corporate import Corporate
@@ -18,7 +20,7 @@ from app.services.gemini_client import background_retry_profile
 from app.services.jd_scoring import FAILED_RETRY_COOLDOWN
 from app.services.package_service import PackageService
 from app.services.technical_eval import TechnicalEvalService
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,70 @@ def claim_report_refresh(candidate_id: UUID, *, now: float | None = None) -> boo
     return True
 
 
+# Reconciler: COMPLETED rows with no score_details after this grace are
+# assumed lost (failed job, Redis blip, restart) and re-queued.
+UNSCORED_GRACE = timedelta(minutes=2)
+UNSCORED_BATCH_LIMIT = 200
+
+
+async def find_unscored_completed(
+    *,
+    lookback: timedelta,
+    now: datetime | None = None,
+    limit: int = UNSCORED_BATCH_LIMIT,
+) -> list[tuple[UUID, UUID]]:
+    """List COMPLETED attempts that never got core scores.
+
+    Only rows completed between ``now - lookback`` and ``now - UNSCORED_GRACE``
+    are considered: the grace leaves the normal post-submit job time to run,
+    and the lookback keeps historical (pre-scoring-v2) rows from being
+    re-scored in bulk.
+
+    Args:
+        lookback: How far back to look for unscored completions.
+        now: Clock override for tests.
+        limit: Max rows returned per call.
+
+    Returns:
+        ``(candidate_id, assessment_id)`` pairs, oldest completion first.
+    """
+    current = now or datetime.now(timezone.utc)
+    stmt = (
+        select(CandidateProgress.candidate_id, CandidateProgress.assessment_id)
+        .join(Candidate, Candidate.id == CandidateProgress.candidate_id)
+        .where(
+            CandidateProgress.status == "COMPLETED",
+            # SQL NULL, or JSON 'null' (HR reset writes None through a JSONB
+            # bind, which stores the JSON literal rather than SQL NULL).
+            or_(
+                CandidateProgress.score_details.is_(None),
+                func.jsonb_typeof(CandidateProgress.score_details) == "null",
+            ),
+            CandidateProgress.completed_at.is_not(None),
+            CandidateProgress.completed_at >= current - lookback,
+            CandidateProgress.completed_at <= current - UNSCORED_GRACE,
+            Candidate.deleted_at.is_(None),
+        )
+        .order_by(CandidateProgress.completed_at)
+        .limit(limit)
+    )
+    async with SessionLocal() as session:
+        rows = (await session.execute(stmt)).all()
+    return [(row[0], row[1]) for row in rows]
+
+
+class ScoringFailedError(Exception):
+    """Core scoring failed for one submitted module; safe to retry."""
+
+    def __init__(self, candidate_id: UUID, assessment_id: UUID) -> None:
+        super().__init__(
+            f"core scoring failed candidate_id={candidate_id} "
+            f"assessment_id={assessment_id}"
+        )
+        self.candidate_id = candidate_id
+        self.assessment_id = assessment_id
+
+
 async def finalize_and_score_ai(
     candidate_id: UUID, assessment_id: UUID
 ) -> None:
@@ -94,6 +160,9 @@ async def finalize_and_score_ai(
     Args:
         candidate_id: Candidate who just submitted.
         assessment_id: Assessment that was submitted.
+
+    Raises:
+        ScoringFailedError: Core scoring failed; later stages did not run.
     """
     async with SessionLocal() as session:
         candidate = await CandidateService.get_candidate(session, candidate_id)
@@ -104,12 +173,17 @@ async def finalize_and_score_ai(
             await CandidateService.finalize_submission_scores(
                 session, candidate, assessment_id
             )
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "finalize_scores_failed candidate_id=%s assessment_id=%s",
                 candidate_id,
                 assessment_id,
+                extra={"event": "finalize_scores_failed"},
             )
+            # Stop here: AI grading, the HR email and the PDF all depend on
+            # core scores. The ARQ task retries; the reconciler cron catches
+            # anything that still ends up COMPLETED without score_details.
+            raise ScoringFailedError(candidate_id, assessment_id) from exc
 
     await score_ai_for_candidate(candidate_id, assessment_id)
     await notify_hr_if_package_complete(candidate_id)

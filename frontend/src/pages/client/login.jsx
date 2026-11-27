@@ -8,8 +8,20 @@ import { CLIENT_DASHBOARD_KEY } from './use-client-dashboard';
 import { useClientSession } from './use-client-session';
 
 const CODE_LENGTH = 6;
-/** Matches backend HR OTP resend cooldown. */
-const RESEND_COOLDOWN_SECONDS = 120;
+/**
+ * Anti-double-click gap; matches backend HR SEND_COOLDOWN. After 3 sends the
+ * backend blocks for 5 minutes and returns Retry-After, which drives the
+ * countdown instead.
+ */
+const RESEND_COOLDOWN_SECONDS = 30;
+
+/** "45s" under a minute, else "m:ss". */
+function formatWait(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = String(seconds % 60).padStart(2, '0');
+  return `${m}:${s}`;
+}
 
 function ErrorBanner({ message }) {
   if (!message) return null;
@@ -81,6 +93,9 @@ export default function ClientLogin() {
       setCooldown(RESEND_COOLDOWN_SECONDS);
     } catch (err) {
       setError(err.message || 'Could not send code');
+      if (err.status === 429 && err.retryAfterSeconds > 0) {
+        setCooldown(err.retryAfterSeconds);
+      }
     } finally {
       setLoading(false);
     }
@@ -208,7 +223,7 @@ export default function ClientLogin() {
                   className="inline-flex w-full items-center justify-center gap-1.5 rounded-md py-1 text-xs text-indigo-600 transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-600 disabled:cursor-not-allowed disabled:text-muted disabled:no-underline dark:text-indigo-400"
                 >
                   <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                  {cooldown > 0 ? `Resend OTP in ${cooldown}s` : 'Resend OTP'}
+                  {cooldown > 0 ? `Resend OTP in ${formatWait(cooldown)}` : 'Resend OTP'}
                 </button>
                 <button
                   type="button"

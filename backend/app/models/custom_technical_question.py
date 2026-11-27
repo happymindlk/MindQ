@@ -19,10 +19,10 @@ class CustomTechnicalQuestion(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     package_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("packages.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("packages.id", ondelete="CASCADE"), nullable=False, index=True
     )
     corporate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
     question_type: Mapped[str] = mapped_column(String(32), default="mcq", nullable=False)

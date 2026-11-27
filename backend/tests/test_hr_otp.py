@@ -103,6 +103,24 @@ class _FakeDb:
         return None
 
 
+class _OrderedDb(_FakeDb):
+    """Records commit / SES send / post-commit statements in call order."""
+
+    def __init__(self, results):
+        super().__init__(results)
+        self.events: list[str] = []
+
+    async def execute(self, *args, **kwargs):
+        if "commit" in self.events:
+            stmt = str(args[0]).split()[0] if args else "?"
+            self.events.append(f"execute:{stmt}")
+        return await super().execute(*args, **kwargs)
+
+    async def commit(self):
+        self.events.append("commit")
+        await super().commit()
+
+
 def test_challenge_model_matches_migration_schema():
     from app.models.hr_login_challenge import HrLoginChallenge
 
@@ -452,20 +470,21 @@ async def test_request_rebinds_from_inactive_corp_to_active_whitelist():
 
 
 @pytest.mark.asyncio
-async def test_request_mail_failure_rolls_back_to_503():
+async def test_request_mail_failure_discards_challenge_with_503():
     user_id, corporate_id = uuid4(), uuid4()
-    db = _FakeDb(
+    db = _OrderedDb(
         [
             _Result(scalar=_membership(user_id, corporate_id)),
             _Result(scalar=_corporate(corporate_id)),
-            _Result(),
-            _Result(first=None),
-            _Result(scalars=[]),
-            _Result(scalars=[]),
+            _Result(),  # advisory lock
+            _Result(first=None),  # _is_locked
+            _Result(scalars=[]),  # recent sends
+            _Result(),  # DELETE of the unsent challenge
         ]
     )
 
     async def _send(_email, _otp):
+        db.events.append("send")
         raise RuntimeError("SES rejected")
 
     with (
@@ -475,7 +494,35 @@ async def test_request_mail_failure_rolls_back_to_503():
         with pytest.raises(HrOtpError) as exc:
             await request_hr_otp(db, EMAIL)
     assert exc.value.status_code == 503
-    assert db.committed is False
+    # Row committed (lock + connection released) before SES, then deleted.
+    assert db.events == ["commit", "send", "execute:DELETE", "commit"]
+
+
+@pytest.mark.asyncio
+async def test_request_commits_before_send_and_supersedes_after():
+    user_id, corporate_id = uuid4(), uuid4()
+    old = SimpleNamespace(locked_until=None, consumed_at=None, otp_hash="h")
+    db = _OrderedDb(
+        [
+            _Result(scalar=_membership(user_id, corporate_id)),
+            _Result(scalar=_corporate(corporate_id)),
+            _Result(),
+            _Result(first=None),
+            _Result(scalars=[]),
+            _Result(scalars=[old]),  # supersede: earlier open challenge
+        ]
+    )
+
+    async def _send(_email, _otp):
+        db.events.append("send")
+
+    with (
+        patch("app.services.hr_otp.find_auth_user_id_by_email", return_value=user_id),
+        patch("app.services.hr_otp.send_hr_otp_email", new=_send),
+    ):
+        await request_hr_otp(db, EMAIL)
+    assert db.events == ["commit", "send", "execute:SELECT", "commit"]
+    assert old.consumed_at is not None and old.otp_hash == ""
 
 
 def _verify_db(row, user_id, corporate_id):
@@ -592,3 +639,43 @@ def test_send_route_returns_challenge_shape(_no_rate_limit):
         )
     assert res.status_code == 200
     assert res.json() == {"status": "otp_required", "temp_token": "t" * 24}
+
+
+# --- HR send policy: 30s cooldown, 3 sends, then 5-minute block -------------
+
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+from app.services.hr_otp import hr_send_block, send_block_message
+
+_NOW = _dt(2026, 11, 26, 9, 0, tzinfo=_tz.utc)
+
+
+def _ago(seconds: int) -> _dt:
+    return _NOW - _td(seconds=seconds)
+
+
+def test_hr_first_send_is_never_blocked():
+    assert hr_send_block([], _NOW) is None
+
+
+def test_hr_double_click_within_30s_hits_cooldown():
+    assert hr_send_block([_ago(10)], _NOW) == ("cooldown", 20)
+
+
+def test_hr_second_and_third_send_allowed_after_30s():
+    assert hr_send_block([_ago(31)], _NOW) is None
+    assert hr_send_block([_ago(70), _ago(35)], _NOW) is None
+
+
+def test_hr_fourth_send_blocked_for_five_minutes_from_last():
+    reason, remaining = hr_send_block([_ago(120), _ago(80), _ago(40)], _NOW)
+    assert reason == "blocked"
+    assert remaining == 300 - 40
+    assert "wait 5 minutes" in send_block_message(remaining)
+
+
+def test_hr_block_lifts_after_five_minutes_and_new_burst_starts():
+    sends = [_ago(400), _ago(360), _ago(301)]
+    assert hr_send_block(sends, _NOW) is None
+    # After one new send the burst restarts at 1, so only cooldown applies.
+    assert hr_send_block([*sends, _ago(5)], _NOW) == ("cooldown", 25)

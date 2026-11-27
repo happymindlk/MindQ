@@ -26,7 +26,7 @@ export function useBulkReportDownload({ packageId, packageTitle, candidates }) {
     controllerRef.current = controller;
     setRunning(true);
     try {
-      const { succeeded, failed } = await clientApi.downloadPackageReportsZip(
+      const { succeeded, failed, parts = 1 } = await clientApi.downloadPackageReportsZip(
         packageId,
         packageTitle,
         { signal: controller.signal },
@@ -42,7 +42,10 @@ export function useBulkReportDownload({ packageId, packageTitle, candidates }) {
       } else {
         toast({
           title: 'Reports ready',
-          description: `${succeeded} MindQ ${succeeded === 1 ? 'Report' : 'Reports'} bundled into one zip.`,
+          description:
+            parts > 1
+              ? `${succeeded} MindQ Reports downloaded as ${parts} zip files.`
+              : `${succeeded} MindQ ${succeeded === 1 ? 'Report' : 'Reports'} bundled into one zip.`,
           variant: 'success',
         });
       }

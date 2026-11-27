@@ -19,7 +19,7 @@ from uuid import UUID, uuid4
 
 import jwt
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import or_, select, text
+from sqlalchemy import delete, or_, select, text
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -230,6 +230,29 @@ def send_block_reason(
     if len(recent) >= MAX_SENDS_PER_WINDOW:
         return ("window", 0)
     return None
+
+
+async def discard_challenge(db: AsyncSession, model: Any, challenge_id: UUID) -> None:
+    """Delete a committed challenge whose email could not be sent.
+
+    Best-effort in its own short transaction: if it fails the row is left
+    behind, unusable (nobody received the code) and expiring after OTP_TTL.
+
+    Args:
+        db: Async database session (no transaction open).
+        model: Challenge ORM class (candidate / HR / admin).
+        challenge_id: Row to delete.
+    """
+    try:
+        await db.execute(delete(model).where(model.id == challenge_id))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.warning(
+            "otp_challenge_discard_failed",
+            exc_info=True,
+            extra={"event": "otp_challenge_discard_failed", "challenge_id": str(challenge_id)},
+        )
 
 
 def apply_otp_attempt(row: Any, otp: str, now: datetime) -> str:

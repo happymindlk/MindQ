@@ -1,0 +1,23 @@
+# Secrets and local state: never bake into the image.
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite3
+*.log
+report_*.html
+local_dump.sql
+
+# Dev / test only
+tests/
+requirements-dev.txt
+node_modules/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+venv/
+.coverage
+htmlcov/
+.git/

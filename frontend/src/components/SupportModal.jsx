@@ -134,15 +134,25 @@ export default function SupportModal() {
       const device = getDeviceContext();
       const accessCode = readAccessCode();
       const enteredName = readLoginDraftName() || null;
+      // Signed-in candidates prove who they are with their token; the server
+      // ignores any raw candidate_id (anyone could send someone else's).
+      let candidateToken = null;
+      try {
+        candidateToken = localStorage.getItem('candidateToken');
+      } catch {
+        candidateToken = null;
+      }
       const res = await fetch(`${API_BASE}/support/submit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(candidateToken ? { Authorization: `Bearer ${candidateToken}` } : {}),
+        },
         body: JSON.stringify({
           email: email.trim(),
           contact_number: contactNumber.trim(),
           details: details.trim(),
           description: details.trim(),
-          candidate_id: localStorage.getItem('candidateId') || null,
           access_code: accessCode || null,
           package_code: accessCode || null,
           entered_name: enteredName,

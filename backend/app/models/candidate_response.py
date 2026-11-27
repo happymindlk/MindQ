@@ -17,13 +17,13 @@ class CandidateResponse(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     corporate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     assessment_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True
     )
     question_id: Mapped[str] = mapped_column(String(255), nullable=False)
     response: Mapped[dict] = mapped_column(JSONB, nullable=False)

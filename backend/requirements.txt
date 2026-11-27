@@ -21,3 +21,4 @@ python-multipart>=0.0.9
 pypdf>=5.0
 arq>=0.26.0
 redis>=5.0.0
+sentry-sdk[fastapi]>=2.19.0

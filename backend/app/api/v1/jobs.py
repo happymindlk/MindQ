@@ -8,12 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import HRUserContext, get_current_hr_user, get_current_ops_user
 from app.config import settings
 from app.database import get_db
-from app.models.assessment import Assessment
 from app.models.candidate import Candidate
-from app.models.candidate_progress import CandidateProgress
 from app.models.package import Package
 from app.services.assessment_expiry import ensure_expired_assessments_finalized
 from app.services.email_service import EmailService
+from app.services.progress_summary import (
+    ProgressSummary,
+    assessment_counts,
+    progress_summaries,
+)
 from app.security import enforce_user_rate_limit, report_limiter
 
 router = APIRouter()
@@ -61,14 +64,9 @@ async def nudge_candidates_due(
 
     nudged = 0
     skipped = 0
+    totals = await assessment_counts(db, [p.id for p in packages])
     for pkg in packages:
-        total = len(
-            (
-                await db.execute(
-                    select(Assessment.id).where(Assessment.package_id == pkg.id)
-                )
-            ).scalars().all()
-        )
+        total = totals.get(pkg.id, 0)
         candidates = (
             await db.execute(
                 select(Candidate).where(
@@ -77,15 +75,9 @@ async def nudge_candidates_due(
                 )
             )
         ).scalars().all()
+        summaries = await progress_summaries(db, [c.id for c in candidates])
         for cand in candidates:
-            progresses = (
-                await db.execute(
-                    select(CandidateProgress).where(
-                        CandidateProgress.candidate_id == cand.id
-                    )
-                )
-            ).scalars().all()
-            completed = sum(1 for p in progresses if p.status == "COMPLETED")
+            completed = summaries.get(cand.id, ProgressSummary()).completed
             if total > 0 and completed >= total:
                 skipped += 1
                 continue

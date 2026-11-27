@@ -932,6 +932,8 @@ export default function SuiteBuilder() {
     }
     const controller = draftSave.current;
     controller.schedule(() => {
+      // persist() already logs and flips the editor to the visible "error"
+      // save state before rethrowing; this only prevents an unhandled rejection.
       persist().catch(() => {});
     }, 900);
     setSaveState((prev) => (prev === 'idle' ? 'idle' : 'saving'));

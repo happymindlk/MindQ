@@ -76,6 +76,7 @@ describe('SupportModal', () => {
 
   it('auto-attaches metadata and shows the success state on a 200 response', async () => {
     localStorage.setItem('candidateId', 'c1');
+    localStorage.setItem('candidateToken', 'tok-c1');
     localStorage.setItem('candidateAccessCode', 'HM-ABCDEF-1');
     localStorage.setItem('mindq_device_id', 'device-fixed-1');
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
@@ -97,7 +98,6 @@ describe('SupportModal', () => {
       contact_number: '+94 77 123 4567',
       details: 'Timer froze',
       description: 'Timer froze',
-      candidate_id: 'c1',
       package_code: 'HM-ABCDEF-1',
       access_code: 'HM-ABCDEF-1',
       device_id: 'device-fixed-1',
@@ -106,6 +106,9 @@ describe('SupportModal', () => {
     });
     expect(body.browser).toBe(navigator.userAgent);
     expect(body.page_url).toContain(window.location.origin);
+    // Identity travels as the signed token, never a raw id in the body.
+    expect(body).not.toHaveProperty('candidate_id');
+    expect(init.headers.Authorization).toBe('Bearer tok-c1');
   });
 
   it('falls back to the invite code in the URL before sign-in', async () => {

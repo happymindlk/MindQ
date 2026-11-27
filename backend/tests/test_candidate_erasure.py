@@ -67,13 +67,13 @@ def test_erase_cross_tenant_hr_returns_404_and_skips_mutation():
     caller_corp = uuid4()
     candidate = _candidate(corporate_id=uuid4())
     erase = AsyncMock()
-    purge = MagicMock()
+    purge = AsyncMock()
 
     with (
         patch.object(CandidateService, "get_candidate", new=AsyncMock(return_value=candidate)),
         patch.object(CandidateService, "erase_candidate", new=erase),
         patch(
-            "app.api.v1.notifications.storage_service.purge_candidate_report_files",
+            "app.api.v1.notifications.enqueue_purge_candidate_report_files",
             new=purge,
         ),
     ):
@@ -84,7 +84,7 @@ def test_erase_cross_tenant_hr_returns_404_and_skips_mutation():
     assert res.status_code == 404
     assert res.json() == {"detail": "Candidate not found"}
     erase.assert_not_awaited()
-    purge.assert_not_called()
+    purge.assert_not_awaited()
 
 
 def test_erase_allows_ops_cross_tenant_and_purges_storage(caplog):
@@ -92,13 +92,13 @@ def test_erase_allows_ops_cross_tenant_and_purges_storage(caplog):
     admin_id = uuid4()
     candidate = _candidate(corporate_id=uuid4())
     erase = AsyncMock(return_value=(candidate.corporate_id, candidate.id))
-    purge = MagicMock(return_value=3)
+    purge = AsyncMock(return_value=None)
 
     with (
         patch.object(CandidateService, "get_candidate", new=AsyncMock(return_value=candidate)),
         patch.object(CandidateService, "erase_candidate", new=erase),
         patch(
-            "app.api.v1.notifications.storage_service.purge_candidate_report_files",
+            "app.api.v1.notifications.enqueue_purge_candidate_report_files",
             new=purge,
         ),
         caplog.at_level(logging.INFO),
@@ -111,7 +111,8 @@ def test_erase_allows_ops_cross_tenant_and_purges_storage(caplog):
     assert res.content == b""
     erase.assert_awaited_once()
     assert erase.await_args.kwargs["admin_user_id"] == admin_id
-    purge.assert_called_once_with(candidate.corporate_id, candidate.id)
+    # Storage purge is queued as a retrying job, not run inline (P1-16).
+    purge.assert_awaited_once_with(candidate.corporate_id, candidate.id)
     assert candidate.full_name not in caplog.text
     assert candidate.email not in caplog.text
 
@@ -120,13 +121,13 @@ def test_erase_same_tenant_hr_succeeds():
     corp = uuid4()
     candidate = _candidate(corporate_id=corp)
     erase = AsyncMock(return_value=(corp, candidate.id))
-    purge = MagicMock(return_value=1)
+    purge = AsyncMock(return_value=None)
 
     with (
         patch.object(CandidateService, "get_candidate", new=AsyncMock(return_value=candidate)),
         patch.object(CandidateService, "erase_candidate", new=erase),
         patch(
-            "app.api.v1.notifications.storage_service.purge_candidate_report_files",
+            "app.api.v1.notifications.enqueue_purge_candidate_report_files",
             new=purge,
         ),
     ):
@@ -237,11 +238,12 @@ async def test_technical_eval_log_omits_ai_prose(caplog, monkeypatch):
         scorecard=["Depth: strong"],
     )
 
-    async def _fake_to_thread(fn, *args, **kwargs):
+    async def _fake_gemini_call(fn, *args, **kwargs):
         return evaluation
 
+    # Gemini calls run on the dedicated executor (P1-19).
     monkeypatch.setattr(
-        "app.services.technical_eval.asyncio.to_thread", _fake_to_thread
+        "app.services.technical_eval.run_gemini_call", _fake_gemini_call
     )
     monkeypatch.setattr(
         "app.services.technical_eval.settings.GEMINI_API_KEY", "test-key"

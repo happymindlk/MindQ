@@ -39,7 +39,7 @@ class GlobalModule(Base):
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     lineage_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
     parent_module_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("global_modules.id", ondelete="SET NULL"), nullable=True
+        Uuid, ForeignKey("global_modules.id", ondelete="SET NULL"), nullable=True, index=True
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     timer_mode: Mapped[str] = mapped_column(String(16), default="flexible", nullable=False)

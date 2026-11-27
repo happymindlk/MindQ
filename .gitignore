@@ -27,8 +27,13 @@ backend/uvicorn.log
 .env
 .env.*
 
+# Local DB dumps only. Never ignore *.sql globally: migrations must be tracked.
 local_dump.sql
-*.sql
+*.dump
+supabase/snippets/
+!supabase/migrations/*.sql
 
 docs/*.pdf
 docs/*.docx
+
+mindq-ux-audit/screenshots/

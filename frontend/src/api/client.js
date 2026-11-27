@@ -47,6 +47,80 @@ const handleResponse = async (response) => {
   return response.json();
 };
 
+/** Hard cap per exam-path request; a stalled socket must not hang the runner. */
+export const EXAM_REQUEST_TIMEOUT_MS = 15000;
+
+/** Thrown when an exam-path request is aborted by {@link EXAM_REQUEST_TIMEOUT_MS}. */
+export const TIMEOUT_CODE = 'TIMEOUT';
+/** Thrown when fetch itself rejects (offline, DNS, captive portal, CORS). */
+export const NETWORK_CODE = 'NETWORK';
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * fetch() with an AbortController deadline. Timeouts and network failures are
+ * normalized to Errors carrying ``code`` + ``retryable`` so callers can retry.
+ *
+ * @param {string} url
+ * @param {RequestInit} init
+ * @param {number} [timeoutMs]
+ * @returns {Promise<Response>}
+ */
+export async function fetchWithTimeout(url, init = {}, timeoutMs = EXAM_REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    const timedOut = controller.signal.aborted;
+    const error = new Error(
+      timedOut
+        ? 'The server took too long to respond.'
+        : 'Network connection lost. Check your connection and try again.',
+    );
+    error.status = 0;
+    error.code = timedOut ? TIMEOUT_CODE : NETWORK_CODE;
+    error.retryable = true;
+    error.cause = err;
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Whether an exam-path failure is worth retrying automatically.
+ * Only transport failures and gateway/overload statuses: a 4xx is a real
+ * answer from the server and retrying cannot change it.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+export function isRetryableRequestError(err) {
+  if (!err || typeof err !== 'object') return false;
+  if (err.retryable) return true;
+  return err.status === 502 || err.status === 503 || err.status === 504;
+}
+
+/**
+ * Run ``attempt`` with exponential backoff (``baseMs``, 2x, ...) on retryable errors.
+ *
+ * @template T
+ * @param {() => Promise<T>} attempt
+ * @param {{ retries?: number, baseMs?: number }} [options]
+ * @returns {Promise<T>}
+ */
+export async function withRetry(attempt, { retries = 2, baseMs = 1000 } = {}) {
+  for (let i = 0; ; i += 1) {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (i >= retries || !isRetryableRequestError(err)) throw err;
+      await sleep(baseMs * 2 ** i);
+    }
+  }
+}
+
 export const api = {
   candidate: {
     /**
@@ -82,33 +156,49 @@ export const api = {
         'Failed to load test',
       );
     },
-    startTest: async (assessmentId) => {
-      const res = await fetch(`${API_BASE}/candidate/test/${assessmentId}/start`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      });
-      return handleResponse(res);
+    // POST /start is idempotent server-side (returns the existing attempt).
+    startTest: async (assessmentId) =>
+      withRetry(async () => {
+        const res = await fetchWithTimeout(`${API_BASE}/candidate/test/${assessmentId}/start`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+        });
+        return handleResponse(res);
+      }),
+    /**
+     * @param {object} data ResponseSave payload.
+     * @param {{ keepalive?: boolean }} [options] ``keepalive`` lets the request
+     *   outlive the page (pagehide flush); it is sent once, without retries.
+     */
+    autosave: async (data, { keepalive = false } = {}) => {
+      const send = async () => {
+        const res = await fetchWithTimeout(`${API_BASE}/candidate/autosave`, {
+          method: 'POST',
+          headers: getAuthHeaders({ json: true }),
+          body: JSON.stringify(data),
+          keepalive,
+        });
+        return handleResponse(res);
+      };
+      // Autosave is an idempotent upsert; the runner adds a slower background
+      // backoff on top of these quick retries.
+      return keepalive ? send() : withRetry(send, { retries: 1 });
     },
-    autosave: async (data) => {
-      const res = await fetch(`${API_BASE}/candidate/autosave`, {
-        method: 'POST',
-        headers: getAuthHeaders({ json: true }),
-        body: JSON.stringify(data),
-      });
-      return handleResponse(res);
-    },
-    submitTest: async (assessmentId, responses = [], totalModuleDurationSeconds = null) => {
-      const res = await fetch(`${API_BASE}/candidate/test/${assessmentId}/submit`, {
-        method: 'POST',
-        headers: getAuthHeaders({ json: true }),
-        body: JSON.stringify({
-          responses,
-          total_module_duration_seconds: totalModuleDurationSeconds,
-        }),
-      });
-      const data = await handleResponse(res);
-      return { ...data, status: res.status };
-    },
+    // Submit is idempotent: a retry after a lost 200 gets 409 ALREADY_SUBMITTED,
+    // which TestRunner confirms before treating it as success.
+    submitTest: async (assessmentId, responses = [], totalModuleDurationSeconds = null) =>
+      withRetry(async () => {
+        const res = await fetchWithTimeout(`${API_BASE}/candidate/test/${assessmentId}/submit`, {
+          method: 'POST',
+          headers: getAuthHeaders({ json: true }),
+          body: JSON.stringify({
+            responses,
+            total_module_duration_seconds: totalModuleDurationSeconds,
+          }),
+        });
+        const data = await handleResponse(res);
+        return { ...data, status: res.status };
+      }),
     logout: async () => {
       const token = localStorage.getItem('candidateToken');
       if (!token) return { ok: true };

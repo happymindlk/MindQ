@@ -146,5 +146,5 @@ async def test_login_rate_limit_returns_429(async_client, monkeypatch):
     res = await async_client.post("/api/v1/candidates/auth/otp/verify", json=payload)
     assert res.status_code == 429
     login_limiter.reset()
-    monkeypatch.setattr(login_limiter, "max_requests", 10)
-    monkeypatch.setattr(login_limiter, "window_seconds", 15 * 60)
+    monkeypatch.setattr(login_limiter, "max_requests", 5)
+    monkeypatch.setattr(login_limiter, "window_seconds", 60)

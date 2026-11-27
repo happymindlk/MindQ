@@ -1,16 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
 from app.database import get_db
-from app.models.assessment import Assessment
 from app.models.candidate import Candidate
-from app.models.candidate_progress import CandidateProgress
 from app.models.corporate import Corporate
 from app.models.package import Package
 from app.schemas.support import PublicTrackCandidate, PublicTrackResponse
 from app.security import enforce_rate_limit, public_limiter
+from app.services.progress_summary import (
+    ProgressSummary,
+    assessment_counts,
+    progress_summaries,
+)
+
+#: Public board row cap (unauthenticated endpoint; bounded memory/DB work).
+TRACK_MAX_ROWS = 500
 
 logger = logging.getLogger("app.track")
 
@@ -22,6 +28,8 @@ async def public_package_track(
     secret: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    limit: int = Query(TRACK_MAX_ROWS, ge=1, le=TRACK_MAX_ROWS),
+    offset: int = Query(0, ge=0),
 ):
     """Read-only completion board for a package, keyed by track_secret (no auth)."""
     enforce_rate_limit(public_limiter, request, "public_track")
@@ -38,13 +46,7 @@ async def public_package_track(
         await db.execute(select(Corporate).where(Corporate.id == package.corporate_id))
     ).scalars().first()
 
-    total_assessments = len(
-        (
-            await db.execute(
-                select(Assessment.id).where(Assessment.package_id == package.id)
-            )
-        ).scalars().all()
-    )
+    total_assessments = (await assessment_counts(db, [package.id])).get(package.id, 0)
 
     candidates = (
         await db.execute(
@@ -53,19 +55,17 @@ async def public_package_track(
                 Candidate.package_id == package.id,
                 Candidate.deleted_at.is_(None),
             )
-            .order_by(Candidate.created_at.desc())
+            .order_by(Candidate.created_at.desc(), Candidate.id)
+            .limit(limit)
+            .offset(offset)
         )
     ).scalars().all()
+    summaries = await progress_summaries(db, [c.id for c in candidates])
 
     rows: list[PublicTrackCandidate] = []
     for cand in candidates:
-        progresses = (
-            await db.execute(
-                select(CandidateProgress).where(CandidateProgress.candidate_id == cand.id)
-            )
-        ).scalars().all()
-        completed = sum(1 for p in progresses if p.status == "COMPLETED")
-        scores = [float(p.score) for p in progresses if p.score is not None]
+        summary = summaries.get(cand.id, ProgressSummary())
+        completed = summary.completed
         status = "not_started"
         if total_assessments > 0 and completed >= total_assessments:
             status = "completed"
@@ -77,7 +77,9 @@ async def public_package_track(
                 full_name=cand.full_name,
                 status=status,
                 progress=f"{completed}/{total_assessments}",
-                avg_score=round(sum(scores) / len(scores), 1) if scores else None,
+                avg_score=(
+                    round(summary.avg_score, 1) if summary.avg_score is not None else None
+                ),
             )
         )
 

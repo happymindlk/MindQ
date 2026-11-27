@@ -15,10 +15,14 @@ from each successful response for per-report cost visibility.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import functools
 import logging
 import random
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 from collections.abc import Awaitable, Callable, Iterator
@@ -47,6 +51,58 @@ _UNPINNED_MARKERS = ("-latest", "-preview", "-exp", "-experimental")
 _background_profile: ContextVar[bool] = ContextVar("gemini_background_profile", default=False)
 
 _client: Any = None
+
+# Dedicated, bounded pool for blocking Gemini SDK calls (P1-19). Keeps slow or
+# timed-out AI requests from occupying AnyIO's shared thread pool, which
+# WeasyPrint, SES and S3 offloads also depend on. Each request is still capped
+# by the SDK HTTP timeout (GEMINI_TIMEOUT_SECONDS) so threads always finish.
+_executor: ThreadPoolExecutor | None = None
+_executor_lock = threading.Lock()
+
+
+def _gemini_executor() -> ThreadPoolExecutor:
+    global _executor
+    if _executor is None:
+        with _executor_lock:
+            if _executor is None:
+                _executor = ThreadPoolExecutor(
+                    max_workers=max(1, int(settings.GEMINI_MAX_CONCURRENCY)),
+                    thread_name_prefix="gemini",
+                )
+    return _executor
+
+
+async def run_gemini_call(fn: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
+    """Run a blocking Gemini call on the dedicated Gemini executor.
+
+    Copies the current context into the worker thread (like
+    ``run_in_threadpool`` / ``asyncio.to_thread``) so the background retry
+    profile ContextVar still applies. Calls beyond ``GEMINI_MAX_CONCURRENCY``
+    queue here instead of consuming shared threads; cancelling the awaiting
+    task (e.g. ``asyncio.wait_for`` timeout) drops a call that has not started.
+
+    Args:
+        fn: Blocking callable that talks to Gemini.
+        *args: Positional args for ``fn``.
+        **kwargs: Keyword args for ``fn``.
+
+    Returns:
+        Whatever ``fn`` returns.
+    """
+    loop = asyncio.get_running_loop()
+    ctx = contextvars.copy_context()
+    return await loop.run_in_executor(
+        _gemini_executor(), functools.partial(ctx.run, fn, *args, **kwargs)
+    )
+
+
+def shutdown_gemini_executor() -> None:
+    """Stop the Gemini pool (process shutdown / tests)."""
+    global _executor
+    with _executor_lock:
+        if _executor is not None:
+            _executor.shutdown(wait=False, cancel_futures=True)
+            _executor = None
 
 
 class GeminiUnavailable(Exception):

@@ -17,10 +17,10 @@ class Assessment(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     corporate_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("corporates.id", ondelete="CASCADE"), nullable=False, index=True
     )
     package_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("packages.id", ondelete="CASCADE"), nullable=False
+        Uuid, ForeignKey("packages.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=True)
@@ -29,7 +29,7 @@ class Assessment(Base):
     questions: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     module_kind: Mapped[str] = mapped_column(String(32), default="technical", nullable=False)
     global_module_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("global_modules.id", ondelete="SET NULL"), nullable=True
+        Uuid, ForeignKey("global_modules.id", ondelete="SET NULL"), nullable=True, index=True
     )
     timer_mode: Mapped[str] = mapped_column(String(16), default="flexible", nullable=False)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)

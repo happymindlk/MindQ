@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_db
+from app.database import get_db, retry_on_deadlock
 from app.jobs.enqueue import (
     enqueue_finalize_and_score_ai,
     enqueue_finalize_expired_assessment,
@@ -44,7 +44,9 @@ def _raise_integrity(exc: Exception) -> NoReturn:
     if isinstance(exc, AssessmentNotFoundError):
         raise HTTPException(status_code=404, detail="Test not found") from exc
     if isinstance(exc, AssessmentAlreadySubmittedError):
-        raise HTTPException(status_code=409, detail=exc.detail) from exc
+        raise HTTPException(
+            status_code=409, detail={"code": exc.code, "message": exc.detail}
+        ) from exc
     if isinstance(exc, AssessmentTimeExpiredError):
         raise HTTPException(
             status_code=409, detail={"code": "TIME_EXPIRED", "message": exc.detail}
@@ -248,12 +250,27 @@ async def autosave(
 ):
     started = time.perf_counter()
     try:
-        resp = await CandidateService.autosave_response(db, candidate, save_data)
+        # Deadlock victims (e.g. HR reset racing this save) retry server-side.
+        resp = await retry_on_deadlock(
+            lambda: CandidateService.autosave_response(db, candidate, save_data),
+            session=db,
+        )
+    except AssessmentTimeExpiredError as exc:
+        if exc.auto_finalized:
+            # Late autosave finalized the module: queue scoring exactly as a
+            # normal submit does, or it would stay unscored forever.
+            await enqueue_finalize_and_score_ai(
+                candidate.id, save_data.assessment_id, await_inline=False
+            )
+            if exc.package_complete:
+                await enqueue_refresh_report_synthesis(
+                    candidate.id, await_inline=False
+                )
+        _raise_integrity(exc)
     except (
         AssessmentNotFoundError,
         AssessmentAlreadySubmittedError,
         AssessmentNotStartedError,
-        AssessmentTimeExpiredError,
         PackageNotOpenError,
         PackageClosedError,
         UnknownQuestionError,
@@ -280,18 +297,22 @@ async def submit_test(
     try:
         # Single fast transaction: upsert answers, flip COMPLETED, write
         # MODULE_COMPLETE. Scoring / Gemini / PDF stay on the ARQ queue.
-        progress, package_complete, company_name, _title = await CandidateService.submit_test(
-            db,
-            candidate,
-            assessment_id,
-            pending_responses=(body.responses if body else None),
-            client_duration_seconds=(body.total_module_duration_seconds if body else None),
-            record_complete_event=True,
-            request=request,
+        progress, package_complete, company_name, _title = await retry_on_deadlock(
+            lambda: CandidateService.submit_test(
+                db,
+                candidate,
+                assessment_id,
+                pending_responses=(body.responses if body else None),
+                client_duration_seconds=(body.total_module_duration_seconds if body else None),
+                record_complete_event=True,
+                request=request,
+            ),
+            session=db,
         )
     except (
         AssessmentNotFoundError,
         AssessmentAlreadySubmittedError,
+        AssessmentNotStartedError,
         PackageNotOpenError,
         PackageClosedError,
     ) as exc:

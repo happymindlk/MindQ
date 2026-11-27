@@ -19,6 +19,7 @@ from app.services.email import (
     clean_recipient_email,
     resolve_frontend_origin,
 )
+from app.services.email import redact_access_code, redact_link
 from app.services.email_service import EmailService
 from app.security import enforce_user_rate_limit, invite_limiter
 
@@ -55,8 +56,8 @@ async def _dispatch_candidate_invite(
     logger.info(
         "[INVITE QUEUED] Candidate=%s Code=%s Link=%s",
         clean_email or candidate_email,
-        access_code,
-        link,
+        redact_access_code(access_code),
+        redact_link(link),
     )
     try:
         sent = await EmailService.send_candidate_invite_email(
@@ -73,8 +74,8 @@ async def _dispatch_candidate_invite(
         logger.exception(
             "[INVITE FAILED] Candidate=%s Code=%s Link=%s",
             clean_email or candidate_email,
-            access_code,
-            link,
+            redact_access_code(access_code),
+            redact_link(link),
         )
         return
     if not sent:
@@ -82,8 +83,8 @@ async def _dispatch_candidate_invite(
             "[INVITE FAILED] Candidate=%s Code=%s Link=%s "
             "(SES returned no MessageId; see app.email logs)",
             clean_email or candidate_email,
-            access_code,
-            link,
+            redact_access_code(access_code),
+            redact_link(link),
         )
 
 
@@ -146,8 +147,8 @@ async def invite_candidate(
     logger.info(
         "[INVITE DISPATCHED] Candidate=%s Code=%s Link=%s",
         clean_email or candidate.email,
-        package_code,
-        link,
+        redact_access_code(package_code),
+        redact_link(link),
     )
     # Mocks / partial package objects may omit close_time; never AttributeError here.
     close_time = getattr(package, "close_time", None) if package else None

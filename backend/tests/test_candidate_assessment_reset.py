@@ -116,13 +116,19 @@ async def test_reset_assessment_clears_child_rows_and_login():
 
     assert result is candidate
     assert candidate.logged_in_at is None
-    # responses DELETE, progress UPDATE, reports DELETE, evaluations DELETE
-    assert session.execute.await_count == 4
+    # progress FOR UPDATE, responses DELETE, progress UPDATE, reports DELETE,
+    # evaluations DELETE
+    assert session.execute.await_count == 5
     session.commit.assert_awaited_once()
     session.refresh.assert_awaited_once_with(candidate)
 
     # Progress UPDATE must reset to NOT_STARTED and clear the attempt deadline.
-    progress_stmt = session.execute.await_args_list[1].args[0]
+    # Lock order matches autosave/submit: progress rows are locked first.
+    lock_sql = str(session.execute.await_args_list[0].args[0]).lower()
+    assert "candidate_progress" in lock_sql and "for update" in lock_sql
+    assert "candidate_responses" in str(session.execute.await_args_list[1].args[0])
+
+    progress_stmt = session.execute.await_args_list[2].args[0]
     compiled = progress_stmt.compile()
     params = compiled.params
     assert params.get("status") == NOT_STARTED_STATUS or NOT_STARTED_STATUS in str(progress_stmt)
@@ -131,8 +137,8 @@ async def test_reset_assessment_clears_child_rows_and_login():
     assert params.get("started_at") is None
     assert params.get("completed_at") is None
 
-    report_sql = str(session.execute.await_args_list[2].args[0])
-    evaluation_sql = str(session.execute.await_args_list[3].args[0])
+    report_sql = str(session.execute.await_args_list[3].args[0])
+    evaluation_sql = str(session.execute.await_args_list[4].args[0])
     assert "candidate_reports" in report_sql
     assert "candidate_evaluations" in evaluation_sql
 
@@ -148,7 +154,7 @@ async def test_reset_assessment_deletes_candidate_responses_for_clean_reopen():
 
     await CandidateService.reset_assessment(session, candidate)
 
-    responses_stmt = session.execute.await_args_list[0].args[0]
+    responses_stmt = session.execute.await_args_list[1].args[0]
     responses_sql = str(responses_stmt).lower()
     assert "candidate_responses" in responses_sql
     assert "delete" in responses_sql

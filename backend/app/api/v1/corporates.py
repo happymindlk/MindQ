@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,7 +48,9 @@ async def upload_corporate_logo(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     try:
-        public_url = upload_logo(corporate_id, filename, raw, content_type)
+        public_url = await run_in_threadpool(
+            upload_logo, corporate_id, filename, raw, content_type
+        )
     except LogoStorageError as exc:
         logger.error("Logo upload failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc

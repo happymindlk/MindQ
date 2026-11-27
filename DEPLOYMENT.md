@@ -43,9 +43,12 @@ frontend (React/Vite) ──supabase-js + HR JWT──► Supabase (Auth, Postgr
 
 2. Redis (durable ARQ job queue for scoring, Gemini, PDF prewarm, SES):
    ```bash
-   docker compose up -d redis
+   REDIS_PASSWORD=<strong-random> docker compose up -d redis
    ```
-   Default URL: `REDIS_URL=redis://localhost:6379/0` (see `backend/.env.example`).
+   Redis requires a password and listens on `127.0.0.1` only. Set the same
+   value in `backend/.env`: `REDIS_URL=redis://:<strong-random>@localhost:6379/0`
+   (see `backend/.env.example`). You can also put `REDIS_PASSWORD=` in a
+   repo-root `.env` (git-ignored) so `docker compose` picks it up.
 
 3. Backend (thin FastAPI service + ARQ worker):
    ```bash
@@ -138,6 +141,52 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
 
 ## Cloud deployment
 
+### Staging Multi-AZ topology (live — `ap-southeast-2` / Sydney)
+
+High availability replaces the former single-instance Cloudflare Tunnel path.
+Traffic reaches FastAPI through:
+
+```
+Client → Cloudflare (proxied DNS) → Lightsail Load Balancer → Nginx → Uvicorn
+```
+
+| Resource | Role |
+|----------|------|
+| `mindq-backend-staging` | Lightsail instance, **Availability Zone A** — FastAPI/Uvicorn behind Nginx |
+| `mindq-backend-staging-2` | Lightsail instance, **Availability Zone B** — same stack as Zone A |
+| `mindq-backend-lb` | Lightsail load balancer; health check **`GET /health/ready`** → HTTP 200 (Postgres `SELECT 1` + Redis `PING`, 1s each; 503 takes the node out of rotation). `GET /health` stays as a dependency-free liveness probe. |
+| `api-qa.mindqtalent.com` | Cloudflare **proxied CNAME** → Lightsail LB DNS name (not a Tunnel) |
+| Shared Redis | `REDIS_URL` over private VPC IP **`:6379`**, **password required** (`requirepass`); bound to the private IP only; Lightsail firewall allows only the backend nodes |
+
+**Proxy hops:** set `TRUSTED_PROXY_HOPS=2` and prefer `CLIENT_IP_HEADER=CF-Connecting-IP`
+so rate limiting keys on the real client IP (Cloudflare + Lightsail LB both append
+to the forwarded chain). With `TRUSTED_PROXY_HOPS=0`, `X-Forwarded-For` is ignored.
+
+**Shared Redis:** both nodes use the same `REDIS_URL` for cross-node
+`RateLimiter` / `AuthFailureLimiter` budgets (and ARQ when the worker is enabled).
+Without Redis, limits multiply by replica count.
+
+**Background work caveat:** FastAPI `BackgroundTasks` (including some PDF / report
+paths) remain **node-local**. Ungraceful termination of the instance that accepted
+the request can drop in-flight work unless that job is backed by the durable ARQ
+queue on Redis. Prefer ARQ for scoring and other long-running jobs in staging/prod.
+
+**Connection pool math (Supavisor Transaction Mode, port `6543`):** every
+process has its own bounded SQLAlchemy pool, sized by role (`app/database.py`):
+
+| Process | Setting | Default | Max sockets |
+|---|---|---|---|
+| Each Uvicorn worker | `DB_POOL_SIZE` + `DB_MAX_OVERFLOW` | 10 + 10 | 20 |
+| Each ARQ worker (`arq ...`) | `DB_WORKER_POOL_SIZE` + `DB_WORKER_MAX_OVERFLOW` | 5 + 5 | 10 |
+
+Total ≈ `nodes × WEB_CONCURRENCY × 20 + arq_workers × 10`. Current staging:
+`2 × 2 × 20 + 1 × 10 = 90` pooler clients. Keep the total **at or below ~70% of
+the Supavisor client limit** for your compute tier (Nano/Micro: 200 → ≤ 140).
+The ARQ role is auto-detected from the `arq` command; set `DB_PROCESS_ROLE=worker`
+if the worker is launched some other way. Each process logs
+`db_engine_configured role=… pool_size=… max_overflow=…` at boot. Lightsail does
+**not** auto-scale; provision nodes manually and re-check the formula.
+
 1. Create a Supabase project (dashboard), then link and push the schema:
    ```bash
    supabase link --project-ref <your-project-ref>
@@ -145,22 +194,33 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
    ```
 2. Enable the custom access token hook (Dashboard: Authentication > Hooks, or via
    `supabase config push`) pointing at `public.custom_access_token_hook`.
-3. Deploy the FastAPI service **and** a dedicated ARQ worker (any container host).
-   Run the worker as a separate process/service:
-   `arq app.jobs.worker.WorkerSettings`. Set env:
+3. Deploy FastAPI on **both** Lightsail nodes (Nginx → Uvicorn) **and** a dedicated
+   ARQ worker where durable jobs are required:
+   `arq app.jobs.worker.WorkerSettings`. Attach both instances to `mindq-backend-lb`.
+   Set the same env on every node:
    - `DATABASE_URL` = Supabase Supavisor **Transaction Mode** pooler on port
      **`6543`** (not session mode `5432`). Example:
-     `postgresql+asyncpg://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres`
+     `postgresql+asyncpg://postgres.<project-ref>:<password>@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres`
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`
    - `SECRET_KEY` (strong random), `DEBUG=false`, `CORS_ORIGINS` = your frontend origin(s)
-   - `REDIS_URL` = managed Redis reachable by both the API and the ARQ worker
-   - `WEB_CONCURRENCY` (default **2** in `backend/Dockerfile`): each worker uses
-     `pool_size=15` + `max_overflow=35` (max **50** sockets/worker). With
-     `WEB_CONCURRENCY=2` across **2** load-balanced Lightsail nodes the ceiling is
-     `2 nodes × 2 workers × 50 = 200` pooler client connections — ensure the
-     Supabase compute tier supports at least **200** (Micro/Small+), or scale down
-     `pool_size` / `max_overflow` on Nano. The ARQ process opens its own pool;
-     count it toward the same client budget.
+   - `ENVIRONMENT` = `production` (prod) or `qa` / `staging`. `DEBUG` now
+     defaults to **false**; with `DEBUG=false` and `ENVIRONMENT` left unset the
+     API boots but logs an `unsafe_config_warning`.
+   - `FRONTEND_URL` = the public app origin (e.g. `https://qa.app.mindqtalent.com`).
+     Invite / OTP links use it. In production request `Origin`/`Referer`
+     headers are never used for links; a missing value logs a boot warning.
+   - `REDIS_URL=redis://:<redis-password>@<private-vpc-ip>:6379/0` (shared;
+     firewall-restricted). The Redis host **must** run with
+     `requirepass <redis-password>`, `bind <private-vpc-ip>` (never `0.0.0.0`
+     or a public IP), `maxmemory <size>` and `maxmemory-policy noeviction`.
+     ARQ deserializes job payloads with pickle, so unauthenticated Redis means
+     remote code execution on the worker. The API logs a
+     `redis_unauthenticated` warning at boot when `REDIS_URL` has no password.
+     Rotation: set `requirepass` on Redis, update `REDIS_URL` on every node and
+     the ARQ worker, then restart them (`CONFIG SET requirepass` applies
+     immediately, so update the nodes right after).
+   - `TRUSTED_PROXY_HOPS=2`, `CLIENT_IP_HEADER=CF-Connecting-IP`
+   - `WEB_CONCURRENCY` (default **2** in `backend/Dockerfile`) — see pool math above
 4. Deploy the frontend to Cloudflare Pages with root directory `frontend/`
    (build `npm run build`, output `dist`). Set env:
    - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
@@ -173,8 +233,8 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
      `EMAIL_FROM`. While the account is in SES Sandbox, verify the From identity
      and every recipient (e.g. `ADMIN_NOTIFICATION_EMAIL`) under SES → Identities.
      Failures surface in API logs as `SES send FAILED` with a full traceback.
-   - `VITE_API_URL` = `https://api-qa.mindqtalent.com` (the Lightsail FastAPI
-     behind Cloudflare Tunnel). `frontend/.env.production` ships this default;
+   - `VITE_API_URL` = `https://api-qa.mindqtalent.com` (Cloudflare proxied CNAME →
+     Lightsail LB `mindq-backend-lb`). `frontend/.env.production` ships this default;
      a value set in the Pages dashboard overrides it. HTTP values are ignored in
      production builds, which then fall back to the same-origin `/api/*` proxy.
    - Any new API origin must also be added to `connect-src` (and `img-src` if it
@@ -188,6 +248,9 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
      proxies `/api/*` to `BACKEND_ORIGIN` (default `https://api-qa.mindqtalent.com`).
      Pages Functions cannot fetch raw IP addresses (error 1003); use a hostname.
 5. Onboard HR users: create the auth user, then insert their `hr_users` row.
+6. Failover check: stop one Lightsail instance while hitting
+   `https://api-qa.mindqtalent.com/health` continuously — expect continued HTTP 200
+   from the surviving AZ (Lightsail does not auto-replace the stopped node).
 
 ## Security notes
 
@@ -198,7 +261,15 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
 - **Fail-closed boot:** with `DEBUG=false`, FastAPI refuses to start if
   `SECRET_KEY` / `SUPABASE_JWT_SECRET` are still the `.env.example` defaults
   or shorter than 32 characters, or if `CORS_ORIGINS` is empty / localhost-only.
-  (Local/CI keep `DEBUG=true` — the Settings default — so example secrets work.)
+  (`DEBUG` defaults to **false**. Local dev sets `DEBUG=true` in `backend/.env`;
+  tests pin it in `tests/conftest.py` and CI, so example secrets work there.)
+- **No secrets in logs:** OTP codes are never logged (even when SES fails, in
+  any environment), and invite logs mask the access PIN (`Code=***-1`) and
+  strip the `?code=` query from links. QA testers need verified SES inboxes
+  (or SES out of sandbox) to receive codes.
+- **Shared rate limits:** every limiter uses the same Redis as ARQ (sliding
+  window, TTL-evicted keys), so budgets hold across workers and both nodes.
+  If Redis errors, limits fall back to per-process for 30s, then retry.
 - **Hosted Supabase:** after `supabase db push`, confirm Dashboard → Advisors
   shows RLS enabled on `corporates`, `packages`, `assessments`, `candidates`,
   `candidate_progress`, and `candidate_responses`. Enable Auth leaked-password
@@ -206,12 +277,14 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
 - **Invite-only enrollment:** package access codes do **not** auto-register
   strangers. Pre-invite candidates (or set `packages.allow_open_enrollment = true`
   intentionally). Invite codes still match email.
-- **Rate limits (in-process):** candidate login ≈ 10 / 15 min / IP; public track,
-  blind review, support, and chat ≈ 60 / min / IP; report/scorecard endpoints
-  (Gemini + PDF) 20 / 10 min / user; nudges 30 / h / user; invites 200 / h / user.
-  Multi-instance deploys need a shared store (Redis) or limits multiply by replica count.
-  Behind Cloudflare set `TRUSTED_PROXY_HOPS=1` and `CLIENT_IP_HEADER=CF-Connecting-IP`;
-  with the default `0`, `X-Forwarded-For` is ignored so it cannot be forged.
+- **Rate limits:** candidate login ≈ 10 / 15 min / IP; public track, blind review,
+  support, and chat ≈ 60 / min / IP; report/scorecard endpoints (Gemini + PDF)
+  20 / 10 min / user; nudges 30 / h / user; invites 200 / h / user. Staging Multi-AZ
+  shares counters via `REDIS_URL` so `RateLimiter` / `AuthFailureLimiter` stay
+  correct across both Lightsail nodes. Without Redis, budgets multiply by replica
+  count. Proxy chain is Cloudflare → Lightsail LB → Nginx: set
+  `TRUSTED_PROXY_HOPS=2` and `CLIENT_IP_HEADER=CF-Connecting-IP`. Local/direct
+  access keeps `TRUSTED_PROXY_HOPS=0` so forged `X-Forwarded-For` is ignored.
 - **Exam content isolation:** non-ops HR has no direct PostgREST read on
   `assessments`, `custom_technical_questions`, `candidate_responses`, or
   `candidate_progress`, and no write on `candidates` / `corporates`
@@ -228,10 +301,42 @@ CI runs backend + frontend + RLS (`.github/workflows/ci.yml`).
 
 - [ ] `DEBUG=false`, strong `SECRET_KEY`, hosted `SUPABASE_JWT_SECRET`, production `CORS_ORIGINS` (exact https origins, no `*`)
 - [ ] Private R2 bucket created and set as `R2_REPORTS_BUCKET_NAME`; existing report objects moved out of the public logo bucket
-- [ ] `TRUSTED_PROXY_HOPS` / `CLIENT_IP_HEADER` match the real proxy chain
+- [x] Multi-AZ staging: 2× Lightsail instances (`mindq-backend-staging`, `mindq-backend-staging-2`) behind `mindq-backend-lb` in `ap-southeast-2`
+- [x] `TRUSTED_PROXY_HOPS=2` / `CLIENT_IP_HEADER=CF-Connecting-IP` match Cloudflare → Lightsail LB → Nginx
+- [x] Shared Redis (`REDIS_URL` on private `:6379`) for cross-node rate limiting
 - [ ] Migrations applied (`supabase db push`), including psychometric response RLS
 - [ ] `pip-audit` / `npm audit` clean of reachable critical/high findings
-- [ ] Health check `GET /health` returns 200 behind the load balancer
+- [x] Health check `GET /health` returns 200 behind the load balancer
+- [ ] Switch the load-balancer health check to `GET /health/ready`
+- [x] Zero-downtime failover verified (stop one instance; public `/health` stays 200)
 - [ ] Rollback: previous container image + prior migration down path documented
 - [ ] Structured JSON logs flowing (request_id on responses via `X-Request-Id`)
 - [ ] Confirm package open-enrollment flags match product intent per tenant
+
+## Operations notes (P1 hardening)
+
+- **Docker images.** `backend/Dockerfile` runs uvicorn as PID 1 (exec form),
+  as a non-root user, with `--timeout-graceful-shutdown 30` and
+  `--proxy-headers` (`FORWARDED_ALLOW_IPS`, default `127.0.0.1` = Nginx on the
+  same host). `backend/.dockerignore` keeps `.env`, local DBs, report HTML and
+  tests out of the image. `frontend/Dockerfile` builds a static bundle
+  (`npm ci && npm run build`, `VITE_*` as `--build-arg`) and serves it with
+  nginx on port 3000 (`frontend/nginx.conf`, SPA fallback).
+- **Sentry.** Now actually initialized in the API and the ARQ worker when
+  `SENTRY_DSN` is set. ERROR logs become events; swallowed storage failures
+  are sent with a `silent_failure` tag (alert on it, e.g.
+  `erasure_purge_failed`, `report_cache_upload_failed`).
+- **Erasure.** After the DB delete, report PDFs are purged by the
+  `task_purge_candidate_report_files` ARQ job (6 tries, 60s/120s/... backoff).
+  A final failure logs `erasure_purge_failed` and goes to Sentry; finish that
+  purge by hand.
+- **Bulk report ZIP.** Each response holds at most 100 PDFs in memory. Bigger
+  packages download as several parts (`X-Report-Zip-Next-Offset`); each part
+  counts against the 5-per-10-minutes ZIP limit.
+- **Gemini.** Blocking SDK calls run on a dedicated pool of
+  `GEMINI_MAX_CONCURRENCY` threads (default 4) per process, each request
+  capped by `GEMINI_TIMEOUT_SECONDS`.
+- **Database errors.** Constraint violations return `409 CONFLICT`. Deadlocks
+  on autosave / submit / HR reset are retried once server-side; otherwise
+  `503` with `Retry-After: 1`. A dropped connection invalidates only that
+  connection (no pool-wide reconnect).

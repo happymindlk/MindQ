@@ -28,14 +28,13 @@ from app.models.hr_user import HRUser
 from app.schemas.client_package import ClientCorporate
 from app.schemas.hr_auth import HrOtpChallengeResponse, HrProfile, HrTokenResponse
 from app.services.admin_otp import (
+    discard_challenge,
     OTP_TTL,
-    SEND_WINDOW,
     apply_otp_attempt,
     cooldown_message,
     generate_otp,
     hash_otp,
     locked_message,
-    send_block_reason,
 )
 from app.services.email import clean_recipient_email, send_hr_otp_email
 from app.services.hr_membership import hr_display_name, upsert_hr_membership
@@ -49,7 +48,15 @@ logger = logging.getLogger("app.hr_otp")
 
 HR_OTP_AUDIENCE = "mindq-hr-otp"
 HR_OTP_TYPE = "hr_otp"
-SEND_COOLDOWN = timedelta(seconds=120)
+# HR client-portal send policy: a short anti-double-click gap between sends,
+# up to MAX_SENDS_PER_BURST codes, then a SEND_BLOCK pause measured from the
+# last send. A burst ends once SEND_BLOCK passes with no new send.
+SEND_COOLDOWN = timedelta(seconds=30)
+MAX_SENDS_PER_BURST = 3
+SEND_BLOCK = timedelta(minutes=5)
+# Look-back for burst detection. Generous so a burst is not cut off at the
+# window edge (rows per user per hour are capped at a handful by the policy).
+_BURST_LOOKBACK = timedelta(hours=1)
 
 _INVALID_TARGET = "This email is not registered for the client portal"
 _NOT_HR = "Operations accounts must use the admin portal"
@@ -57,7 +64,6 @@ _NO_COMPANY = "Company not found"
 _INVALID_CODE = "Invalid or expired verification code"
 _INVALID_SESSION = "Invalid or expired verification session"
 _LOCKED = locked_message()
-_SEND_WINDOW_BLOCK = "Too many verification codes were requested. Try again later."
 _MAIL_FAILED = "Could not send the verification email. Try again."
 _AUTH_DOWN = "Authentication service is unavailable"
 
@@ -65,8 +71,11 @@ _AUTH_DOWN = "Authentication service is unavailable"
 class HrOtpError(Exception):
     """Mapped to an HTTP error by the HR auth routes. Detail is client-safe."""
 
-    def __init__(self, status_code: int, detail: str) -> None:
+    def __init__(
+        self, status_code: int, detail: str, retry_after: int | None = None
+    ) -> None:
         super().__init__(detail)
+        self.retry_after = retry_after
         self.status_code = status_code
         self.detail = detail
 
@@ -327,8 +336,70 @@ async def _is_locked(db: AsyncSession, user_id: UUID, now: datetime) -> bool:
     return found is not None
 
 
+def send_block_message(remaining_seconds: int) -> str:
+    """Client-safe detail for the post-burst send block.
+
+    Args:
+        remaining_seconds: Whole seconds until another send is allowed.
+
+    Returns:
+        Message telling the user how many minutes to wait.
+    """
+    minutes = max(1, -(-int(remaining_seconds) // 60))
+    unit = "minute" if minutes == 1 else "minutes"
+    return (
+        f"You have requested {MAX_SENDS_PER_BURST} verification codes. "
+        f"Please wait {minutes} {unit} before requesting another code."
+    )
+
+
+def hr_send_block(
+    created_ats: list[datetime], now: datetime
+) -> tuple[str, int] | None:
+    """Decide whether another HR code email may be sent.
+
+    Sends form a burst while consecutive sends are less than ``SEND_BLOCK``
+    apart. Within a burst, sends must be ``SEND_COOLDOWN`` apart; after
+    ``MAX_SENDS_PER_BURST`` sends, further sends wait ``SEND_BLOCK`` from
+    the latest one.
+
+    Args:
+        created_ats: Recent challenge creation times for this user.
+        now: Current UTC time.
+
+    Returns:
+        ``("cooldown", seconds)`` or ``("blocked", seconds)`` when the send
+        must be refused, else None.
+    """
+    if not created_ats:
+        return None
+    sends = sorted(_aware(ts) for ts in created_ats)
+    latest = sends[-1]
+    since_latest = now - latest
+    if since_latest >= SEND_BLOCK:
+        return None  # previous burst is over
+
+    # Walk oldest → newest. A send starts a new burst when it follows a quiet
+    # gap of SEND_BLOCK, or when the previous burst already hit the cap (it
+    # was only allowed because the block elapsed).
+    burst = 0
+    prev: datetime | None = None
+    for ts in sends:
+        if prev is None or ts - prev >= SEND_BLOCK or burst >= MAX_SENDS_PER_BURST:
+            burst = 1
+        else:
+            burst += 1
+        prev = ts
+
+    if burst >= MAX_SENDS_PER_BURST:
+        return ("blocked", max(1, int((SEND_BLOCK - since_latest).total_seconds())))
+    if since_latest < SEND_COOLDOWN:
+        return ("cooldown", max(1, int((SEND_COOLDOWN - since_latest).total_seconds())))
+    return None
+
+
 async def _recent_sends(db: AsyncSession, user_id: UUID, now: datetime) -> list[datetime]:
-    window_start = now - SEND_WINDOW
+    window_start = now - _BURST_LOOKBACK
     return list(
         (
             await db.execute(
@@ -341,15 +412,16 @@ async def _recent_sends(db: AsyncSession, user_id: UUID, now: datetime) -> list[
     )
 
 
-async def _supersede_open(db: AsyncSession, user_id: UUID, now: datetime) -> None:
-    rows = (
-        await db.execute(
-            select(HrLoginChallenge).where(
-                HrLoginChallenge.user_id == user_id,
-                HrLoginChallenge.consumed_at.is_(None),
-            )
-        )
-    ).scalars().all()
+async def _supersede_open(
+    db: AsyncSession, user_id: UUID, now: datetime, *, keep_id: UUID | None = None
+) -> None:
+    query = select(HrLoginChallenge).where(
+        HrLoginChallenge.user_id == user_id,
+        HrLoginChallenge.consumed_at.is_(None),
+    )
+    if keep_id is not None:
+        query = query.where(HrLoginChallenge.id != keep_id)
+    rows = (await db.execute(query)).scalars().all()
     for row in rows:
         if row.locked_until is not None and _aware(row.locked_until) > now:
             continue
@@ -385,45 +457,52 @@ async def request_hr_otp(db: AsyncSession, email: str) -> HrOtpChallengeResponse
     if await _is_locked(db, membership.user_id, now):
         raise HrOtpError(429, _LOCKED)
 
-    block = send_block_reason(
-        await _recent_sends(db, membership.user_id, now),
-        now,
-        cooldown=SEND_COOLDOWN,
-    )
+    block = hr_send_block(await _recent_sends(db, membership.user_id, now), now)
     if block is not None:
         reason, remaining = block
         detail = (
-            cooldown_message(remaining) if reason == "cooldown" else _SEND_WINDOW_BLOCK
+            cooldown_message(remaining)
+            if reason == "cooldown"
+            else send_block_message(remaining)
         )
-        raise HrOtpError(429, detail)
+        raise HrOtpError(429, detail, retry_after=remaining)
 
-    await _supersede_open(db, membership.user_id, now)
     challenge_id = uuid4()
     otp = generate_otp()
-    row = HrLoginChallenge(
-        id=challenge_id,
-        user_id=membership.user_id,
-        email=normalized_email,
-        otp_hash=hash_otp(challenge_id, otp),
-        expires_at=now + OTP_TTL,
-        attempt_count=0,
-        created_at=now,
+    db.add(
+        HrLoginChallenge(
+            id=challenge_id,
+            user_id=membership.user_id,
+            email=normalized_email,
+            otp_hash=hash_otp(challenge_id, otp),
+            expires_at=now + OTP_TTL,
+            attempt_count=0,
+            created_at=now,
+        )
     )
-    db.add(row)
+    # Commit BEFORE calling SES so the advisory lock and pooled connection
+    # are released while the email is in flight (see candidate_otp).
     try:
-        await db.flush()
-        await send_hr_otp_email(normalized_email, otp)
         await db.commit()
     except ProgrammingError:
         await db.rollback()
         raise
+
+    try:
+        await send_hr_otp_email(normalized_email, otp)
     except Exception as exc:
-        await db.rollback()
         logger.error(
             "hr_otp_delivery_failed",
             extra={"event": "hr_otp_delivery_failed", "error_type": type(exc).__name__},
         )
+        # Unsent code: remove it so it neither works nor counts toward the
+        # 3-send burst / cooldown.
+        await discard_challenge(db, HrLoginChallenge, challenge_id)
         raise HrOtpError(503, _MAIL_FAILED) from exc
+
+    # Resend invalidates every earlier unused code, once the new one is sent.
+    await _supersede_open(db, membership.user_id, now, keep_id=challenge_id)
+    await db.commit()
 
     logger.info(
         "hr_otp_issued",

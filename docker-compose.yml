@@ -7,15 +7,32 @@
 #   4. Frontend Vite on :5173
 # See DEPLOYMENT.md.
 #
-# Start Redis only:
-#   docker compose up -d redis
+# Start Redis only (REDIS_PASSWORD is required; put it in a repo-root `.env`
+# or export it, and use the same value in backend/.env REDIS_URL):
+#   REDIS_PASSWORD=<strong-random> docker compose up -d redis
+#   REDIS_URL=redis://:<strong-random>@localhost:6379/0
 
 services:
   redis:
     image: redis:7-alpine
+    # Loopback only: never publish Redis on 0.0.0.0. ARQ deserializes job
+    # payloads with pickle, so anyone who can reach Redis can run code on the
+    # worker.
     ports:
-      - "6379:6379"
-    command: ["redis-server", "--appendonly", "yes"]
+      - "127.0.0.1:6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD (see docker-compose.yml header)}
+      # Lets the healthcheck's redis-cli authenticate without echoing the secret.
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    command:
+      - sh
+      - -c
+      - >-
+        exec redis-server
+        --appendonly yes
+        --requirepass "$$REDIS_PASSWORD"
+        --maxmemory 256mb
+        --maxmemory-policy noeviction
     volumes:
       - mindq_redis_data:/data
     healthcheck:
